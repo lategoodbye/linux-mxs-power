@@ -433,6 +433,14 @@ config REGULATOR_MC13892
 	  Say y here to support the regulators found on the Freescale MC13892
 	  PMIC.
 
+config REGULATOR_MXS
+	tristate "Freescale MXS on-chip regulators"
+	depends on MXS_POWER
+	help
+	  Say y here to support Freescale MXS on-chip regulators.
+	  It is recommended that this option be enabled on i.MX23,
+	  i.MX28 platform.
+
 config REGULATOR_PALMAS
 	tristate "TI Palmas PMIC Regulators"
 	depends on MFD_PALMAS
