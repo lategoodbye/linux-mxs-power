@@ -159,6 +159,7 @@ static inline u8 get_linreg_offset(struct mxs_regulator *sreg, u32 regs)
 static u8 get_vddio_power_source(struct regulator_dev *reg)
 {
 	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
+	static int dump_regs = 1;
 	u32 v5ctrl, status, base;
 	u8 linreg;
 
@@ -166,6 +167,12 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 	status = readl(sreg->status_addr);
 	base = readl(sreg->base_addr);
 	linreg = get_linreg_offset(sreg, base);
+
+	if (dump_regs) {
+		_decode_hw_power_5vctrl(v5ctrl);
+		_decode_hw_power_vddioctrl(base);
+		dump_regs = 0;
+	}
 
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
 		if ((base & sreg->disable_fet_mask) &&
@@ -192,6 +199,7 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 {
 	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &sreg->desc;
+	static int dump_regs = 1;
 	u32 v5ctrl, status, base;
 	u8 linreg;
 
@@ -199,6 +207,19 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	status = readl(sreg->status_addr);
 	base = readl(sreg->base_addr);
 	linreg = get_linreg_offset(sreg, base);
+
+	if (dump_regs) {
+		_decode_hw_power_5vctrl(v5ctrl);
+		switch (desc->id) {
+		case MXS_VDDA:
+			_decode_hw_power_vddactrl(base);
+			break;
+		case MXS_VDDD:
+			_decode_hw_power_vdddctrl(base);
+			break;
+		}
+		dump_regs = 0;
+	}
 
 	if (base & sreg->disable_fet_mask) {
 		if (status & BM_POWER_STS_VBUSVALID0_STATUS)
@@ -309,7 +330,7 @@ static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	}
 
 	dev_warn_ratelimited(&reg->dev, "%s: timeout status=0x%08x\n",
-				  __func__, readl(sreg->status_addr));
+			     __func__, readl(sreg->status_addr));
 
 	return -ETIMEDOUT;
 }
@@ -438,7 +459,7 @@ static void regulator_init(struct regulator_dev *reg)
 
 		if (power_source == HW_POWER_UNKNOWN_SOURCE) {
 			dev_warn(&reg->dev, "%s: Invalid power source config\n",
-					    desc->name);
+				 desc->name);
 		}
 	}
 
@@ -452,7 +473,7 @@ static void regulator_init(struct regulator_dev *reg)
 			base |= HW_POWER_LINREG_OFFSET_DCDC_MODE;
 			writel(base, sreg->base_addr);
 			dev_info(&reg->dev, "%s: Set LinReg offset below DCDC target\n",
-					    desc->name);
+				 desc->name);
 			break;
 		}
 	}
