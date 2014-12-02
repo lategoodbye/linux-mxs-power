@@ -15,7 +15,7 @@ For imx28 regulators
   the information of registers in the same order as described by reg-names
 - reg-names: Should contain the reg names
   - "base-address"	- contains base address of regulator
-  - "v5ctrl-address"	- contains control address of DC-DC 5V convertor
+  - "v5ctrl-address"	- contains control address of DC-DC 5V converter
   - "status-address"	- contains status address of regulator
 
 Any regulator property defined as part of the core regulator
@@ -44,5 +44,4 @@ Example for i.MX28:
 			regulator-max-microvolt = <1550000>;
 		};
 	};
-	
 

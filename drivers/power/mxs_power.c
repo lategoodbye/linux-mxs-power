@@ -85,7 +85,7 @@ int get_dcdc_clk_freq(struct mxs_power_data *pdata)
 	return ret;
 }
 
-int set_dcdc_clk_freq(struct mxs_power_data *pdata, int kHz)
+int set_dcdc_clk_freq(struct mxs_power_data *pdata, int khz)
 {
 	void __iomem *misc = pdata->base_addr + HW_POWER_MISC_OFFSET;
 	u32 val;
@@ -97,7 +97,7 @@ int set_dcdc_clk_freq(struct mxs_power_data *pdata, int kHz)
 	val &= ~HW_POWER_MISC_SEL_PLLCLK;
 
 	/* Accept only values recommend by Freescale */
-	switch (kHz) {
+	switch (khz) {
 	case 19200:
 		val |= HW_POWER_MISC_FREQSEL_19200_KHZ << SHIFT_FREQSEL;
 		break;
@@ -129,8 +129,8 @@ static enum power_supply_property mxs_power_dc_props[] = {
 };
 
 static int mxs_power_dc_get_property(struct power_supply *psy,
-				    enum power_supply_property psp,
-				    union power_supply_propval *val)
+				     enum power_supply_property psp,
+				     union power_supply_propval *val)
 {
 	struct mxs_power_data *data = container_of(psy,
 						   struct mxs_power_data, dc);
