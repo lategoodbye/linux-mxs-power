@@ -86,6 +86,7 @@ int mxs_saif_clkmux_select(unsigned int clkmux)
 static void __init clk_misc_init(void)
 {
 	u32 val;
+	u8 frac;
 
 	/* Gate off cpu clock in WFI for power saving */
 	writel_relaxed(1 << BP_CPU_INTERRUPT_WAIT, CPU + SET);
@@ -121,10 +122,14 @@ static void __init clk_misc_init(void)
 	 * so set frac0 to get a 288 MHz ref_io0 and ref_io1.
 	 * According to reference manual we must access frac0 bytewise.
 	 */
-	writeb_relaxed(0x3f, FRAC0 + FRAC0_IO0 + CLR);
-	writeb_relaxed(30, FRAC0 + FRAC0_IO0 + SET);
-	writeb_relaxed(0x3f, FRAC0 + FRAC0_IO1 + CLR);
-	writeb_relaxed(30, FRAC0 + FRAC0_IO1 + SET);
+	frac = readb_relaxed(FRAC0 + FRAC0_IO0);
+	frac &= ~0x3f;
+	frac |= 30;
+	writeb_relaxed(frac, FRAC0 + FRAC0_IO0);
+	frac = readb_relaxed(FRAC0 + FRAC0_IO1);
+	frac &= ~0x3f;
+	frac |= 30;
+	writeb_relaxed(frac, FRAC0 + FRAC0_IO1);
 }
 
 static const char *sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };

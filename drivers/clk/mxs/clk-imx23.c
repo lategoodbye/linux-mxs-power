@@ -52,6 +52,7 @@ static void __iomem *digctrl;
 static void __init clk_misc_init(void)
 {
 	u32 val;
+	u8 frac;
 
 	/* Gate off cpu clock in WFI for power saving */
 	writel_relaxed(1 << BP_CPU_INTERRUPT_WAIT, CPU + SET);
@@ -75,8 +76,10 @@ static void __init clk_misc_init(void)
 	 * so set frac to get a 288 MHz ref_io.
 	 * According to reference manual we must access frac bytewise.
 	 */
-	writeb_relaxed(0x3f, FRAC + FRAC_IO + CLR);
-	writeb_relaxed(30, FRAC + FRAC_IO + SET);
+	frac = readb_relaxed(FRAC + FRAC_IO);
+	frac &= ~0x3f;
+	frac |= 30;
+	writeb_relaxed(frac, FRAC + FRAC_IO);
 }
 
 static const char *sel_pll[]  __initconst = { "pll", "ref_xtal", };
