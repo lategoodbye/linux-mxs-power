@@ -25,6 +25,8 @@
 #include <linux/power_supply.h>
 #include <linux/types.h>
 
+#define HW_POWER_CTRL_CLR	0x08
+
 #define BM_POWER_CTRL_POLARITY_VBUSVALID	BIT(5)
 #define BM_POWER_CTRL_VBUSVALID_IRQ		BIT(4)
 #define BM_POWER_CTRL_ENIRQ_VBUS_VALID		BIT(3)
@@ -34,6 +36,7 @@
 
 #define BM_POWER_5VCTRL_VBUSVALID_THRESH	(7 << 8)
 #define BM_POWER_5VCTRL_PWDN_5VBRNOUT		BIT(7)
+#define BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT	BIT(6)
 #define BM_POWER_5VCTRL_VBUSVALID_5VDETECT	BIT(4)
 
 #define HW_POWER_5VCTRL_VBUSVALID_THRESH_4_40V	(5 << 8)
@@ -160,6 +163,7 @@ static int mxs_power_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct resource *res;
 	struct mxs_power_data *data;
+	void __iomem *v5ctrl_addr;
 	int ret;
 	int dcdc_clk_freq;
 
@@ -195,6 +199,12 @@ static int mxs_power_probe(struct platform_device *pdev)
 	dcdc_clk_freq = get_dcdc_clk_freq(data);
 
 	dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
+
+	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL_OFFSET;
+
+	/* Make sure the current limit of the linregs are disabled. */
+	writel(BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT,
+	       v5ctrl_addr + HW_POWER_CTRL_CLR);
 
 	return of_platform_populate(np, NULL, NULL, dev);
 }
