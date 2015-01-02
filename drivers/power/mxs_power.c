@@ -55,7 +55,7 @@ MODULE_PARM_DESC(dcdc_pll,
 
 struct mxs_power_data {
 	void __iomem *base_addr;
-	struct power_supply dc;
+	struct power_supply ac;
 };
 
 int get_dcdc_clk_freq(struct mxs_power_data *pdata)
@@ -124,16 +124,16 @@ int set_dcdc_clk_freq(struct mxs_power_data *pdata, int khz)
 	return 0;
 }
 
-static enum power_supply_property mxs_power_dc_props[] = {
+static enum power_supply_property mxs_power_ac_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 };
 
-static int mxs_power_dc_get_property(struct power_supply *psy,
+static int mxs_power_ac_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
 {
 	struct mxs_power_data *data = container_of(psy,
-						   struct mxs_power_data, dc);
+						   struct mxs_power_data, ac);
 	int ret = 0;
 
 	switch (psp) {
@@ -172,18 +172,18 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (data == NULL)
 		return -ENOMEM;
 
-	data->dc.properties = mxs_power_dc_props;
-	data->dc.num_properties = ARRAY_SIZE(mxs_power_dc_props);
-	data->dc.get_property = mxs_power_dc_get_property;
-	data->dc.name = "dc";
-	data->dc.type = POWER_SUPPLY_TYPE_MAINS;
+	data->ac.properties = mxs_power_ac_props;
+	data->ac.num_properties = ARRAY_SIZE(mxs_power_ac_props);
+	data->ac.get_property = mxs_power_ac_get_property;
+	data->ac.name = "ac";
+	data->ac.type = POWER_SUPPLY_TYPE_MAINS;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	data->base_addr = devm_ioremap_resource(dev, res);
 	if (IS_ERR(data->base_addr))
 		return PTR_ERR(data->base_addr);
 
-	ret = power_supply_register(dev, &data->dc);
+	ret = power_supply_register(dev, &data->ac);
 	if (ret)
 		return ret;
 
@@ -204,7 +204,7 @@ static int mxs_power_remove(struct platform_device *pdev)
 	struct mxs_power_data *data = platform_get_drvdata(pdev);
 
 	of_platform_depopulate(&pdev->dev);
-	power_supply_unregister(&data->dc);
+	power_supply_unregister(&data->ac);
 
 	return 0;
 }
