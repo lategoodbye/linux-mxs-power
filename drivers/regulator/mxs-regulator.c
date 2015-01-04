@@ -34,8 +34,7 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/slab.h>
 
-#define HW_POWER_LINREG_OFFSET_LINREG_MODE	0
-#define HW_POWER_LINREG_OFFSET_DCDC_MODE	2
+#define BM_POWER_LINREG_OFFSET_DCDC_MODE	BIT(1)
 
 /* Powered by linear regulator.  DCDC output is gated off and
    the linreg output is equal to the target. */
@@ -176,19 +175,19 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
 		if ((base & sreg->disable_fet_mask) &&
-		    (linreg == HW_POWER_LINREG_OFFSET_LINREG_MODE)) {
+		    !(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)) {
 			return HW_POWER_LINREG_DCDC_OFF;
 		}
 
 		if (v5ctrl & BM_POWER_5VCTRL_ENABLE_DCDC) {
-			if (linreg == HW_POWER_LINREG_OFFSET_DCDC_MODE)
+			if (linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 				return HW_POWER_DCDC_LINREG_ON;
 		} else {
-			if (linreg == HW_POWER_LINREG_OFFSET_LINREG_MODE)
+			if (!(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 				return HW_POWER_LINREG_DCDC_OFF;
 		}
 	} else {
-		if (linreg == HW_POWER_LINREG_OFFSET_DCDC_MODE)
+		if (linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 			return HW_POWER_DCDC_LINREG_ON;
 	}
 
@@ -225,7 +224,7 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 		if (status & BM_POWER_STS_VBUSVALID0_STATUS)
 			return HW_POWER_EXTERNAL_SOURCE_5V;
 
-		if (linreg == HW_POWER_LINREG_OFFSET_LINREG_MODE)
+		if (!(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 			return HW_POWER_LINREG_DCDC_OFF;
 	}
 
@@ -236,7 +235,7 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 		return HW_POWER_LINREG_DCDC_OFF;
 	}
 
-	if (linreg == HW_POWER_LINREG_OFFSET_DCDC_MODE) {
+	if (linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE) {
 		if (base & desc->enable_mask)
 			return HW_POWER_DCDC_LINREG_ON;
 
@@ -464,13 +463,13 @@ static void regulator_init(struct regulator_dev *reg)
 	}
 
 	/* According to AN4199 avoid possible LinReg and DC-DC contention */
-	if (linreg < HW_POWER_LINREG_OFFSET_DCDC_MODE) {
+	if (!(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)) {
 		switch (power_source) {
 		case HW_POWER_DCDC_LINREG_ON:
 		case HW_POWER_DCDC_LINREG_READY:
 		case HW_POWER_EXTERNAL_SOURCE_5V:
 			base &= ~sreg->linreg_offset_mask;
-			base |= HW_POWER_LINREG_OFFSET_DCDC_MODE;
+			base |= BM_POWER_LINREG_OFFSET_DCDC_MODE;
 			writel(base, sreg->base_addr);
 			dev_info(&reg->dev, "%s: Set LinReg offset below DCDC target\n",
 				 desc->name);
