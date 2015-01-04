@@ -153,7 +153,7 @@ void _decode_hw_power_vddioctrl(u32 value)
 
 static inline u8 get_linreg_offset(struct mxs_regulator *sreg, u32 regs)
 {
-	return regs & sreg->linreg_offset_mask >> sreg->linreg_offset_shift;
+	return (regs & sreg->linreg_offset_mask) >> sreg->linreg_offset_shift;
 }
 
 static u8 get_vddio_power_source(struct regulator_dev *reg)
