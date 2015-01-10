@@ -482,11 +482,9 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *match;
-	const struct mxs_regulator *template;
-	struct device_node *np = dev->of_node;
 	struct regulator_dev *rdev = NULL;
 	struct mxs_regulator *sreg;
-	struct regulator_init_data *initdata = NULL;
+	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
 	struct resource *res;
 	int ret = 0;
@@ -499,18 +497,11 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	template = match->data;
-
-	sreg = devm_kmemdup(&pdev->dev, template, sizeof(*sreg), GFP_KERNEL);
+	sreg = devm_kmemdup(dev, match->data, sizeof(*sreg), GFP_KERNEL);
 	if (!sreg)
 		return -ENOMEM;
 
-	if (!np) {
-		dev_err(dev, "missing device tree\n");
-		return -EINVAL;
-	}
-
-	initdata = of_get_regulator_init_data(dev, np, &sreg->desc);
+	initdata = of_get_regulator_init_data(dev, dev->of_node, &sreg->desc);
 	if (!initdata) {
 		dev_err(dev, "missing regulator init data\n");
 		return -EINVAL;
@@ -550,10 +541,10 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	if (IS_ERR(sreg->v5ctrl_addr))
 		return PTR_ERR(sreg->v5ctrl_addr);
 
-	config.dev = &pdev->dev;
+	config.dev = dev;
 	config.init_data = initdata;
 	config.driver_data = sreg;
-	config.of_node = np;
+	config.of_node = dev->of_node;
 
 	rdev = devm_regulator_register(dev, &sreg->desc, &config);
 	if (IS_ERR(rdev)) {
