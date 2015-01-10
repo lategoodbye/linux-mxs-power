@@ -501,20 +501,20 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 
 	template = match->data;
 
+	sreg = devm_kmemdup(&pdev->dev, template, sizeof(*sreg), GFP_KERNEL);
+	if (!sreg)
+		return -ENOMEM;
+
 	if (!np) {
 		dev_err(dev, "missing device tree\n");
 		return -EINVAL;
 	}
 
-	initdata = of_get_regulator_init_data(dev, np);
+	initdata = of_get_regulator_init_data(dev, np, &sreg->desc);
 	if (!initdata) {
 		dev_err(dev, "missing regulator init data\n");
 		return -EINVAL;
 	}
-
-	sreg = devm_kmemdup(&pdev->dev, template, sizeof(*sreg), GFP_KERNEL);
-	if (!sreg)
-		return -ENOMEM;
 
 	pname = "base-address";
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
