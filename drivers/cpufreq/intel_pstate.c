@@ -199,7 +199,14 @@ static signed int pid_calc(struct _pid *pid, int32_t busy)
 
 	pid->integral += fp_error;
 
-	/* limit the integral term */
+	/*
+	 * We limit the integral here so that it will never
+	 * get higher than 30.  This prevents it from becoming
+	 * too large an input over long periods of time and allows
+	 * it to get factored out sooner.
+	 *
+	 * The value of 30 was chosen through experimentation.
+	 */
 	integral_limit = int_tofp(30);
 	if (pid->integral > integral_limit)
 		pid->integral = integral_limit;
@@ -616,6 +623,11 @@ static void intel_pstate_get_min_max(struct cpudata *cpu, int *min, int *max)
 	if (limits.no_turbo || limits.turbo_disabled)
 		max_perf = cpu->pstate.max_pstate;
 
+	/*
+	 * performance can be limited by user through sysfs, by cpufreq
+	 * policy, or by cpu specific default values determined through
+	 * experimentation.
+	 */
 	max_perf_adj = fp_toint(mul_fp(int_tofp(max_perf), limits.max_perf));
 	*max = clamp_t(int, max_perf_adj,
 			cpu->pstate.min_pstate, cpu->pstate.turbo_pstate);
@@ -717,11 +729,29 @@ static inline int32_t intel_pstate_get_scaled_busy(struct cpudata *cpu)
 	u32 duration_us;
 	u32 sample_time;
 
+	/*
+	 * core_busy is the ratio of actual performance to max
+	 * max_pstate is the max non turbo pstate available
+	 * current_pstate was the pstate that was requested during
+	 * 	the last sample period.
+	 *
+	 * We normalize core_busy, which was our actual percent
+	 * performance to what we requested during the last sample
+	 * period. The result will be a percentage of busy at a
+	 * specified pstate.
+	 */
 	core_busy = cpu->sample.core_pct_busy;
 	max_pstate = int_tofp(cpu->pstate.max_pstate);
 	current_pstate = int_tofp(cpu->pstate.current_pstate);
 	core_busy = mul_fp(core_busy, div_fp(max_pstate, current_pstate));
 
+	/*
+	 * Since we have a deferred timer, it will not fire unless
+	 * we are in C0.  So, determine if the actual elapsed time
+	 * is significantly greater (3x) than our sample interval.  If it
+	 * is, then we were idle for a long enough period of time
+	 * to adjust our busyness.
+	 */
 	sample_time = pid_params.sample_rate_ms  * USEC_PER_MSEC;
 	duration_us = (u32) ktime_us_delta(cpu->sample.time,
 					   cpu->last_sample_time);
@@ -948,6 +978,7 @@ static struct cpufreq_driver intel_pstate_driver = {
 
 static int __initdata no_load;
 static int __initdata no_hwp;
+static unsigned int force_load;
 
 static int intel_pstate_msrs_not_valid(void)
 {
@@ -1025,15 +1056,46 @@ static bool intel_pstate_no_acpi_pss(void)
 	return true;
 }
 
+static bool intel_pstate_has_acpi_ppc(void)
+{
+	int i;
+
+	for_each_possible_cpu(i) {
+		struct acpi_processor *pr = per_cpu(processors, i);
+
+		if (!pr)
+			continue;
+		if (acpi_has_method(pr->handle, "_PPC"))
+			return true;
+	}
+	return false;
+}
+
+enum {
+	PSS,
+	PPC,
+};
+
 struct hw_vendor_info {
 	u16  valid;
 	char oem_id[ACPI_OEM_ID_SIZE];
 	char oem_table_id[ACPI_OEM_TABLE_ID_SIZE];
+	int  oem_pwr_table;
 };
 
 /* Hardware vendor-specific info that has its own power management modes */
 static struct hw_vendor_info vendor_info[] = {
-	{1, "HP    ", "ProLiant"},
+	{1, "HP    ", "ProLiant", PSS},
+	{1, "ORACLE", "X4-2    ", PPC},
+	{1, "ORACLE", "X4-2L   ", PPC},
+	{1, "ORACLE", "X4-2B   ", PPC},
+	{1, "ORACLE", "X3-2    ", PPC},
+	{1, "ORACLE", "X3-2L   ", PPC},
+	{1, "ORACLE", "X3-2B   ", PPC},
+	{1, "ORACLE", "X4470M2 ", PPC},
+	{1, "ORACLE", "X4270M3 ", PPC},
+	{1, "ORACLE", "X4270M2 ", PPC},
+	{1, "ORACLE", "X4170M2 ", PPC},
 	{0, "", ""},
 };
 
@@ -1057,15 +1119,22 @@ static bool intel_pstate_platform_pwr_mgmt_exists(void)
 
 	for (v_info = vendor_info; v_info->valid; v_info++) {
 		if (!strncmp(hdr.oem_id, v_info->oem_id, ACPI_OEM_ID_SIZE) &&
-		    !strncmp(hdr.oem_table_id, v_info->oem_table_id, ACPI_OEM_TABLE_ID_SIZE) &&
-		    intel_pstate_no_acpi_pss())
-			return true;
+			!strncmp(hdr.oem_table_id, v_info->oem_table_id,
+						ACPI_OEM_TABLE_ID_SIZE))
+			switch (v_info->oem_pwr_table) {
+			case PSS:
+				return intel_pstate_no_acpi_pss();
+			case PPC:
+				return intel_pstate_has_acpi_ppc() &&
+					(!force_load);
+			}
 	}
 
 	return false;
 }
 #else /* CONFIG_ACPI not enabled */
 static inline bool intel_pstate_platform_pwr_mgmt_exists(void) { return false; }
+static inline bool intel_pstate_has_acpi_ppc(void) { return false; }
 #endif /* CONFIG_ACPI */
 
 static int __init intel_pstate_init(void)
@@ -1138,6 +1207,8 @@ static int __init intel_pstate_setup(char *str)
 		no_load = 1;
 	if (!strcmp(str, "no_hwp"))
 		no_hwp = 1;
+	if (!strcmp(str, "force"))
+		force_load = 1;
 	return 0;
 }
 early_param("intel_pstate", intel_pstate_setup);

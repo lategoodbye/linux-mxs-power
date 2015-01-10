@@ -611,16 +611,12 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	 */
 	NF_CT_ASSERT(!nf_ct_is_confirmed(ct));
 	pr_debug("Confirming conntrack %p\n", ct);
-
-	/* We have to check the DYING flag after unlink to prevent
-	 * a race against nf_ct_get_next_corpse() possibly called from
-	 * user context, else we insert an already 'dead' hash, blocking
-	 * further use of that particular connection -JM.
-	 */
-	nf_ct_del_from_dying_or_unconfirmed_list(ct);
+	/* We have to check the DYING flag inside the lock to prevent
+	   a race against nf_ct_get_next_corpse() possibly called from
+	   user context, else we insert an already 'dead' hash, blocking
+	   further use of that particular connection -JM */
 
 	if (unlikely(nf_ct_is_dying(ct))) {
-		nf_ct_add_to_dying_list(ct);
 		nf_conntrack_double_unlock(hash, reply_hash);
 		local_bh_enable();
 		return NF_ACCEPT;
@@ -639,6 +635,8 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 				      &h->tuple) &&
 		    zone == nf_ct_zone(nf_ct_tuplehash_to_ctrack(h)))
 			goto out;
+
+	nf_ct_del_from_dying_or_unconfirmed_list(ct);
 
 	/* Timer relative to confirmation time, not original
 	   setting time, otherwise we'd get timer wrap in
@@ -826,22 +824,19 @@ __nf_conntrack_alloc(struct net *net, u16 zone,
 		atomic_dec(&net->ct.count);
 		return ERR_PTR(-ENOMEM);
 	}
-	/*
-	 * Let ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode.next
-	 * and ct->tuplehash[IP_CT_DIR_REPLY].hnnode.next unchanged.
-	 */
-	memset(&ct->tuplehash[IP_CT_DIR_MAX], 0,
-	       offsetof(struct nf_conn, proto) -
-	       offsetof(struct nf_conn, tuplehash[IP_CT_DIR_MAX]));
 	spin_lock_init(&ct->lock);
 	ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple = *orig;
 	ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode.pprev = NULL;
 	ct->tuplehash[IP_CT_DIR_REPLY].tuple = *repl;
 	/* save hash for reusing when confirming */
 	*(unsigned long *)(&ct->tuplehash[IP_CT_DIR_REPLY].hnnode.pprev) = hash;
+	ct->status = 0;
 	/* Don't set timer yet: wait for confirmation */
 	setup_timer(&ct->timeout, death_by_timeout, (unsigned long)ct);
 	write_pnet(&ct->ct_net, net);
+	memset(&ct->__nfct_init_offset[0], 0,
+	       offsetof(struct nf_conn, proto) -
+	       offsetof(struct nf_conn, __nfct_init_offset[0]));
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	if (zone) {
 		struct nf_conntrack_zone *nf_ct_zone;
