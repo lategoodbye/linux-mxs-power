@@ -343,11 +343,30 @@ static int mxs_get_voltage_sel(struct regulator_dev *reg)
 	return ret;
 }
 
+static int mxs_is_enabled(struct regulator_dev *reg)
+{
+	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
+	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
+
+	if (sreg->get_power_source)
+		power_source = sreg->get_power_source(reg);
+
+	switch (power_source) {
+	case HW_POWER_LINREG_DCDC_OFF:
+	case HW_POWER_LINREG_DCDC_READY:
+	case HW_POWER_DCDC_LINREG_ON:
+		return 1;
+	}
+
+	return 0;
+}
+
 static struct regulator_ops mxs_rops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_set_voltage_sel,
 	.get_voltage_sel	= mxs_get_voltage_sel,
+	.is_enabled		= mxs_is_enabled,
 };
 
 static const struct mxs_regulator imx23_info_vddio = {
