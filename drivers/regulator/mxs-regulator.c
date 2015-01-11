@@ -291,12 +291,6 @@ static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	int uV;
 	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
 
-	if (sel >= desc->n_voltages) {
-		dev_err(&reg->dev, "%s: sel(%d) >= n_voltages(%d)\n", __func__,
-			sel, desc->n_voltages);
-		return -EINVAL;
-	}
-
 	uV = regulator_list_voltage_linear(reg, sel);
 
 	if (uV >= 0)
