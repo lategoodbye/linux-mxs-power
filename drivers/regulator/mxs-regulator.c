@@ -306,17 +306,17 @@ static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	case HW_POWER_LINREG_DCDC_OFF:
 	case HW_POWER_LINREG_DCDC_READY:
 	case HW_POWER_EXTERNAL_SOURCE_5V:
-		msleep(1000);
+		usleep_range(1000, 2000);
 		return 0;
 	}
 
-	usleep_range(15000, 20000);
+	usleep_range(15, 20);
 	start = jiffies;
 	while (1) {
 		if (readl(sreg->status_addr) & BM_POWER_STS_DC_OK)
 			return 0;
 
-		if (time_after(jiffies, start +	msecs_to_jiffies(20000)))
+		if (time_after(jiffies, start +	msecs_to_jiffies(20)))
 			break;
 
 		schedule();
