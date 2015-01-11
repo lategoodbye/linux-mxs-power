@@ -337,9 +337,6 @@ static int mxs_get_voltage_sel(struct regulator_dev *reg)
 	ret = readl(sreg->base_addr) & desc->vsel_mask;
 	uV = regulator_list_voltage_linear(reg, ret);
 
-	if (uV >= 0)
-		pr_debug("%s: %s: %d mV\n", __func__, desc->name, uV / 1000);
-
 	return ret;
 }
 
