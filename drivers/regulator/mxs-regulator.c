@@ -443,8 +443,6 @@ static void regulator_init(struct regulator_dev *reg)
 {
 	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &sreg->desc;
-	u32 base = readl(sreg->base_addr);
-	u8 linreg = get_linreg_offset(sreg, base);
 	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
 
 	if (sreg->get_power_source) {
@@ -453,21 +451,6 @@ static void regulator_init(struct regulator_dev *reg)
 		if (power_source == HW_POWER_UNKNOWN_SOURCE) {
 			dev_warn(&reg->dev, "%s: Invalid power source config\n",
 				 desc->name);
-		}
-	}
-
-	/* According to AN4199 avoid possible LinReg and DC-DC contention */
-	if (!(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)) {
-		switch (power_source) {
-		case HW_POWER_DCDC_LINREG_ON:
-		case HW_POWER_DCDC_LINREG_READY:
-		case HW_POWER_EXTERNAL_SOURCE_5V:
-			base &= ~sreg->linreg_offset_mask;
-			base |= BM_POWER_LINREG_OFFSET_DCDC_MODE;
-			writel(base, sreg->base_addr);
-			dev_info(&reg->dev, "%s: Set LinReg offset below DCDC target\n",
-				 desc->name);
-			break;
 		}
 	}
 }
