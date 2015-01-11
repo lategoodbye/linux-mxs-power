@@ -222,7 +222,6 @@ static int mxs_power_remove(struct platform_device *pdev)
 static struct platform_driver mxs_power_driver = {
 	.driver = {
 		.name	= "mxs_power",
-		.owner  = THIS_MODULE,
 		.of_match_table = of_mxs_power_match,
 	},
 	.probe	= mxs_power_probe,

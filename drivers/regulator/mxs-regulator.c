@@ -563,7 +563,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 static struct platform_driver mxs_regulator_driver = {
 	.driver = {
 		.name	= "mxs_regulator",
-		.owner  = THIS_MODULE,
 		.of_match_table = of_mxs_regulator_match,
 	},
 	.probe	= mxs_regulator_probe,
