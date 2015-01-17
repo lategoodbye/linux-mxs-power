@@ -392,7 +392,7 @@
 				reg = <0x80038000 0x2000>;
 				status = "disabled";
 			};
-                };
+		};
 
 		apbx@80040000 {
 			compatible = "simple-bus";
@@ -434,6 +434,8 @@
 					regulator-min-microvolt = <1350000>;
 					regulator-max-microvolt = <1550000>;
 					vddd-supply = <&reg_vdda>;
+					regulator-boot-on;
+					regulator-always-on;
 				};
 
 				reg_vdda: regulator@80044050 {
@@ -448,6 +450,8 @@
 					regulator-min-microvolt = <1725000>;
 					regulator-max-microvolt = <1950000>;
 					vdda-supply = <&reg_vddio>;
+					regulator-boot-on;
+					regulator-always-on;
 				};
 
 				reg_vddio: regulator@80044060 {
@@ -462,6 +466,8 @@
 					regulator-min-microvolt = <3000000>;
 					regulator-max-microvolt = <3575000>;
 					regulator-microvolt-offset = <80000>;
+					regulator-boot-on;
+					regulator-always-on;
 				};
 			};
 
