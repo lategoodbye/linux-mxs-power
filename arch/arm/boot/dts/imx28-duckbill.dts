@@ -97,6 +97,7 @@
 		status {
 			label = "duckbill:green:status";
 			gpios = <&gpio3 5 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "heartbeat";
 		};
 
 		failure {
