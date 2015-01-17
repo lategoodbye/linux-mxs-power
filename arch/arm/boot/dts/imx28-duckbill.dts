@@ -75,6 +75,7 @@
 	ahb@80080000 {
 		usb0: usb@80080000 {
 			status = "okay";
+			dr_mode = "peripheral";
 		};
 
 		mac0: ethernet@800f0000 {
