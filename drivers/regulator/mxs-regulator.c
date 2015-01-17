@@ -150,6 +150,33 @@ void _decode_hw_power_vddioctrl(u32 value)
 	pr_info("TRG: %x\n", value & 0x1f);
 }
 
+void _decode_hw_power_sts(u32 value)
+{
+	pr_info("HW_POWER_STS\n");
+	pr_info("PWRUP_SOURCE %x\n", (value >> 24) & 0x1F);
+	pr_info("PSWITCH %x\n", (value >> 20) & 3);
+	pr_info("THERMAL_WARNING %x\n", (value >> 19) & 1);
+	pr_info("VDDMEM_BO %x\n", (value >> 18) & 1);
+	pr_info("AVALID0_STATUS %x\n", (value >> 17) & 1);
+	pr_info("BVALID0_STATUS %x\n", (value >> 16) & 1);
+	pr_info("SESSEND0_STATUS %x\n", (value >> 15) & 1);
+	pr_info("VBUSVALID0_STATUS %x\n", (value >> 14) & 1);
+	pr_info("BATT_BO %x\n", (value >> 13) & 1);
+	pr_info("VDD5V_FAULT %x\n", (value >> 12) & 1);
+	pr_info("CHRGSTS %x\n", (value >> 11) & 1);
+	pr_info("DCDC_4P2_BO %x\n", (value >> 10) & 1);
+	pr_info("DC_OK %x\n", (value >> 9) & 1);
+	pr_info("VDDIO_BO %x\n", (value >> 8) & 1);
+	pr_info("VDDA_BO %x\n", (value >> 7) & 1);
+	pr_info("VDDD_BO %x\n", (value >> 6) & 1);
+	pr_info("VDD5V_GT_VDDIO %x\n", (value >> 5) & 1);
+	pr_info("VDD5V_DROOP %x\n", (value >> 4) & 1);
+	pr_info("AVALID0 %x\n", (value >> 3) & 1);
+	pr_info("BVALID0 %x\n", (value >> 2) & 1);
+	pr_info("VBUSVALID0 %x\n", (value >> 1) & 1);
+	pr_info("SESSEND0 %x\n", value & 1);
+}
+
 static inline u8 get_linreg_offset(struct mxs_regulator *sreg, u32 regs)
 {
 	return (regs & sreg->linreg_offset_mask) >> sreg->linreg_offset_shift;
@@ -169,6 +196,7 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 
 	if (dump_regs) {
 		_decode_hw_power_5vctrl(v5ctrl);
+		_decode_hw_power_sts(status);
 		_decode_hw_power_vddioctrl(base);
 		dump_regs = 0;
 	}
