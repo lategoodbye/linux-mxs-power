@@ -236,8 +236,8 @@ static int micro_batt_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&mb->update, micro_battery_work);
 	platform_set_drvdata(pdev, mb);
 	queue_delayed_work(mb->wq, &mb->update, 1);
-	power_supply_register(&pdev->dev, &micro_batt_power);
-	power_supply_register(&pdev->dev, &micro_ac_power);
+	power_supply_register(&pdev->dev, &micro_batt_power, NULL);
+	power_supply_register(&pdev->dev, &micro_ac_power, NULL);
 
 	dev_info(&pdev->dev, "iPAQ micro battery driver\n");
 	return 0;

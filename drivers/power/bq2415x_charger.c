@@ -1058,7 +1058,7 @@ static int bq2415x_power_supply_init(struct bq2415x_device *bq)
 		return -ENOMEM;
 	}
 
-	ret = power_supply_register(bq->dev, &bq->charger);
+	ret = power_supply_register(bq->dev, &bq->charger, NULL);
 	if (ret) {
 		kfree(bq->model);
 		return ret;
