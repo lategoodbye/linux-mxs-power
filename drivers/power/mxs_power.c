@@ -187,7 +187,7 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (IS_ERR(data->base_addr))
 		return PTR_ERR(data->base_addr);
 
-	ret = power_supply_register(dev, &data->ac);
+	ret = power_supply_register(dev, &data->ac, NULL);
 	if (ret)
 		return ret;
 
