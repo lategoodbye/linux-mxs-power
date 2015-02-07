@@ -58,7 +58,7 @@ MODULE_PARM_DESC(dcdc_pll,
 
 struct mxs_power_data {
 	void __iomem *base_addr;
-	struct power_supply ac;
+	struct power_supply *ac;
 };
 
 int get_dcdc_clk_freq(struct mxs_power_data *pdata)
@@ -135,8 +135,7 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
 {
-	struct mxs_power_data *data = container_of(psy,
-						   struct mxs_power_data, ac);
+	struct mxs_power_data *data = power_supply_get_drvdata(psy);
 	int ret = 0;
 
 	switch (psp) {
@@ -157,14 +156,22 @@ static const struct of_device_id of_mxs_power_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_mxs_power_match);
 
+static const struct power_supply_desc ac_desc = {
+       .properties     = mxs_power_ac_props,
+       .num_properties = ARRAY_SIZE(mxs_power_ac_props),
+       .get_property   = mxs_power_ac_get_property,
+       .name           = "ac",
+       .type           = POWER_SUPPLY_TYPE_MAINS,
+};
+
 static int mxs_power_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	struct resource *res;
 	struct mxs_power_data *data;
+	struct power_supply_config psy_cfg = {};
 	void __iomem *v5ctrl_addr;
-	int ret;
 	int dcdc_clk_freq;
 
 	if (!np) {
@@ -176,20 +183,16 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (data == NULL)
 		return -ENOMEM;
 
-	data->ac.properties = mxs_power_ac_props;
-	data->ac.num_properties = ARRAY_SIZE(mxs_power_ac_props);
-	data->ac.get_property = mxs_power_ac_get_property;
-	data->ac.name = "ac";
-	data->ac.type = POWER_SUPPLY_TYPE_MAINS;
-
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	data->base_addr = devm_ioremap_resource(dev, res);
 	if (IS_ERR(data->base_addr))
 		return PTR_ERR(data->base_addr);
 
-	ret = power_supply_register(dev, &data->ac, NULL);
-	if (ret)
-		return ret;
+	psy_cfg.drv_data = data;
+
+	data->ac = power_supply_register(dev, &ac_desc, &psy_cfg);
+	if (IS_ERR(data->ac))
+		return PTR_ERR(data->ac);
 
 	platform_set_drvdata(pdev, data);
 
@@ -214,7 +217,7 @@ static int mxs_power_remove(struct platform_device *pdev)
 	struct mxs_power_data *data = platform_get_drvdata(pdev);
 
 	of_platform_depopulate(&pdev->dev);
-	power_supply_unregister(&data->ac);
+	power_supply_unregister(data->ac);
 
 	return 0;
 }
