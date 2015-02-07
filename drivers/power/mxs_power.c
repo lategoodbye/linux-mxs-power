@@ -135,8 +135,6 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
 {
-	struct mxs_power_data *data = container_of(psy,
-						   struct mxs_power_data, ac);
 	int ret = 0;
 
 	switch (psp) {
