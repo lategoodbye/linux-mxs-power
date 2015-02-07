@@ -146,7 +146,9 @@ static char *test_power_ac_supplied_to[] = {
 	"test_battery",
 };
 
-static struct power_supply test_power_supplies[] = {
+static struct power_supply *test_power_supplies[TEST_POWER_NUM];
+
+static const struct power_supply_desc test_power_desc[] = {
 	{
 		.name = "test_ac",
 		.type = POWER_SUPPLY_TYPE_MAINS,
@@ -188,11 +190,13 @@ static int __init test_power_init(void)
 	int ret;
 
 	for (i = 0; i < ARRAY_SIZE(test_power_supplies); i++) {
-		ret = power_supply_register(NULL, &test_power_supplies[i],
+		test_power_supplies[i] = power_supply_register(NULL,
+						&test_power_desc[i],
 						&test_power_configs[i]);
-		if (ret) {
+		if (IS_ERR(test_power_supplies[i])) {
 			pr_err("%s: failed to register %s\n", __func__,
-				test_power_supplies[i].name);
+				test_power_desc[i].name);
+			ret = PTR_ERR(test_power_supplies[i]);
 			goto failed;
 		}
 	}
@@ -201,7 +205,7 @@ static int __init test_power_init(void)
 	return 0;
 failed:
 	while (--i >= 0)
-		power_supply_unregister(&test_power_supplies[i]);
+		power_supply_unregister(test_power_supplies[i]);
 	return ret;
 }
 module_init(test_power_init);
@@ -215,13 +219,13 @@ static void __exit test_power_exit(void)
 	usb_online = 0;
 	battery_status = POWER_SUPPLY_STATUS_DISCHARGING;
 	for (i = 0; i < ARRAY_SIZE(test_power_supplies); i++)
-		power_supply_changed(&test_power_supplies[i]);
+		power_supply_changed(test_power_supplies[i]);
 	pr_info("%s: 'changed' event sent, sleeping for 10 seconds...\n",
 		__func__);
 	ssleep(10);
 
 	for (i = 0; i < ARRAY_SIZE(test_power_supplies); i++)
-		power_supply_unregister(&test_power_supplies[i]);
+		power_supply_unregister(test_power_supplies[i]);
 
 	module_initialized = false;
 }
@@ -319,7 +323,7 @@ static inline void signal_power_supply_changed(struct power_supply *psy)
 static int param_set_ac_online(const char *key, const struct kernel_param *kp)
 {
 	ac_online = map_get_value(map_ac_online, key, ac_online);
-	signal_power_supply_changed(&test_power_supplies[0]);
+	signal_power_supply_changed(test_power_supplies[0]);
 	return 0;
 }
 
@@ -332,7 +336,7 @@ static int param_get_ac_online(char *buffer, const struct kernel_param *kp)
 static int param_set_usb_online(const char *key, const struct kernel_param *kp)
 {
 	usb_online = map_get_value(map_ac_online, key, usb_online);
-	signal_power_supply_changed(&test_power_supplies[2]);
+	signal_power_supply_changed(test_power_supplies[2]);
 	return 0;
 }
 
@@ -346,7 +350,7 @@ static int param_set_battery_status(const char *key,
 					const struct kernel_param *kp)
 {
 	battery_status = map_get_value(map_status, key, battery_status);
-	signal_power_supply_changed(&test_power_supplies[1]);
+	signal_power_supply_changed(test_power_supplies[1]);
 	return 0;
 }
 
@@ -360,7 +364,7 @@ static int param_set_battery_health(const char *key,
 					const struct kernel_param *kp)
 {
 	battery_health = map_get_value(map_health, key, battery_health);
-	signal_power_supply_changed(&test_power_supplies[1]);
+	signal_power_supply_changed(test_power_supplies[1]);
 	return 0;
 }
 
@@ -374,7 +378,7 @@ static int param_set_battery_present(const char *key,
 					const struct kernel_param *kp)
 {
 	battery_present = map_get_value(map_present, key, battery_present);
-	signal_power_supply_changed(&test_power_supplies[0]);
+	signal_power_supply_changed(test_power_supplies[0]);
 	return 0;
 }
 
@@ -390,7 +394,7 @@ static int param_set_battery_technology(const char *key,
 {
 	battery_technology = map_get_value(map_technology, key,
 						battery_technology);
-	signal_power_supply_changed(&test_power_supplies[1]);
+	signal_power_supply_changed(test_power_supplies[1]);
 	return 0;
 }
 
@@ -411,7 +415,7 @@ static int param_set_battery_capacity(const char *key,
 		return -EINVAL;
 
 	battery_capacity = tmp;
-	signal_power_supply_changed(&test_power_supplies[1]);
+	signal_power_supply_changed(test_power_supplies[1]);
 	return 0;
 }
 
@@ -426,7 +430,7 @@ static int param_set_battery_voltage(const char *key,
 		return -EINVAL;
 
 	battery_voltage = tmp;
-	signal_power_supply_changed(&test_power_supplies[1]);
+	signal_power_supply_changed(test_power_supplies[1]);
 	return 0;
 }
 
