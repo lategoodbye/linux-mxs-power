@@ -483,22 +483,6 @@ static const struct of_device_id of_mxs_regulator_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_mxs_regulator_match);
 
-static void regulator_init(struct regulator_dev *reg)
-{
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &sreg->desc;
-	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
-
-	if (sreg->get_power_source) {
-		power_source = sreg->get_power_source(reg);
-
-		if (power_source == HW_POWER_UNKNOWN_SOURCE) {
-			dev_warn(&reg->dev, "%s: Invalid power source config\n",
-				 desc->name);
-		}
-	}
-}
-
 static int mxs_regulator_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -575,7 +559,13 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	regulator_init(rdev);
+	if (sreg->get_power_source) {
+		if (sreg->get_power_source(reg) == HW_POWER_UNKNOWN_SOURCE) {
+			dev_warn(&reg->dev, "%s: Invalid power source config\n",
+				 desc->name);
+		}
+	}
+
 	platform_set_drvdata(pdev, rdev);
 
 	return 0;
