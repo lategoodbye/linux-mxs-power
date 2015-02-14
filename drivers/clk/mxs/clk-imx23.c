@@ -46,8 +46,7 @@ static void __iomem *digctrl;
 #define BP_CLKSEQ_BYPASS_SAIF	0
 #define BP_CLKSEQ_BYPASS_SSP	5
 #define BP_SAIF_DIV_FRAC_EN	16
-
-#define FRAC_IO	3
+#define BP_FRAC_IOFRAC		24
 
 static void __init clk_misc_init(void)
 {
@@ -73,10 +72,9 @@ static void __init clk_misc_init(void)
 	/*
 	 * 480 MHz seems too high to be ssp clock source directly,
 	 * so set frac to get a 288 MHz ref_io.
-	 * According to reference manual we must access frac bytewise.
 	 */
-	writeb_relaxed(0x3f, FRAC + FRAC_IO + CLR);
-	writeb_relaxed(30, FRAC + FRAC_IO + SET);
+	writel_relaxed(0x3f << BP_FRAC_IOFRAC, FRAC + CLR);
+	writel_relaxed(30 << BP_FRAC_IOFRAC, FRAC + SET);
 }
 
 static const char *sel_pll[]  __initconst = { "pll", "ref_xtal", };
