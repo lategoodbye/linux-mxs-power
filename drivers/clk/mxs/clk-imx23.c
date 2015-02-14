@@ -73,8 +73,10 @@ static void __init clk_misc_init(void)
 	 * 480 MHz seems too high to be ssp clock source directly,
 	 * so set frac to get a 288 MHz ref_io.
 	 */
-	writel_relaxed(0x3f << BP_FRAC_IOFRAC, FRAC + CLR);
-	writel_relaxed(30 << BP_FRAC_IOFRAC, FRAC + SET);
+	val = readl_relaxed(FRAC);
+	val &= ~(0x3f << BP_FRAC_IOFRAC);
+	val |= 30 << BP_FRAC_IOFRAC;
+	writel_relaxed(val, FRAC);
 }
 
 static const char *sel_pll[]  __initconst = { "pll", "ref_xtal", };
