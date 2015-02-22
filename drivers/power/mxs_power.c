@@ -211,7 +211,6 @@ static int mxs_power_remove(struct platform_device *pdev)
 {
 	struct mxs_power_data *data = platform_get_drvdata(pdev);
 
-	of_platform_depopulate(&pdev->dev);
 	power_supply_unregister(&data->ac);
 
 	return 0;
