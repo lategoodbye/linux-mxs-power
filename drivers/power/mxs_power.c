@@ -135,7 +135,6 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
 {
-	struct mxs_power_data *data = power_supply_get_drvdata(psy);
 	int ret = 0;
 
 	switch (psp) {
@@ -216,8 +215,7 @@ static int mxs_power_remove(struct platform_device *pdev)
 {
 	struct mxs_power_data *data = platform_get_drvdata(pdev);
 
-	of_platform_depopulate(&pdev->dev);
-	power_supply_unregister(data->ac);
+	power_supply_unregister(&data->ac);
 
 	return 0;
 }

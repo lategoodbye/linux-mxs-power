@@ -60,6 +60,10 @@
 		};
 
 		apbx@80040000 {
+			lradc@80050000 {
+				status = "okay";
+			};
+
 			duart: serial@80074000 {
 				pinctrl-names = "default";
 				pinctrl-0 = <&duart_pins_a>;
