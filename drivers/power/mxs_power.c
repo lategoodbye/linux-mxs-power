@@ -156,11 +156,11 @@ static const struct of_device_id of_mxs_power_match[] = {
 MODULE_DEVICE_TABLE(of, of_mxs_power_match);
 
 static const struct power_supply_desc ac_desc = {
-       .properties     = mxs_power_ac_props,
-       .num_properties = ARRAY_SIZE(mxs_power_ac_props),
-       .get_property   = mxs_power_ac_get_property,
-       .name           = "ac",
-       .type           = POWER_SUPPLY_TYPE_MAINS,
+	.properties	= mxs_power_ac_props,
+	.num_properties	= ARRAY_SIZE(mxs_power_ac_props),
+	.get_property	= mxs_power_ac_get_property,
+	.name		= "ac",
+	.type		= POWER_SUPPLY_TYPE_MAINS,
 };
 
 static int mxs_power_probe(struct platform_device *pdev)
@@ -179,7 +179,7 @@ static int mxs_power_probe(struct platform_device *pdev)
 	}
 
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
-	if (data == NULL)
+	if (!data)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
