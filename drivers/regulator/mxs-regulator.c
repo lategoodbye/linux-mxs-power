@@ -559,13 +559,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	if (sreg->get_power_source) {
-		if (sreg->get_power_source(rdev) == HW_POWER_UNKNOWN_SOURCE) {
-			dev_warn(dev, "%s: Invalid power source config\n",
-				 __func__);
-		}
-	}
-
 	platform_set_drvdata(pdev, rdev);
 
 	return 0;
