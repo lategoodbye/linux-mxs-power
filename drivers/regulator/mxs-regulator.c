@@ -177,9 +177,9 @@ void _decode_hw_power_sts(u32 value)
 	pr_info("SESSEND0 %x\n", value & 1);
 }
 
-static inline u8 get_linreg_offset(struct mxs_ldo *sreg, u32 regs)
+static inline u8 get_linreg_offset(struct mxs_ldo *ldo, u32 regs)
 {
-	return (regs & sreg->linreg_offset_mask) >> sreg->linreg_offset_shift;
+	return (regs & ldo->linreg_offset_mask) >> ldo->linreg_offset_shift;
 }
 
 static u8 get_vddio_power_source(struct regulator_dev *reg)
