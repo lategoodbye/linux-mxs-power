@@ -1,5 +1,5 @@
 /*
- * Freescale STMP378X voltage regulators
+ * Freescale MXS regulators
  *
  * Embedded Alley Solutions, Inc <source@embeddedalley.com>
  *
@@ -575,6 +575,6 @@ static struct platform_driver mxs_regulator_driver = {
 module_platform_driver(mxs_regulator_driver);
 
 MODULE_AUTHOR("Stefan Wahren <stefan.wahren@i2se.com>");
-MODULE_DESCRIPTION("Freescale STMP378X voltage regulators");
+MODULE_DESCRIPTION("Freescale MXS regulators");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:mxs_regulator");
