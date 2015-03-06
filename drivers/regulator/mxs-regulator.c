@@ -79,11 +79,11 @@
 #define BM_POWER_5VCTRL_ILIMIT_EQ_ZERO	BIT(2)
 #define BM_POWER_5VCTRL_ENABLE_DCDC	BIT(0)
 
-#define MXS_VDDIO	1
-#define MXS_VDDA	2
-#define MXS_VDDD	3
+#define MXS_VDDIO	2
+#define MXS_VDDA	3
+#define MXS_VDDD	4
 
-struct mxs_regulator {
+struct mxs_ldo {
 	struct regulator_desc desc;
 	unsigned int disable_fet_mask;
 	unsigned int linreg_offset_mask;
@@ -177,22 +177,22 @@ void _decode_hw_power_sts(u32 value)
 	pr_info("SESSEND0 %x\n", value & 1);
 }
 
-static inline u8 get_linreg_offset(struct mxs_regulator *sreg, u32 regs)
+static inline u8 get_linreg_offset(struct mxs_ldo *sreg, u32 regs)
 {
 	return (regs & sreg->linreg_offset_mask) >> sreg->linreg_offset_shift;
 }
 
 static u8 get_vddio_power_source(struct regulator_dev *reg)
 {
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
+	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
 	static int dump_regs = 1;
 	u32 v5ctrl, status, base;
-	u8 linreg;
+	u8 offset;
 
-	v5ctrl = readl(sreg->v5ctrl_addr);
-	status = readl(sreg->status_addr);
-	base = readl(sreg->base_addr);
-	linreg = get_linreg_offset(sreg, base);
+	v5ctrl = readl(ldo->v5ctrl_addr);
+	status = readl(ldo->status_addr);
+	base = readl(ldo->base_addr);
+	offset = get_linreg_offset(ldo, base);
 
 	if (dump_regs) {
 		_decode_hw_power_5vctrl(v5ctrl);
@@ -202,20 +202,20 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 	}
 
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
-		if ((base & sreg->disable_fet_mask) &&
-		    !(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)) {
+		if ((base & ldo->disable_fet_mask) &&
+		    !(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)) {
 			return HW_POWER_LINREG_DCDC_OFF;
 		}
 
 		if (v5ctrl & BM_POWER_5VCTRL_ENABLE_DCDC) {
-			if (linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)
+			if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 				return HW_POWER_DCDC_LINREG_ON;
 		} else {
-			if (!(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE))
+			if (!(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 				return HW_POWER_LINREG_DCDC_OFF;
 		}
 	} else {
-		if (linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE)
+		if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 			return HW_POWER_DCDC_LINREG_ON;
 	}
 
@@ -224,16 +224,16 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 
 static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 {
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &sreg->desc;
+	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct regulator_desc *desc = &ldo->desc;
 	static int dump_regs = 1;
 	u32 v5ctrl, status, base;
-	u8 linreg;
+	u8 offset;
 
-	v5ctrl = readl(sreg->v5ctrl_addr);
-	status = readl(sreg->status_addr);
-	base = readl(sreg->base_addr);
-	linreg = get_linreg_offset(sreg, base);
+	v5ctrl = readl(ldo->v5ctrl_addr);
+	status = readl(ldo->status_addr);
+	base = readl(ldo->base_addr);
+	offset = get_linreg_offset(ldo, base);
 
 	if (dump_regs) {
 		_decode_hw_power_5vctrl(v5ctrl);
@@ -248,11 +248,11 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 		dump_regs = 0;
 	}
 
-	if (base & sreg->disable_fet_mask) {
+	if (base & ldo->disable_fet_mask) {
 		if (status & BM_POWER_STS_VBUSVALID0_STATUS)
 			return HW_POWER_EXTERNAL_SOURCE_5V;
 
-		if (!(linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE))
+		if (!(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 			return HW_POWER_LINREG_DCDC_OFF;
 	}
 
@@ -263,7 +263,7 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 		return HW_POWER_LINREG_DCDC_OFF;
 	}
 
-	if (linreg & BM_POWER_LINREG_OFFSET_DCDC_MODE) {
+	if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE) {
 		if (base & desc->enable_mask)
 			return HW_POWER_DCDC_LINREG_ON;
 
@@ -275,12 +275,12 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 void print_power_source(struct regulator_dev *reg)
 {
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &sreg->desc;
+	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct regulator_desc *desc = &ldo->desc;
 	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
 
-	if (sreg->get_power_source)
-		power_source = sreg->get_power_source(reg);
+	if (ldo->get_power_source)
+		power_source = ldo->get_power_source(reg);
 
 	switch (power_source) {
 	case HW_POWER_LINREG_DCDC_OFF:
@@ -310,10 +310,10 @@ void print_power_source(struct regulator_dev *reg)
 	}
 }
 
-static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
+static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 {
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &sreg->desc;
+	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct regulator_desc *desc = &ldo->desc;
 	unsigned long start;
 	u32 regs;
 	int uV;
@@ -324,11 +324,11 @@ static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	if (uV >= 0)
 		pr_debug("%s: %s: %d mV\n", __func__, desc->name, uV / 1000);
 
-	regs = (readl(sreg->base_addr) & ~desc->vsel_mask);
-	writel(sel | regs, sreg->base_addr);
+	regs = (readl(ldo->base_addr) & ~desc->vsel_mask);
+	writel(sel | regs, ldo->base_addr);
 
-	if (sreg->get_power_source)
-		power_source = sreg->get_power_source(reg);
+	if (ldo->get_power_source)
+		power_source = ldo->get_power_source(reg);
 
 	switch (power_source) {
 	case HW_POWER_LINREG_DCDC_OFF:
@@ -341,7 +341,7 @@ static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	usleep_range(15, 20);
 	start = jiffies;
 	while (1) {
-		if (readl(sreg->status_addr) & BM_POWER_STS_DC_OK)
+		if (readl(ldo->status_addr) & BM_POWER_STS_DC_OK)
 			return 0;
 
 		if (time_after(jiffies, start +	msecs_to_jiffies(20)))
@@ -351,30 +351,30 @@ static int mxs_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	}
 
 	dev_warn_ratelimited(&reg->dev, "%s: timeout status=0x%08x\n",
-			     __func__, readl(sreg->status_addr));
+			     __func__, readl(ldo->status_addr));
 
 	return -ETIMEDOUT;
 }
 
-static int mxs_get_voltage_sel(struct regulator_dev *reg)
+static int mxs_ldo_get_voltage_sel(struct regulator_dev *reg)
 {
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &sreg->desc;
+	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct regulator_desc *desc = &ldo->desc;
 	int ret, uV;
 
-	ret = readl(sreg->base_addr) & desc->vsel_mask;
+	ret = readl(ldo->base_addr) & desc->vsel_mask;
 	uV = regulator_list_voltage_linear(reg, ret);
 
 	return ret;
 }
 
-static int mxs_is_enabled(struct regulator_dev *reg)
+static int mxs_ldo_is_enabled(struct regulator_dev *reg)
 {
-	struct mxs_regulator *sreg = rdev_get_drvdata(reg);
+	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
 	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
 
-	if (sreg->get_power_source)
-		power_source = sreg->get_power_source(reg);
+	if (ldo->get_power_source)
+		power_source = ldo->get_power_source(reg);
 
 	switch (power_source) {
 	case HW_POWER_LINREG_DCDC_OFF:
@@ -386,15 +386,15 @@ static int mxs_is_enabled(struct regulator_dev *reg)
 	return 0;
 }
 
-static struct regulator_ops mxs_rops = {
+static struct regulator_ops mxs_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
-	.set_voltage_sel	= mxs_set_voltage_sel,
-	.get_voltage_sel	= mxs_get_voltage_sel,
-	.is_enabled		= mxs_is_enabled,
+	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
+	.get_voltage_sel	= mxs_ldo_get_voltage_sel,
+	.is_enabled		= mxs_ldo_is_enabled,
 };
 
-static const struct mxs_regulator imx23_info_vddio = {
+static const struct mxs_ldo imx23_info_vddio = {
 	.desc = {
 		.name = "vddio",
 		.id = MXS_VDDIO,
@@ -405,7 +405,7 @@ static const struct mxs_regulator imx23_info_vddio = {
 		.linear_min_sel = 0,
 		.min_uV = 2800000,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_rops,
+		.ops = &mxs_ldo_ops,
 	},
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
@@ -413,7 +413,7 @@ static const struct mxs_regulator imx23_info_vddio = {
 	.get_power_source = get_vddio_power_source,
 };
 
-static const struct mxs_regulator imx28_info_vddio = {
+static const struct mxs_ldo imx28_info_vddio = {
 	.desc = {
 		.name = "vddio",
 		.id = MXS_VDDIO,
@@ -424,7 +424,7 @@ static const struct mxs_regulator imx28_info_vddio = {
 		.linear_min_sel = 0,
 		.min_uV = 2800000,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_rops,
+		.ops = &mxs_ldo_ops,
 	},
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
@@ -432,7 +432,7 @@ static const struct mxs_regulator imx28_info_vddio = {
 	.get_power_source = get_vddio_power_source,
 };
 
-static const struct mxs_regulator mxs_info_vdda = {
+static const struct mxs_ldo mxs_info_vdda = {
 	.desc = {
 		.name = "vdda",
 		.id = MXS_VDDA,
@@ -443,7 +443,7 @@ static const struct mxs_regulator mxs_info_vdda = {
 		.linear_min_sel = 0,
 		.min_uV = 1500000,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_rops,
+		.ops = &mxs_ldo_ops,
 		.enable_mask = (1 << 17),
 	},
 	.disable_fet_mask = 1 << 16,
@@ -452,7 +452,7 @@ static const struct mxs_regulator mxs_info_vdda = {
 	.get_power_source = get_vdda_vddd_power_source,
 };
 
-static const struct mxs_regulator mxs_info_vddd = {
+static const struct mxs_ldo mxs_info_vddd = {
 	.desc = {
 		.name = "vddd",
 		.id = MXS_VDDD,
@@ -463,7 +463,7 @@ static const struct mxs_regulator mxs_info_vddd = {
 		.linear_min_sel = 0,
 		.min_uV = 800000,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_rops,
+		.ops = &mxs_ldo_ops,
 		.enable_mask = (1 << 21),
 	},
 	.disable_fet_mask = 1 << 20,
@@ -488,7 +488,7 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *match;
 	struct regulator_dev *rdev = NULL;
-	struct mxs_regulator *sreg;
+	struct mxs_ldo *ldo;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
 	struct resource *res;
@@ -502,11 +502,11 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	sreg = devm_kmemdup(dev, match->data, sizeof(*sreg), GFP_KERNEL);
-	if (!sreg)
+	ldo = devm_kmemdup(dev, match->data, sizeof(*ldo), GFP_KERNEL);
+	if (!ldo)
 		return -ENOMEM;
 
-	initdata = of_get_regulator_init_data(dev, dev->of_node, &sreg->desc);
+	initdata = of_get_regulator_init_data(dev, dev->of_node, &ldo->desc);
 	if (!initdata) {
 		dev_err(dev, "missing regulator init data\n");
 		return -EINVAL;
@@ -518,10 +518,10 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		dev_err(dev, "Missing '%s' IO resource\n", pname);
 		return -ENODEV;
 	}
-	sreg->base_addr = devm_ioremap_nocache(dev, res->start,
+	ldo->base_addr = devm_ioremap_nocache(dev, res->start,
 						 resource_size(res));
-	if (IS_ERR(sreg->base_addr))
-		return PTR_ERR(sreg->base_addr);
+	if (IS_ERR(ldo->base_addr))
+		return PTR_ERR(ldo->base_addr);
 
 	/* status register is shared between the regulators */
 	pname = "status-address";
@@ -530,10 +530,10 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		dev_err(dev, "Missing '%s' IO resource\n", pname);
 		return -ENODEV;
 	}
-	sreg->status_addr = devm_ioremap_nocache(dev, res->start,
+	ldo->status_addr = devm_ioremap_nocache(dev, res->start,
 						 resource_size(res));
-	if (IS_ERR(sreg->status_addr))
-		return PTR_ERR(sreg->status_addr);
+	if (IS_ERR(ldo->status_addr))
+		return PTR_ERR(ldo->status_addr);
 
 	pname = "v5ctrl-address";
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
@@ -541,17 +541,17 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		dev_err(dev, "Missing '%s' IO resource\n", pname);
 		return -ENODEV;
 	}
-	sreg->v5ctrl_addr = devm_ioremap_nocache(dev, res->start,
+	ldo->v5ctrl_addr = devm_ioremap_nocache(dev, res->start,
 						 resource_size(res));
-	if (IS_ERR(sreg->v5ctrl_addr))
-		return PTR_ERR(sreg->v5ctrl_addr);
+	if (IS_ERR(ldo->v5ctrl_addr))
+		return PTR_ERR(ldo->v5ctrl_addr);
 
 	config.dev = dev;
 	config.init_data = initdata;
-	config.driver_data = sreg;
+	config.driver_data = ldo;
 	config.of_node = dev->of_node;
 
-	rdev = devm_regulator_register(dev, &sreg->desc, &config);
+	rdev = devm_regulator_register(dev, &ldo->desc, &config);
 	if (IS_ERR(rdev)) {
 		ret = PTR_ERR(rdev);
 		dev_err(dev, "%s: failed to register regulator(%d)\n",
