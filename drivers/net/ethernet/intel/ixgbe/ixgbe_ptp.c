@@ -261,18 +261,9 @@ static int ixgbe_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 	struct ixgbe_adapter *adapter =
 		container_of(ptp, struct ixgbe_adapter, ptp_caps);
 	unsigned long flags;
-	u64 now;
 
 	spin_lock_irqsave(&adapter->tmreg_lock, flags);
-
-	now = timecounter_read(&adapter->tc);
-	now += delta;
-
-	/* reset the timecounter */
-	timecounter_init(&adapter->tc,
-			 &adapter->cc,
-			 now);
-
+	timecounter_adjtime(&adapter->tc, delta);
 	spin_unlock_irqrestore(&adapter->tmreg_lock, flags);
 
 	ixgbe_ptp_setup_sdp(adapter);
@@ -497,7 +488,7 @@ static void ixgbe_ptp_tx_hwtstamp(struct ixgbe_adapter *adapter)
  * @work: pointer to the work struct
  *
  * This work item polls TSYNCTXCTL valid bit to determine when a Tx hardware
- * timestamp has been taken for the current skb. It is necesary, because the
+ * timestamp has been taken for the current skb. It is necessary, because the
  * descriptor's "done" bit does not correlate with the timestamp event.
  */
 static void ixgbe_ptp_tx_hwtstamp_work(struct work_struct *work)
@@ -802,7 +793,7 @@ void ixgbe_ptp_start_cyclecounter(struct ixgbe_adapter *adapter)
 
 	memset(&adapter->cc, 0, sizeof(adapter->cc));
 	adapter->cc.read = ixgbe_ptp_read;
-	adapter->cc.mask = CLOCKSOURCE_MASK(64);
+	adapter->cc.mask = CYCLECOUNTER_MASK(64);
 	adapter->cc.shift = shift;
 	adapter->cc.mult = 1;
 

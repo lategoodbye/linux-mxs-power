@@ -325,7 +325,8 @@ static int pda_power_probe(struct platform_device *pdev)
 #endif
 
 	if (pdata->is_ac_online) {
-		pda_psy_ac = power_supply_register(&pdev->dev, &pda_psy_ac_desc, &psy_cfg);
+		pda_psy_ac = power_supply_register(&pdev->dev,
+						   &pda_psy_ac_desc, &psy_cfg);
 		if (IS_ERR(pda_psy_ac)) {
 			dev_err(dev, "failed to register %s power supply\n",
 				pda_psy_ac_desc.name);

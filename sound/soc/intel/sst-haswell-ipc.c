@@ -31,6 +31,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
+#include <sound/asound.h>
 
 #include "sst-haswell-ipc.h"
 #include "sst-dsp.h"
@@ -78,6 +79,15 @@
 #define IPC_LOG_ID_MASK		(0xf << IPC_LOG_ID_SHIFT)
 #define IPC_LOG_ID(x)		(x << IPC_LOG_ID_SHIFT)
 
+/* Module Message */
+#define IPC_MODULE_OPERATION_SHIFT	20
+#define IPC_MODULE_OPERATION_MASK	(0xf << IPC_MODULE_OPERATION_SHIFT)
+#define IPC_MODULE_OPERATION(x)	(x << IPC_MODULE_OPERATION_SHIFT)
+
+#define IPC_MODULE_ID_SHIFT	16
+#define IPC_MODULE_ID_MASK	(0xf << IPC_MODULE_ID_SHIFT)
+#define IPC_MODULE_ID(x)	(x << IPC_MODULE_ID_SHIFT)
+
 /* IPC message timeout (msecs) */
 #define IPC_TIMEOUT_MSECS	300
 #define IPC_BOOT_MSECS		200
@@ -93,6 +103,8 @@
 
 /* Mailbox */
 #define IPC_MAX_MAILBOX_BYTES	256
+
+#define INVALID_STREAM_HW_ID	0xffffffff
 
 /* Global Message - Types and Replies */
 enum ipc_glb_type {
@@ -112,6 +124,7 @@ enum ipc_glb_type {
 	IPC_GLB_ENTER_DX_STATE = 12,
 	IPC_GLB_GET_MIXER_STREAM_INFO = 13,	/* Request mixer stream params */
 	IPC_GLB_DEBUG_LOG_MESSAGE = 14,		/* Message to or from the debug logger. */
+	IPC_GLB_MODULE_OPERATION = 15,		/* Message to loadable fw module */
 	IPC_GLB_REQUEST_TRANSFER = 16, 		/* < Request Transfer for host */
 	IPC_GLB_MAX_IPC_MESSAGE_TYPE = 17,	/* Maximum message number */
 };
@@ -128,6 +141,16 @@ enum ipc_glb_reply {
 	IPC_GLB_REPLY_STAGE_UNINITIALIZED = 8,	/* Processing stage was uninitialized. */
 	IPC_GLB_REPLY_NOT_FOUND = 9,		/* Required resource can not be found. */
 	IPC_GLB_REPLY_SOURCE_NOT_STARTED = 10,	/* Source was not started. */
+};
+
+enum ipc_module_operation {
+	IPC_MODULE_NOTIFICATION = 0,
+	IPC_MODULE_ENABLE = 1,
+	IPC_MODULE_DISABLE = 2,
+	IPC_MODULE_GET_PARAMETER = 3,
+	IPC_MODULE_SET_PARAMETER = 4,
+	IPC_MODULE_GET_INFO = 5,
+	IPC_MODULE_MAX_MESSAGE
 };
 
 /* Stream Message - Types */
@@ -240,6 +263,9 @@ struct sst_hsw_stream {
 	u32 (*notify_position)(struct sst_hsw_stream *stream, void *data);
 	void *pdata;
 
+	/* record the fw read position when playback */
+	snd_pcm_uframes_t old_position;
+	bool play_silence;
 	struct list_head node;
 };
 
@@ -275,7 +301,6 @@ struct sst_hsw {
 	/* FW config */
 	struct sst_hsw_ipc_fw_ready fw_ready;
 	struct sst_hsw_ipc_fw_version version;
-	struct sst_module *scratch;
 	bool fw_done;
 	struct sst_fw *sst_fw;
 
@@ -312,6 +337,15 @@ struct sst_hsw {
 
 	/* FW log stream */
 	struct sst_hsw_log_stream log_stream;
+
+	/* flags bit field to track module state when resume from RTD3,
+	 * each bit represent state (enabled/disabled) of single module */
+	u32 enabled_modules_rtd3;
+
+	/* buffer to store parameter lines */
+	u32 param_idx_w;	/* write index */
+	u32 param_idx_r;	/* read index */
+	u8 param_buf[WAVES_PARAM_LINES][WAVES_PARAM_COUNT];
 };
 
 #define CREATE_TRACE_POINTS
@@ -337,12 +371,6 @@ static inline u32 msg_get_stage_type(u32 msg)
 	return (msg & IPC_STG_TYPE_MASK) >>  IPC_STG_TYPE_SHIFT;
 }
 
-static inline u32 msg_set_stage_type(u32 msg, u32 type)
-{
-	return (msg & ~IPC_STG_TYPE_MASK) +
-		(type << IPC_STG_TYPE_SHIFT);
-}
-
 static inline u32 msg_get_stream_id(u32 msg)
 {
 	return (msg & IPC_STR_ID_MASK) >>  IPC_STR_ID_SHIFT;
@@ -351,6 +379,16 @@ static inline u32 msg_get_stream_id(u32 msg)
 static inline u32 msg_get_notify_reason(u32 msg)
 {
 	return (msg & IPC_STG_TYPE_MASK) >> IPC_STG_TYPE_SHIFT;
+}
+
+static inline u32 msg_get_module_operation(u32 msg)
+{
+	return (msg & IPC_MODULE_OPERATION_MASK) >> IPC_MODULE_OPERATION_SHIFT;
+}
+
+static inline u32 msg_get_module_id(u32 msg)
+{
+	return (msg & IPC_MODULE_ID_MASK) >> IPC_MODULE_ID_SHIFT;
 }
 
 u32 create_channel_map(enum sst_hsw_channel_config config)
@@ -651,11 +689,11 @@ static void hsw_notification_work(struct work_struct *work)
 	}
 
 	/* tell DSP that notification has been handled */
-	sst_dsp_shim_update_bits_unlocked(hsw->dsp, SST_IPCD,
+	sst_dsp_shim_update_bits(hsw->dsp, SST_IPCD,
 		SST_IPCD_BUSY | SST_IPCD_DONE, SST_IPCD_DONE);
 
 	/* unmask busy interrupt */
-	sst_dsp_shim_update_bits_unlocked(hsw->dsp, SST_IMRX, SST_IMRX_BUSY, 0);
+	sst_dsp_shim_update_bits(hsw->dsp, SST_IMRX, SST_IMRX_BUSY, 0);
 }
 
 static struct ipc_message *reply_find_msg(struct sst_hsw *hsw, u32 header)
@@ -796,6 +834,31 @@ static int hsw_process_reply(struct sst_hsw *hsw, u32 header)
 	return 1;
 }
 
+static int hsw_module_message(struct sst_hsw *hsw, u32 header)
+{
+	u32 operation, module_id;
+	int handled = 0;
+
+	operation = msg_get_module_operation(header);
+	module_id = msg_get_module_id(header);
+	dev_dbg(hsw->dev, "received module message header: 0x%8.8x\n",
+			header);
+	dev_dbg(hsw->dev, "operation: 0x%8.8x module_id: 0x%8.8x\n",
+			operation, module_id);
+
+	switch (operation) {
+	case IPC_MODULE_NOTIFICATION:
+		dev_dbg(hsw->dev, "module notification received");
+		handled = 1;
+		break;
+	default:
+		handled = hsw_process_reply(hsw, header);
+		break;
+	}
+
+	return handled;
+}
+
 static int hsw_stream_message(struct sst_hsw *hsw, u32 header)
 {
 	u32 stream_msg, stream_id, stage_type;
@@ -891,6 +954,9 @@ static int hsw_process_notification(struct sst_hsw *hsw)
 	case IPC_GLB_DEBUG_LOG_MESSAGE:
 		handled = hsw_log_message(hsw, header);
 		break;
+	case IPC_GLB_MODULE_OPERATION:
+		handled = hsw_module_message(hsw, header);
+		break;
 	default:
 		dev_err(hsw->dev, "error: unexpected type %d hdr 0x%8.8x\n",
 			type, header);
@@ -969,45 +1035,6 @@ int sst_hsw_fw_get_version(struct sst_hsw *hsw,
 }
 
 /* Mixer Controls */
-int sst_hsw_stream_mute(struct sst_hsw *hsw, struct sst_hsw_stream *stream,
-	u32 stage_id, u32 channel)
-{
-	int ret;
-
-	ret = sst_hsw_stream_get_volume(hsw, stream, stage_id, channel,
-		&stream->mute_volume[channel]);
-	if (ret < 0)
-		return ret;
-
-	ret = sst_hsw_stream_set_volume(hsw, stream, stage_id, channel, 0);
-	if (ret < 0) {
-		dev_err(hsw->dev, "error: can't unmute stream %d channel %d\n",
-			stream->reply.stream_hw_id, channel);
-		return ret;
-	}
-
-	stream->mute[channel] = 1;
-	return 0;
-}
-
-int sst_hsw_stream_unmute(struct sst_hsw *hsw, struct sst_hsw_stream *stream,
-	u32 stage_id, u32 channel)
-
-{
-	int ret;
-
-	stream->mute[channel] = 0;
-	ret = sst_hsw_stream_set_volume(hsw, stream, stage_id, channel,
-		stream->mute_volume[channel]);
-	if (ret < 0) {
-		dev_err(hsw->dev, "error: can't unmute stream %d channel %d\n",
-			stream->reply.stream_hw_id, channel);
-		return ret;
-	}
-
-	return 0;
-}
-
 int sst_hsw_stream_get_volume(struct sst_hsw *hsw, struct sst_hsw_stream *stream,
 	u32 stage_id, u32 channel, u32 *volume)
 {
@@ -1017,17 +1044,6 @@ int sst_hsw_stream_get_volume(struct sst_hsw *hsw, struct sst_hsw_stream *stream
 	sst_dsp_read(hsw->dsp, volume,
 		stream->reply.volume_register_address[channel],
 		sizeof(*volume));
-
-	return 0;
-}
-
-int sst_hsw_stream_set_volume_curve(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream, u64 curve_duration,
-	enum sst_hsw_volume_curve curve)
-{
-	/* curve duration in steps of 100ns */
-	stream->vol_req.curve_duration = curve_duration;
-	stream->vol_req.curve_type = curve;
 
 	return 0;
 }
@@ -1083,42 +1099,6 @@ int sst_hsw_stream_set_volume(struct sst_hsw *hsw,
 	return 0;
 }
 
-int sst_hsw_mixer_mute(struct sst_hsw *hsw, u32 stage_id, u32 channel)
-{
-	int ret;
-
-	ret = sst_hsw_mixer_get_volume(hsw, stage_id, channel,
-		&hsw->mute_volume[channel]);
-	if (ret < 0)
-		return ret;
-
-	ret = sst_hsw_mixer_set_volume(hsw, stage_id, channel, 0);
-	if (ret < 0) {
-		dev_err(hsw->dev, "error: failed to unmute mixer channel %d\n",
-			channel);
-		return ret;
-	}
-
-	hsw->mute[channel] = 1;
-	return 0;
-}
-
-int sst_hsw_mixer_unmute(struct sst_hsw *hsw, u32 stage_id, u32 channel)
-{
-	int ret;
-
-	ret = sst_hsw_mixer_set_volume(hsw, stage_id, channel,
-		hsw->mixer_info.volume_register_address[channel]);
-	if (ret < 0) {
-		dev_err(hsw->dev, "error: failed to unmute mixer channel %d\n",
-			channel);
-		return ret;
-	}
-
-	hsw->mute[channel] = 0;
-	return 0;
-}
-
 int sst_hsw_mixer_get_volume(struct sst_hsw *hsw, u32 stage_id, u32 channel,
 	u32 *volume)
 {
@@ -1128,16 +1108,6 @@ int sst_hsw_mixer_get_volume(struct sst_hsw *hsw, u32 stage_id, u32 channel,
 	sst_dsp_read(hsw->dsp, volume,
 		hsw->mixer_info.volume_register_address[channel],
 		sizeof(*volume));
-
-	return 0;
-}
-
-int sst_hsw_mixer_set_volume_curve(struct sst_hsw *hsw,
-	 u64 curve_duration, enum sst_hsw_volume_curve curve)
-{
-	/* curve duration in steps of 100ns */
-	hsw->curve_duration = curve_duration;
-	hsw->curve_type = curve;
 
 	return 0;
 }
@@ -1208,6 +1178,7 @@ struct sst_hsw_stream *sst_hsw_stream_new(struct sst_hsw *hsw, int id,
 		return NULL;
 
 	spin_lock_irqsave(&sst->spinlock, flags);
+	stream->reply.stream_hw_id = INVALID_STREAM_HW_ID;
 	list_add(&stream->node, &hsw->stream_list);
 	stream->notify_position = notify_position;
 	stream->pdata = data;
@@ -1227,6 +1198,11 @@ int sst_hsw_stream_free(struct sst_hsw *hsw, struct sst_hsw_stream *stream)
 	int ret = 0;
 	struct sst_dsp *sst = hsw->dsp;
 	unsigned long flags;
+
+	if (!stream) {
+		dev_warn(hsw->dev, "warning: stream is NULL, no stream to free, ignore it.\n");
+		return 0;
+	}
 
 	/* dont free DSP streams that are not commited */
 	if (!stream->commited)
@@ -1415,6 +1391,16 @@ int sst_hsw_stream_commit(struct sst_hsw *hsw, struct sst_hsw_stream *stream)
 	u32 header;
 	int ret;
 
+	if (!stream) {
+		dev_warn(hsw->dev, "warning: stream is NULL, no stream to commit, ignore it.\n");
+		return 0;
+	}
+
+	if (stream->commited) {
+		dev_warn(hsw->dev, "warning: stream is already committed, ignore it.\n");
+		return 0;
+	}
+
 	trace_ipc_request("stream alloc", stream->host_id);
 
 	header = IPC_GLB_TYPE(IPC_GLB_ALLOCATE_STREAM);
@@ -1432,50 +1418,32 @@ int sst_hsw_stream_commit(struct sst_hsw *hsw, struct sst_hsw_stream *stream)
 	return 0;
 }
 
+snd_pcm_uframes_t sst_hsw_stream_get_old_position(struct sst_hsw *hsw,
+	struct sst_hsw_stream *stream)
+{
+	return stream->old_position;
+}
+
+void sst_hsw_stream_set_old_position(struct sst_hsw *hsw,
+	struct sst_hsw_stream *stream, snd_pcm_uframes_t val)
+{
+	stream->old_position = val;
+}
+
+bool sst_hsw_stream_get_silence_start(struct sst_hsw *hsw,
+	struct sst_hsw_stream *stream)
+{
+	return stream->play_silence;
+}
+
+void sst_hsw_stream_set_silence_start(struct sst_hsw *hsw,
+	struct sst_hsw_stream *stream, bool val)
+{
+	stream->play_silence = val;
+}
+
 /* Stream Information - these calls could be inline but we want the IPC
  ABI to be opaque to client PCM drivers to cope with any future ABI changes */
-int sst_hsw_stream_get_hw_id(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream)
-{
-	return stream->reply.stream_hw_id;
-}
-
-int sst_hsw_stream_get_mixer_id(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream)
-{
-	return stream->reply.mixer_hw_id;
-}
-
-u32 sst_hsw_stream_get_read_reg(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream)
-{
-	return stream->reply.read_position_register_address;
-}
-
-u32 sst_hsw_stream_get_pointer_reg(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream)
-{
-	return stream->reply.presentation_position_register_address;
-}
-
-u32 sst_hsw_stream_get_peak_reg(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream, u32 channel)
-{
-	if (channel >= 2)
-		return 0;
-
-	return stream->reply.peak_meter_register_address[channel];
-}
-
-u32 sst_hsw_stream_get_vol_reg(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream, u32 channel)
-{
-	if (channel >= 2)
-		return 0;
-
-	return stream->reply.volume_register_address[channel];
-}
-
 int sst_hsw_mixer_get_info(struct sst_hsw *hsw)
 {
 	struct sst_hsw_ipc_stream_info_reply *reply;
@@ -1519,6 +1487,11 @@ int sst_hsw_stream_pause(struct sst_hsw *hsw, struct sst_hsw_stream *stream,
 {
 	int ret;
 
+	if (!stream) {
+		dev_warn(hsw->dev, "warning: stream is NULL, no stream to pause, ignore it.\n");
+		return 0;
+	}
+
 	trace_ipc_request("stream pause", stream->reply.stream_hw_id);
 
 	ret = sst_hsw_stream_operations(hsw, IPC_STR_PAUSE,
@@ -1535,6 +1508,11 @@ int sst_hsw_stream_resume(struct sst_hsw *hsw, struct sst_hsw_stream *stream,
 {
 	int ret;
 
+	if (!stream) {
+		dev_warn(hsw->dev, "warning: stream is NULL, no stream to resume, ignore it.\n");
+		return 0;
+	}
+
 	trace_ipc_request("stream resume", stream->reply.stream_hw_id);
 
 	ret = sst_hsw_stream_operations(hsw, IPC_STR_RESUME,
@@ -1549,6 +1527,11 @@ int sst_hsw_stream_resume(struct sst_hsw *hsw, struct sst_hsw_stream *stream,
 int sst_hsw_stream_reset(struct sst_hsw *hsw, struct sst_hsw_stream *stream)
 {
 	int ret, tries = 10;
+
+	if (!stream) {
+		dev_warn(hsw->dev, "warning: stream is NULL, no stream to reset, ignore it.\n");
+		return 0;
+	}
 
 	/* dont reset streams that are not commited */
 	if (!stream->commited)
@@ -1596,30 +1579,6 @@ u64 sst_hsw_get_dsp_presentation_position(struct sst_hsw *hsw,
 		sizeof(ppos));
 
 	return ppos;
-}
-
-int sst_hsw_stream_set_write_position(struct sst_hsw *hsw,
-	struct sst_hsw_stream *stream, u32 stage_id, u32 position)
-{
-	u32 header;
-	int ret;
-
-	trace_stream_write_position(stream->reply.stream_hw_id, position);
-
-	header = IPC_GLB_TYPE(IPC_GLB_STREAM_MESSAGE) |
-		IPC_STR_TYPE(IPC_STR_STAGE_MESSAGE);
-	header |= (stream->reply.stream_hw_id << IPC_STR_ID_SHIFT);
-	header |= (IPC_STG_SET_WRITE_POSITION << IPC_STG_TYPE_SHIFT);
-	header |= (stage_id << IPC_STG_ID_SHIFT);
-	stream->wpos.position = position;
-
-	ret = ipc_tx_message_nowait(hsw, header, &stream->wpos,
-		sizeof(stream->wpos));
-	if (ret < 0)
-		dev_err(hsw->dev, "error: stream %d set position %d failed\n",
-			stream->reply.stream_hw_id, position);
-
-	return ret;
 }
 
 /* physical BE config */
@@ -1840,6 +1799,7 @@ static void sst_hsw_drop_all(struct sst_hsw *hsw)
 int sst_hsw_dsp_load(struct sst_hsw *hsw)
 {
 	struct sst_dsp *dsp = hsw->dsp;
+	struct sst_fw *sst_fw, *t;
 	int ret;
 
 	dev_dbg(hsw->dev, "loading audio DSP....");
@@ -1856,12 +1816,17 @@ int sst_hsw_dsp_load(struct sst_hsw *hsw)
 		return ret;
 	}
 
-	ret = sst_fw_reload(hsw->sst_fw);
-	if (ret < 0) {
-		dev_err(hsw->dev, "error: SST FW reload failed\n");
-		sst_dsp_dma_put_channel(dsp);
-		return -ENOMEM;
+	list_for_each_entry_safe_reverse(sst_fw, t, &dsp->fw_list, list) {
+		ret = sst_fw_reload(sst_fw);
+		if (ret < 0) {
+			dev_err(hsw->dev, "error: SST FW reload failed\n");
+			sst_dsp_dma_put_channel(dsp);
+			return -ENOMEM;
+		}
 	}
+	ret = sst_block_alloc_scratch(hsw->dsp);
+	if (ret < 0)
+		return -EINVAL;
 
 	sst_dsp_dma_put_channel(dsp);
 	return 0;
@@ -1917,12 +1882,17 @@ int sst_hsw_dsp_runtime_suspend(struct sst_hsw *hsw)
 
 int sst_hsw_dsp_runtime_sleep(struct sst_hsw *hsw)
 {
-	sst_fw_unload(hsw->sst_fw);
-	sst_block_free_scratch(hsw->dsp);
+	struct sst_fw *sst_fw, *t;
+	struct sst_dsp *dsp = hsw->dsp;
+
+	list_for_each_entry_safe(sst_fw, t, &dsp->fw_list, list) {
+		sst_fw_unload(sst_fw);
+	}
+	sst_block_free_scratch(dsp);
 
 	hsw->boot_complete = false;
 
-	sst_dsp_sleep(hsw->dsp);
+	sst_dsp_sleep(dsp);
 
 	return 0;
 }
@@ -1940,6 +1910,8 @@ int sst_hsw_dsp_runtime_resume(struct sst_hsw *hsw)
 	ret = sst_hsw_dsp_restore(hsw);
 	if (ret < 0)
 		dev_err(dev, "error: audio DSP boot failure\n");
+
+	sst_hsw_init_module_state(hsw);
 
 	ret = wait_event_timeout(hsw->boot_wait, hsw->boot_complete,
 		msecs_to_jiffies(IPC_BOOT_MSECS));
@@ -1981,6 +1953,342 @@ static int msg_empty_list_init(struct sst_hsw *hsw)
 struct sst_dsp *sst_hsw_get_dsp(struct sst_hsw *hsw)
 {
 	return hsw->dsp;
+}
+
+void sst_hsw_init_module_state(struct sst_hsw *hsw)
+{
+	struct sst_module *module;
+	enum sst_hsw_module_id id;
+
+	/* the base fw contains several modules */
+	for (id = SST_HSW_MODULE_BASE_FW; id < SST_HSW_MAX_MODULE_ID; id++) {
+		module = sst_module_get_from_id(hsw->dsp, id);
+		if (module) {
+			/* module waves is active only after being enabled */
+			if (id == SST_HSW_MODULE_WAVES)
+				module->state = SST_MODULE_STATE_INITIALIZED;
+			else
+				module->state = SST_MODULE_STATE_ACTIVE;
+		}
+	}
+}
+
+bool sst_hsw_is_module_loaded(struct sst_hsw *hsw, u32 module_id)
+{
+	struct sst_module *module;
+
+	module = sst_module_get_from_id(hsw->dsp, module_id);
+	if (module == NULL || module->state == SST_MODULE_STATE_UNLOADED)
+		return false;
+	else
+		return true;
+}
+
+bool sst_hsw_is_module_active(struct sst_hsw *hsw, u32 module_id)
+{
+	struct sst_module *module;
+
+	module = sst_module_get_from_id(hsw->dsp, module_id);
+	if (module != NULL && module->state == SST_MODULE_STATE_ACTIVE)
+		return true;
+	else
+		return false;
+}
+
+void sst_hsw_set_module_enabled_rtd3(struct sst_hsw *hsw, u32 module_id)
+{
+	hsw->enabled_modules_rtd3 |= (1 << module_id);
+}
+
+void sst_hsw_set_module_disabled_rtd3(struct sst_hsw *hsw, u32 module_id)
+{
+	hsw->enabled_modules_rtd3 &= ~(1 << module_id);
+}
+
+bool sst_hsw_is_module_enabled_rtd3(struct sst_hsw *hsw, u32 module_id)
+{
+	return hsw->enabled_modules_rtd3 & (1 << module_id);
+}
+
+void sst_hsw_reset_param_buf(struct sst_hsw *hsw)
+{
+	hsw->param_idx_w = 0;
+	hsw->param_idx_r = 0;
+	memset((void *)hsw->param_buf, 0, sizeof(hsw->param_buf));
+}
+
+int sst_hsw_store_param_line(struct sst_hsw *hsw, u8 *buf)
+{
+	/* save line to the first available position of param buffer */
+	if (hsw->param_idx_w > WAVES_PARAM_LINES - 1) {
+		dev_warn(hsw->dev, "warning: param buffer overflow!\n");
+		return -EPERM;
+	}
+	memcpy(hsw->param_buf[hsw->param_idx_w], buf, WAVES_PARAM_COUNT);
+	hsw->param_idx_w++;
+	return 0;
+}
+
+int sst_hsw_load_param_line(struct sst_hsw *hsw, u8 *buf)
+{
+	u8 id = 0;
+
+	/* read the first matching line from param buffer */
+	while (hsw->param_idx_r < WAVES_PARAM_LINES) {
+		id = hsw->param_buf[hsw->param_idx_r][0];
+		hsw->param_idx_r++;
+		if (buf[0] == id) {
+			memcpy(buf, hsw->param_buf[hsw->param_idx_r],
+				WAVES_PARAM_COUNT);
+			break;
+		}
+	}
+	if (hsw->param_idx_r > WAVES_PARAM_LINES - 1) {
+		dev_dbg(hsw->dev, "end of buffer, roll to the beginning\n");
+		hsw->param_idx_r = 0;
+		return 0;
+	}
+	return 0;
+}
+
+int sst_hsw_launch_param_buf(struct sst_hsw *hsw)
+{
+	int ret, idx;
+
+	if (!sst_hsw_is_module_active(hsw, SST_HSW_MODULE_WAVES)) {
+		dev_dbg(hsw->dev, "module waves is not active\n");
+		return 0;
+	}
+
+	/* put all param lines to DSP through ipc */
+	for (idx = 0; idx < hsw->param_idx_w; idx++) {
+		ret = sst_hsw_module_set_param(hsw,
+			SST_HSW_MODULE_WAVES, 0, hsw->param_buf[idx][0],
+			WAVES_PARAM_COUNT, hsw->param_buf[idx]);
+		if (ret < 0)
+			return ret;
+	}
+	return 0;
+}
+
+int sst_hsw_module_load(struct sst_hsw *hsw,
+	u32 module_id, u32 instance_id, char *name)
+{
+	int ret = 0;
+	const struct firmware *fw = NULL;
+	struct sst_fw *hsw_sst_fw;
+	struct sst_module *module;
+	struct device *dev = hsw->dev;
+	struct sst_dsp *dsp = hsw->dsp;
+
+	dev_dbg(dev, "sst_hsw_module_load id=%d, name='%s'", module_id, name);
+
+	module = sst_module_get_from_id(dsp, module_id);
+	if (module == NULL) {
+		/* loading for the first time */
+		if (module_id == SST_HSW_MODULE_BASE_FW) {
+			/* for base module: use fw requested in acpi probe */
+			fw = dsp->pdata->fw;
+			if (!fw) {
+				dev_err(dev, "request Base fw failed\n");
+				return -ENODEV;
+			}
+		} else {
+			/* try and load any other optional modules if they are
+			 * available. Use dev_info instead of dev_err in case
+			 * request firmware failed */
+			ret = request_firmware(&fw, name, dev);
+			if (ret) {
+				dev_info(dev, "fw image %s not available(%d)\n",
+						name, ret);
+				return ret;
+			}
+		}
+		hsw_sst_fw = sst_fw_new(dsp, fw, hsw);
+		if (hsw_sst_fw  == NULL) {
+			dev_err(dev, "error: failed to load firmware\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+		module = sst_module_get_from_id(dsp, module_id);
+		if (module == NULL) {
+			dev_err(dev, "error: no module %d in firmware %s\n",
+					module_id, name);
+		}
+	} else
+		dev_info(dev, "module %d (%s) already loaded\n",
+				module_id, name);
+out:
+	/* release fw, but base fw should be released by acpi driver */
+	if (fw && module_id != SST_HSW_MODULE_BASE_FW)
+		release_firmware(fw);
+
+	return ret;
+}
+
+int sst_hsw_module_enable(struct sst_hsw *hsw,
+	u32 module_id, u32 instance_id)
+{
+	int ret;
+	u32 header = 0;
+	struct sst_hsw_ipc_module_config config;
+	struct sst_module *module;
+	struct sst_module_runtime *runtime;
+	struct device *dev = hsw->dev;
+	struct sst_dsp *dsp = hsw->dsp;
+
+	if (!sst_hsw_is_module_loaded(hsw, module_id)) {
+		dev_dbg(dev, "module %d not loaded\n", module_id);
+		return 0;
+	}
+
+	if (sst_hsw_is_module_active(hsw, module_id)) {
+		dev_info(dev, "module %d already enabled\n", module_id);
+		return 0;
+	}
+
+	module = sst_module_get_from_id(dsp, module_id);
+	if (module == NULL) {
+		dev_err(dev, "module %d not valid\n", module_id);
+		return -ENXIO;
+	}
+
+	runtime = sst_module_runtime_get_from_id(module, module_id);
+	if (runtime == NULL) {
+		dev_err(dev, "runtime %d not valid", module_id);
+		return -ENXIO;
+	}
+
+	header = IPC_GLB_TYPE(IPC_GLB_MODULE_OPERATION) |
+			IPC_MODULE_OPERATION(IPC_MODULE_ENABLE) |
+			IPC_MODULE_ID(module_id);
+	dev_dbg(dev, "module enable header: %x\n", header);
+
+	config.map.module_entries_count = 1;
+	config.map.module_entries[0].module_id = module->id;
+	config.map.module_entries[0].entry_point = module->entry;
+
+	config.persistent_mem.offset =
+		sst_dsp_get_offset(dsp,
+			runtime->persistent_offset, SST_MEM_DRAM);
+	config.persistent_mem.size = module->persistent_size;
+
+	config.scratch_mem.offset =
+		sst_dsp_get_offset(dsp,
+			dsp->scratch_offset, SST_MEM_DRAM);
+	config.scratch_mem.size = module->scratch_size;
+	dev_dbg(dev, "mod %d enable p:%d @ %x, s:%d @ %x, ep: %x",
+		config.map.module_entries[0].module_id,
+		config.persistent_mem.size,
+		config.persistent_mem.offset,
+		config.scratch_mem.size, config.scratch_mem.offset,
+		config.map.module_entries[0].entry_point);
+
+	ret = ipc_tx_message_wait(hsw, header,
+			&config, sizeof(config), NULL, 0);
+	if (ret < 0)
+		dev_err(dev, "ipc: module enable failed - %d\n", ret);
+	else
+		module->state = SST_MODULE_STATE_ACTIVE;
+
+	return ret;
+}
+
+int sst_hsw_module_disable(struct sst_hsw *hsw,
+	u32 module_id, u32 instance_id)
+{
+	int ret;
+	u32 header;
+	struct sst_module *module;
+	struct device *dev = hsw->dev;
+	struct sst_dsp *dsp = hsw->dsp;
+
+	if (!sst_hsw_is_module_loaded(hsw, module_id)) {
+		dev_dbg(dev, "module %d not loaded\n", module_id);
+		return 0;
+	}
+
+	if (!sst_hsw_is_module_active(hsw, module_id)) {
+		dev_info(dev, "module %d already disabled\n", module_id);
+		return 0;
+	}
+
+	module = sst_module_get_from_id(dsp, module_id);
+	if (module == NULL) {
+		dev_err(dev, "module %d not valid\n", module_id);
+		return -ENXIO;
+	}
+
+	header = IPC_GLB_TYPE(IPC_GLB_MODULE_OPERATION) |
+			IPC_MODULE_OPERATION(IPC_MODULE_DISABLE) |
+			IPC_MODULE_ID(module_id);
+
+	ret = ipc_tx_message_wait(hsw, header,  NULL, 0, NULL, 0);
+	if (ret < 0)
+		dev_err(dev, "module disable failed - %d\n", ret);
+	else
+		module->state = SST_MODULE_STATE_INITIALIZED;
+
+	return ret;
+}
+
+int sst_hsw_module_set_param(struct sst_hsw *hsw,
+	u32 module_id, u32 instance_id, u32 parameter_id,
+	u32 param_size, char *param)
+{
+	int ret;
+	unsigned char *data = NULL;
+	u32 header = 0;
+	u32 payload_size = 0, transfer_parameter_size = 0;
+	dma_addr_t dma_addr = 0;
+	struct sst_hsw_transfer_parameter *parameter;
+	struct device *dev = hsw->dev;
+
+	header = IPC_GLB_TYPE(IPC_GLB_MODULE_OPERATION) |
+			IPC_MODULE_OPERATION(IPC_MODULE_SET_PARAMETER) |
+			IPC_MODULE_ID(module_id);
+	dev_dbg(dev, "sst_hsw_module_set_param header=%x\n", header);
+
+	payload_size = param_size +
+		sizeof(struct sst_hsw_transfer_parameter) -
+		sizeof(struct sst_hsw_transfer_list);
+	dev_dbg(dev, "parameter size : %d\n", param_size);
+	dev_dbg(dev, "payload size   : %d\n", payload_size);
+
+	if (payload_size <= SST_HSW_IPC_MAX_SHORT_PARAMETER_SIZE) {
+		/* short parameter, mailbox can contain data */
+		dev_dbg(dev, "transfer parameter size : %d\n",
+			transfer_parameter_size);
+
+		transfer_parameter_size = ALIGN(payload_size, 4);
+		dev_dbg(dev, "transfer parameter aligned size : %d\n",
+			transfer_parameter_size);
+
+		parameter = kzalloc(transfer_parameter_size, GFP_KERNEL);
+		if (parameter == NULL)
+			return -ENOMEM;
+
+		memcpy(parameter->data, param, param_size);
+	} else {
+		dev_warn(dev, "transfer parameter size too large!");
+		return 0;
+	}
+
+	parameter->parameter_id = parameter_id;
+	parameter->data_size = param_size;
+
+	ret = ipc_tx_message_wait(hsw, header,
+		parameter, transfer_parameter_size , NULL, 0);
+	if (ret < 0)
+		dev_err(dev, "ipc: module set parameter failed - %d\n", ret);
+
+	kfree(parameter);
+
+	if (data)
+		dma_free_coherent(hsw->dsp->dma_dev,
+			param_size, (void *)data, dma_addr);
+
+	return ret;
 }
 
 static struct sst_dsp_device hsw_dev = {
@@ -2044,12 +2352,21 @@ int sst_hsw_dsp_init(struct device *dev, struct sst_pdata *pdata)
 	/* keep the DSP in reset state for base FW loading */
 	sst_dsp_reset(hsw->dsp);
 
-	hsw->sst_fw = sst_fw_new(hsw->dsp, pdata->fw, hsw);
-	if (hsw->sst_fw == NULL) {
-		ret = -ENODEV;
-		dev_err(dev, "error: failed to load firmware\n");
+	/* load base module and other modules in base firmware image */
+	ret = sst_hsw_module_load(hsw, SST_HSW_MODULE_BASE_FW, 0, "Base");
+	if (ret < 0)
 		goto fw_err;
-	}
+
+	/* try to load module waves */
+	sst_hsw_module_load(hsw, SST_HSW_MODULE_WAVES, 0, "intel/IntcPP01.bin");
+
+	/* allocate scratch mem regions */
+	ret = sst_block_alloc_scratch(hsw->dsp);
+	if (ret < 0)
+		goto boot_err;
+
+	/* init param buffer */
+	sst_hsw_reset_param_buf(hsw);
 
 	/* wait for DSP boot completion */
 	sst_dsp_boot(hsw->dsp);
@@ -2062,6 +2379,9 @@ int sst_hsw_dsp_init(struct device *dev, struct sst_pdata *pdata)
 			sst_dsp_shim_read_unlocked(hsw->dsp, SST_IPCX));
 		goto boot_err;
 	}
+
+	/* init module state after boot */
+	sst_hsw_init_module_state(hsw);
 
 	/* get the FW version */
 	sst_hsw_fw_get_version(hsw, &version);
@@ -2078,7 +2398,7 @@ int sst_hsw_dsp_init(struct device *dev, struct sst_pdata *pdata)
 
 boot_err:
 	sst_dsp_reset(hsw->dsp);
-	sst_fw_free(hsw->sst_fw);
+	sst_fw_free_all(hsw->dsp);
 fw_err:
 	dma_free_coherent(hsw->dsp->dma_dev, SST_HSW_DX_CONTEXT_SIZE,
 			hsw->dx_context, hsw->dx_context_paddr);
@@ -2102,7 +2422,6 @@ void sst_hsw_dsp_free(struct device *dev, struct sst_pdata *pdata)
 	dma_free_coherent(hsw->dsp->dma_dev, SST_HSW_DX_CONTEXT_SIZE,
 			hsw->dx_context, hsw->dx_context_paddr);
 	sst_dsp_free(hsw->dsp);
-	kfree(hsw->scratch);
 	kthread_stop(hsw->tx_thread);
 	kfree(hsw->msg);
 }

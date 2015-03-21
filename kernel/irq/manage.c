@@ -68,14 +68,20 @@ static void __synchronize_hardirq(struct irq_desc *desc)
  *	Do not use this for shutdown scenarios where you must be sure
  *	that all parts (hardirq and threaded handler) have completed.
  *
+ *	Returns: false if a threaded handler is active.
+ *
  *	This function may be called - with care - from IRQ context.
  */
-void synchronize_hardirq(unsigned int irq)
+bool synchronize_hardirq(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 
-	if (desc)
+	if (desc) {
 		__synchronize_hardirq(desc);
+		return !atomic_read(&desc->threads_active);
+	}
+
+	return true;
 }
 EXPORT_SYMBOL(synchronize_hardirq);
 
@@ -243,6 +249,9 @@ int irq_set_affinity_hint(unsigned int irq, const struct cpumask *m)
 		return -EINVAL;
 	desc->affinity_hint = m;
 	irq_put_desc_unlock(desc, flags);
+	/* set the initial affinity to prevent every interrupt being on CPU0 */
+	if (m)
+		__irq_set_affinity(irq, m, false);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(irq_set_affinity_hint);
@@ -436,6 +445,32 @@ void disable_irq(unsigned int irq)
 		synchronize_irq(irq);
 }
 EXPORT_SYMBOL(disable_irq);
+
+/**
+ *	disable_hardirq - disables an irq and waits for hardirq completion
+ *	@irq: Interrupt to disable
+ *
+ *	Disable the selected interrupt line.  Enables and Disables are
+ *	nested.
+ *	This function waits for any pending hard IRQ handlers for this
+ *	interrupt to complete before returning. If you use this function while
+ *	holding a resource the hard IRQ handler may need you will deadlock.
+ *
+ *	When used to optimistically disable an interrupt from atomic context
+ *	the return value must be checked.
+ *
+ *	Returns: false if a threaded handler is active.
+ *
+ *	This function may be called - with care - from IRQ context.
+ */
+bool disable_hardirq(unsigned int irq)
+{
+	if (!__disable_irq_nosync(irq))
+		return synchronize_hardirq(irq);
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(disable_hardirq);
 
 void __enable_irq(struct irq_desc *desc, unsigned int irq)
 {
@@ -1471,8 +1506,13 @@ int request_threaded_irq(unsigned int irq, irq_handler_t handler,
 	 * otherwise we'll have trouble later trying to figure out
 	 * which interrupt is which (messes up the interrupt freeing
 	 * logic etc).
+	 *
+	 * Also IRQF_COND_SUSPEND only makes sense for shared interrupts and
+	 * it cannot be set along with IRQF_NO_SUSPEND.
 	 */
-	if ((irqflags & IRQF_SHARED) && !dev_id)
+	if (((irqflags & IRQF_SHARED) && !dev_id) ||
+	    (!(irqflags & IRQF_SHARED) && (irqflags & IRQF_COND_SUSPEND)) ||
+	    ((irqflags & IRQF_NO_SUSPEND) && (irqflags & IRQF_COND_SUSPEND)))
 		return -EINVAL;
 
 	desc = irq_to_desc(irq);

@@ -66,17 +66,17 @@ static int brnf_pass_vlan_indev __read_mostly = 0;
 #endif
 
 #define IS_IP(skb) \
-	(!vlan_tx_tag_present(skb) && skb->protocol == htons(ETH_P_IP))
+	(!skb_vlan_tag_present(skb) && skb->protocol == htons(ETH_P_IP))
 
 #define IS_IPV6(skb) \
-	(!vlan_tx_tag_present(skb) && skb->protocol == htons(ETH_P_IPV6))
+	(!skb_vlan_tag_present(skb) && skb->protocol == htons(ETH_P_IPV6))
 
 #define IS_ARP(skb) \
-	(!vlan_tx_tag_present(skb) && skb->protocol == htons(ETH_P_ARP))
+	(!skb_vlan_tag_present(skb) && skb->protocol == htons(ETH_P_ARP))
 
 static inline __be16 vlan_proto(const struct sk_buff *skb)
 {
-	if (vlan_tx_tag_present(skb))
+	if (skb_vlan_tag_present(skb))
 		return skb->protocol;
 	else if (skb->protocol == htons(ETH_P_8021Q))
 		return vlan_eth_hdr(skb)->h_vlan_encapsulated_proto;
@@ -237,6 +237,14 @@ inhdr_error:
 	IP_INC_STATS_BH(dev_net(dev), IPSTATS_MIB_INHDRERRORS);
 drop:
 	return -1;
+}
+
+static void nf_bridge_update_protocol(struct sk_buff *skb)
+{
+	if (skb->nf_bridge->mask & BRNF_8021Q)
+		skb->protocol = htons(ETH_P_8021Q);
+	else if (skb->nf_bridge->mask & BRNF_PPPoE)
+		skb->protocol = htons(ETH_P_PPP_SES);
 }
 
 /* PF_BRIDGE/PRE_ROUTING *********************************************/
@@ -436,11 +444,11 @@ static struct net_device *brnf_get_logical_dev(struct sk_buff *skb, const struct
 	struct net_device *vlan, *br;
 
 	br = bridge_parent(dev);
-	if (brnf_pass_vlan_indev == 0 || !vlan_tx_tag_present(skb))
+	if (brnf_pass_vlan_indev == 0 || !skb_vlan_tag_present(skb))
 		return br;
 
 	vlan = __vlan_find_dev_deep_rcu(br, skb->vlan_proto,
-				    vlan_tx_tag_get(skb) & VLAN_VID_MASK);
+				    skb_vlan_tag_get(skb) & VLAN_VID_MASK);
 
 	return vlan ? vlan : br;
 }
@@ -764,23 +772,53 @@ static unsigned int br_nf_forward_arp(const struct nf_hook_ops *ops,
 }
 
 #if IS_ENABLED(CONFIG_NF_DEFRAG_IPV4)
+static bool nf_bridge_copy_header(struct sk_buff *skb)
+{
+	int err;
+	unsigned int header_size;
+
+	nf_bridge_update_protocol(skb);
+	header_size = ETH_HLEN + nf_bridge_encap_header_len(skb);
+	err = skb_cow_head(skb, header_size);
+	if (err)
+		return false;
+
+	skb_copy_to_linear_data_offset(skb, -header_size,
+				       skb->nf_bridge->data, header_size);
+	__skb_push(skb, nf_bridge_encap_header_len(skb));
+	return true;
+}
+
+static int br_nf_push_frag_xmit(struct sk_buff *skb)
+{
+	if (!nf_bridge_copy_header(skb)) {
+		kfree_skb(skb);
+		return 0;
+	}
+
+	return br_dev_queue_push_xmit(skb);
+}
+
 static int br_nf_dev_queue_xmit(struct sk_buff *skb)
 {
 	int ret;
 	int frag_max_size;
+	unsigned int mtu_reserved;
 
+	if (skb_is_gso(skb) || skb->protocol != htons(ETH_P_IP))
+		return br_dev_queue_push_xmit(skb);
+
+	mtu_reserved = nf_bridge_mtu_reduction(skb);
 	/* This is wrong! We should preserve the original fragment
 	 * boundaries by preserving frag_list rather than refragmenting.
 	 */
-	if (skb->protocol == htons(ETH_P_IP) &&
-	    skb->len + nf_bridge_mtu_reduction(skb) > skb->dev->mtu &&
-	    !skb_is_gso(skb)) {
+	if (skb->len + mtu_reserved > skb->dev->mtu) {
 		frag_max_size = BR_INPUT_SKB_CB(skb)->frag_max_size;
 		if (br_parse_ip_options(skb))
 			/* Drop invalid packet */
 			return NF_DROP;
 		IPCB(skb)->frag_max_size = frag_max_size;
-		ret = ip_fragment(skb, br_dev_queue_push_xmit);
+		ret = ip_fragment(skb, br_nf_push_frag_xmit);
 	} else
 		ret = br_dev_queue_push_xmit(skb);
 
@@ -853,6 +891,41 @@ static unsigned int ip_sabotage_in(const struct nf_hook_ops *ops,
 
 	return NF_ACCEPT;
 }
+
+/* This is called when br_netfilter has called into iptables/netfilter,
+ * and DNAT has taken place on a bridge-forwarded packet.
+ *
+ * neigh->output has created a new MAC header, with local br0 MAC
+ * as saddr.
+ *
+ * This restores the original MAC saddr of the bridged packet
+ * before invoking bridge forward logic to transmit the packet.
+ */
+static void br_nf_pre_routing_finish_bridge_slow(struct sk_buff *skb)
+{
+	struct nf_bridge_info *nf_bridge = skb->nf_bridge;
+
+	skb_pull(skb, ETH_HLEN);
+	nf_bridge->mask &= ~BRNF_BRIDGED_DNAT;
+
+	skb_copy_to_linear_data_offset(skb, -(ETH_HLEN-ETH_ALEN),
+				       skb->nf_bridge->data, ETH_HLEN-ETH_ALEN);
+	skb->dev = nf_bridge->physindev;
+	br_handle_frame_finish(skb);
+}
+
+static int br_nf_dev_xmit(struct sk_buff *skb)
+{
+	if (skb->nf_bridge && (skb->nf_bridge->mask & BRNF_BRIDGED_DNAT)) {
+		br_nf_pre_routing_finish_bridge_slow(skb);
+		return 1;
+	}
+	return 0;
+}
+
+static const struct nf_br_ops br_ops = {
+	.br_dev_xmit_hook =	br_nf_dev_xmit,
+};
 
 void br_netfilter_enable(void)
 {
@@ -987,19 +1060,18 @@ static int __init br_netfilter_init(void)
 	if (brnf_sysctl_header == NULL) {
 		printk(KERN_WARNING
 		       "br_netfilter: can't register to sysctl.\n");
-		ret = -ENOMEM;
-		goto err1;
+		nf_unregister_hooks(br_nf_ops, ARRAY_SIZE(br_nf_ops));
+		return -ENOMEM;
 	}
 #endif
+	RCU_INIT_POINTER(nf_br_ops, &br_ops);
 	printk(KERN_NOTICE "Bridge firewalling registered\n");
 	return 0;
-err1:
-	nf_unregister_hooks(br_nf_ops, ARRAY_SIZE(br_nf_ops));
-	return ret;
 }
 
 static void __exit br_netfilter_fini(void)
 {
+	RCU_INIT_POINTER(nf_br_ops, NULL);
 	nf_unregister_hooks(br_nf_ops, ARRAY_SIZE(br_nf_ops));
 #ifdef CONFIG_SYSCTL
 	unregister_net_sysctl_table(brnf_sysctl_header);

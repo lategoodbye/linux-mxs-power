@@ -45,8 +45,8 @@ int ath9k_modparam_nohwcrypt;
 module_param_named(nohwcrypt, ath9k_modparam_nohwcrypt, int, 0444);
 MODULE_PARM_DESC(nohwcrypt, "Disable hardware encryption");
 
-int led_blink;
-module_param_named(blink, led_blink, int, 0444);
+int ath9k_led_blink;
+module_param_named(blink, ath9k_led_blink, int, 0444);
 MODULE_PARM_DESC(blink, "Enable LED blink on activity");
 
 static int ath9k_btcoex_enable;
@@ -437,8 +437,15 @@ static void ath9k_init_pcoem_platform(struct ath_softc *sc)
 		ath_info(common, "Enable WAR for ASPM D3/L1\n");
 	}
 
+	/*
+	 * The default value of pll_pwrsave is 1.
+	 * For certain AR9485 cards, it is set to 0.
+	 * For AR9462, AR9565 it's set to 7.
+	 */
+	ah->config.pll_pwrsave = 1;
+
 	if (sc->driver_data & ATH9K_PCI_NO_PLL_PWRSAVE) {
-		ah->config.no_pll_pwrsave = true;
+		ah->config.pll_pwrsave = 0;
 		ath_info(common, "Disable PLL PowerSave\n");
 	}
 
@@ -763,7 +770,8 @@ static const struct ieee80211_iface_combination if_comb[] = {
 		.num_different_channels = 1,
 		.beacon_int_infra_match = true,
 		.radar_detect_widths =	BIT(NL80211_CHAN_WIDTH_20_NOHT) |
-					BIT(NL80211_CHAN_WIDTH_20),
+					BIT(NL80211_CHAN_WIDTH_20) |
+					BIT(NL80211_CHAN_WIDTH_40),
 	}
 #endif
 };
@@ -996,6 +1004,7 @@ void ath9k_deinit_device(struct ath_softc *sc)
 	ath9k_ps_restore(sc);
 
 	ath9k_deinit_debug(sc);
+	ath9k_deinit_wow(hw);
 	ieee80211_unregister_hw(hw);
 	ath_rx_cleanup(sc);
 	ath9k_deinit_softc(sc);

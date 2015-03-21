@@ -203,7 +203,8 @@ static int goldfish_battery_probe(struct platform_device *pdev)
 	if (IS_ERR(data->ac))
 		return PTR_ERR(data->ac);
 
-	data->battery = power_supply_register(&pdev->dev, &battery_desc, &psy_cfg);
+	data->battery = power_supply_register(&pdev->dev, &battery_desc,
+						&psy_cfg);
 	if (IS_ERR(data->battery)) {
 		power_supply_unregister(data->ac);
 		return PTR_ERR(data->battery);

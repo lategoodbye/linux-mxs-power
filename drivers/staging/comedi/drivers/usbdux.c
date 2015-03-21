@@ -16,10 +16,11 @@
 /*
  * Driver: usbdux
  * Description: University of Stirling USB DAQ & INCITE Technology Limited
- * Devices: (ITL) USB-DUX [usbdux]
+ * Devices: [ITL] USB-DUX (usbdux)
  * Author: Bernd Porr <mail@berndporr.me.uk>
  * Updated: 10 Oct 2014
  * Status: Stable
+ *
  * Connection scheme for the counter at the digital port:
  * 0=/CLK0, 1=UP/DOWN0, 2=RESET0, 4=/CLK1, 5=UP/DOWN1, 6=RESET1.
  * The sampling rate of the counter is approximately 500Hz.
@@ -79,11 +80,10 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/input.h>
-#include <linux/usb.h>
 #include <linux/fcntl.h>
 #include <linux/compiler.h>
 
-#include "../comedidev.h"
+#include "../comedi_usb.h"
 
 #include "comedi_fc.h"
 
@@ -633,8 +633,8 @@ static int receive_dux_commands(struct comedi_device *dev, unsigned int command)
 
 	for (i = 0; i < RETRIES; i++) {
 		ret = usb_bulk_msg(usb, usb_rcvbulkpipe(usb, 8),
-				      devpriv->insn_buf, SIZEINSNBUF,
-				      &nrec, BULK_TIMEOUT);
+				   devpriv->insn_buf, SIZEINSNBUF,
+				   &nrec, BULK_TIMEOUT);
 		if (ret < 0)
 			return ret;
 		if (le16_to_cpu(devpriv->insn_buf[0]) == command)
@@ -1041,7 +1041,6 @@ static int usbdux_dio_insn_bits(struct comedi_device *dev,
 				struct comedi_insn *insn,
 				unsigned int *data)
 {
-
 	struct usbdux_private *devpriv = dev->private;
 	int ret;
 

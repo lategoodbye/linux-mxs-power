@@ -45,13 +45,13 @@ int dso__read_binary_type_filename(const struct dso *dso,
 	case DSO_BINARY_TYPE__DEBUGLINK: {
 		char *debuglink;
 
-		strncpy(filename, dso->long_name, size);
-		debuglink = filename + dso->long_name_len;
+		len = __symbol__join_symfs(filename, size, dso->long_name);
+		debuglink = filename + len;
 		while (debuglink != filename && *debuglink != '/')
 			debuglink--;
 		if (*debuglink == '/')
 			debuglink++;
-		ret = filename__read_debuglink(dso->long_name, debuglink,
+		ret = filename__read_debuglink(filename, debuglink,
 					       size - (debuglink - filename));
 		}
 		break;
@@ -240,7 +240,7 @@ static int do_open(char *name)
 		if (fd >= 0)
 			return fd;
 
-		pr_debug("dso open failed, mmap: %s\n",
+		pr_debug("dso open failed: %s\n",
 			 strerror_r(errno, sbuf, sizeof(sbuf)));
 		if (!dso__data_open_cnt || errno != EMFILE)
 			break;
@@ -532,12 +532,8 @@ dso_cache__read(struct dso *dso, u64 offset, u8 *data, ssize_t size)
 			break;
 
 		cache_offset = offset & DSO__DATA_CACHE_MASK;
-		ret = -EINVAL;
 
-		if (-1 == lseek(dso->data.fd, cache_offset, SEEK_SET))
-			break;
-
-		ret = read(dso->data.fd, cache->data, DSO__DATA_CACHE_SIZE);
+		ret = pread(dso->data.fd, cache->data, DSO__DATA_CACHE_SIZE, cache_offset);
 		if (ret <= 0)
 			break;
 

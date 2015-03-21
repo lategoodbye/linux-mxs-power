@@ -19,6 +19,9 @@
 #include <net/af_ieee802154.h>
 #include <linux/ieee802154.h>
 #include <linux/skbuff.h>
+#include <linux/unaligned/memmove.h>
+
+#include <net/cfg802154.h>
 
 /* General MAC frame format:
  *  2 bytes: Frame Control
@@ -212,7 +215,8 @@ struct ieee802154_ops {
 					    unsigned long changed);
 	int		(*set_txpower)(struct ieee802154_hw *hw, int db);
 	int		(*set_lbt)(struct ieee802154_hw *hw, bool on);
-	int		(*set_cca_mode)(struct ieee802154_hw *hw, u8 mode);
+	int		(*set_cca_mode)(struct ieee802154_hw *hw,
+					const struct wpan_phy_cca *cca);
 	int		(*set_cca_ed_level)(struct ieee802154_hw *hw,
 					    s32 level);
 	int		(*set_csma_params)(struct ieee802154_hw *hw,
@@ -230,9 +234,7 @@ struct ieee802154_ops {
  */
 static inline void ieee802154_be64_to_le64(void *le64_dst, const void *be64_src)
 {
-	__le64 tmp = (__force __le64)swab64p(be64_src);
-
-	memcpy(le64_dst, &tmp, IEEE802154_EXTENDED_ADDR_LEN);
+	__put_unaligned_memmove64(swab64p(be64_src), le64_dst);
 }
 
 /**
@@ -242,9 +244,7 @@ static inline void ieee802154_be64_to_le64(void *le64_dst, const void *be64_src)
  */
 static inline void ieee802154_le64_to_be64(void *be64_dst, const void *le64_src)
 {
-	__be64 tmp = (__force __be64)swab64p(le64_src);
-
-	memcpy(be64_dst, &tmp, IEEE802154_EXTENDED_ADDR_LEN);
+	__put_unaligned_memmove64(swab64p(le64_src), be64_dst);
 }
 
 /* Basic interface to register ieee802154 hwice */

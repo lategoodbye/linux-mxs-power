@@ -7,6 +7,7 @@
 #include <linux/tracepoint.h>
 
 #include <linux/rtnetlink.h>
+#include <linux/etherdevice.h>
 #include <net/cfg80211.h>
 #include "core.h"
 
@@ -15,7 +16,7 @@
 	if (given_mac)						     \
 		memcpy(__entry->entry_mac, given_mac, ETH_ALEN);     \
 	else							     \
-		memset(__entry->entry_mac, 0, ETH_ALEN);	     \
+		eth_zero_addr(__entry->entry_mac);		     \
 	} while (0)
 #define MAC_PR_FMT "%pM"
 #define MAC_PR_ARG(entry_mac) (__entry->entry_mac)
@@ -1077,7 +1078,7 @@ TRACE_EVENT(rdev_auth,
 		if (req->bss)
 			MAC_ASSIGN(bssid, req->bss->bssid);
 		else
-			memset(__entry->bssid, 0, ETH_ALEN);
+			eth_zero_addr(__entry->bssid);
 		__entry->auth_type = req->auth_type;
 	),
 	TP_printk(WIPHY_PR_FMT ", " NETDEV_PR_FMT ", auth type: %d, bssid: " MAC_PR_FMT,
@@ -1103,7 +1104,7 @@ TRACE_EVENT(rdev_assoc,
 		if (req->bss)
 			MAC_ASSIGN(bssid, req->bss->bssid);
 		else
-			memset(__entry->bssid, 0, ETH_ALEN);
+			eth_zero_addr(__entry->bssid);
 		MAC_ASSIGN(prev_bssid, req->prev_bssid);
 		__entry->use_mfp = req->use_mfp;
 		__entry->flags = req->flags;
@@ -1153,7 +1154,7 @@ TRACE_EVENT(rdev_disassoc,
 		if (req->bss)
 			MAC_ASSIGN(bssid, req->bss->bssid);
 		else
-			memset(__entry->bssid, 0, ETH_ALEN);
+			eth_zero_addr(__entry->bssid);
 		__entry->reason_code = req->reason_code;
 		__entry->local_state_change = req->local_state_change;
 	),
@@ -1604,11 +1605,12 @@ TRACE_EVENT(rdev_return_int_survey_info,
 		WIPHY_ENTRY
 		CHAN_ENTRY
 		__field(int, ret)
-		__field(u64, channel_time)
-		__field(u64, channel_time_busy)
-		__field(u64, channel_time_ext_busy)
-		__field(u64, channel_time_rx)
-		__field(u64, channel_time_tx)
+		__field(u64, time)
+		__field(u64, time_busy)
+		__field(u64, time_ext_busy)
+		__field(u64, time_rx)
+		__field(u64, time_tx)
+		__field(u64, time_scan)
 		__field(u32, filled)
 		__field(s8, noise)
 	),
@@ -1616,22 +1618,24 @@ TRACE_EVENT(rdev_return_int_survey_info,
 		WIPHY_ASSIGN;
 		CHAN_ASSIGN(info->channel);
 		__entry->ret = ret;
-		__entry->channel_time = info->channel_time;
-		__entry->channel_time_busy = info->channel_time_busy;
-		__entry->channel_time_ext_busy = info->channel_time_ext_busy;
-		__entry->channel_time_rx = info->channel_time_rx;
-		__entry->channel_time_tx = info->channel_time_tx;
+		__entry->time = info->time;
+		__entry->time_busy = info->time_busy;
+		__entry->time_ext_busy = info->time_ext_busy;
+		__entry->time_rx = info->time_rx;
+		__entry->time_tx = info->time_tx;
+		__entry->time_scan = info->time_scan;
 		__entry->filled = info->filled;
 		__entry->noise = info->noise;
 	),
 	TP_printk(WIPHY_PR_FMT ", returned: %d, " CHAN_PR_FMT
 		  ", channel time: %llu, channel time busy: %llu, "
 		  "channel time extension busy: %llu, channel time rx: %llu, "
-		  "channel time tx: %llu, filled: %u, noise: %d",
+		  "channel time tx: %llu, scan time: %llu, filled: %u, noise: %d",
 		  WIPHY_PR_ARG, __entry->ret, CHAN_PR_ARG,
-		  __entry->channel_time, __entry->channel_time_busy,
-		  __entry->channel_time_ext_busy, __entry->channel_time_rx,
-		  __entry->channel_time_tx, __entry->filled, __entry->noise)
+		  __entry->time, __entry->time_busy,
+		  __entry->time_ext_busy, __entry->time_rx,
+		  __entry->time_tx, __entry->time_scan,
+		  __entry->filled, __entry->noise)
 );
 
 TRACE_EVENT(rdev_tdls_oper,

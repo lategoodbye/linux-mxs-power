@@ -80,16 +80,13 @@
 #include <linux/list.h>
 #include <linux/integrity.h>
 #include <linux/proc_ns.h>
+#include <linux/io.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
-
-#ifdef CONFIG_X86_LOCAL_APIC
-#include <asm/smp.h>
-#endif
 
 static int kernel_init(void *);
 
@@ -147,7 +144,7 @@ EXPORT_SYMBOL_GPL(static_key_initialized);
  * rely on the BIOS and skip the reset operation.
  *
  * This is useful if kernel is booting in an unreliable environment.
- * For ex. kdump situaiton where previous kernel has crashed, BIOS has been
+ * For ex. kdump situation where previous kernel has crashed, BIOS has been
  * skipped and devices will be in unknown state.
  */
 unsigned int reset_devices;
@@ -351,15 +348,6 @@ __setup("rdinit=", rdinit_setup);
 
 #ifndef CONFIG_SMP
 static const unsigned int setup_max_cpus = NR_CPUS;
-#ifdef CONFIG_X86_LOCAL_APIC
-static void __init smp_init(void)
-{
-	APIC_init_uniprocessor();
-}
-#else
-#define smp_init()	do { } while (0)
-#endif
-
 static inline void setup_nr_cpu_ids(void) { }
 static inline void smp_prepare_cpus(unsigned int maxcpus) { }
 #endif
@@ -497,6 +485,7 @@ static void __init mm_init(void)
 	percpu_init_late();
 	pgtable_init();
 	vmalloc_init();
+	ioremap_huge_init();
 }
 
 asmlinkage __visible void __init start_kernel(void)
@@ -667,8 +656,8 @@ asmlinkage __visible void __init start_kernel(void)
 	page_writeback_init();
 	proc_root_init();
 	nsfs_init();
-	cgroup_init();
 	cpuset_init();
+	cgroup_init();
 	taskstats_init_early();
 	delayacct_init();
 
@@ -966,13 +955,8 @@ static int __ref kernel_init(void *unused)
 		ret = run_init_process(execute_command);
 		if (!ret)
 			return 0;
-#ifndef CONFIG_INIT_FALLBACK
 		panic("Requested init %s failed (error %d).",
 		      execute_command, ret);
-#else
-		pr_err("Failed to execute %s (error %d).  Attempting defaults...\n",
-		       execute_command, ret);
-#endif
 	}
 	if (!try_to_run_init_process("/sbin/init") ||
 	    !try_to_run_init_process("/etc/init") ||

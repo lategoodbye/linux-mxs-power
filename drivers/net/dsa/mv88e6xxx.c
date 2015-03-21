@@ -85,6 +85,12 @@ int mv88e6xxx_reg_read(struct dsa_switch *ds, int addr, int reg)
 	ret = __mv88e6xxx_reg_read(bus, ds->pd->sw_addr, addr, reg);
 	mutex_unlock(&ps->smi_mutex);
 
+	if (ret < 0)
+		return ret;
+
+	dev_dbg(ds->master_dev, "<- addr: 0x%.2x reg: 0x%.2x val: 0x%.4x\n",
+		addr, reg, ret);
+
 	return ret;
 }
 
@@ -127,6 +133,9 @@ int mv88e6xxx_reg_write(struct dsa_switch *ds, int addr, int reg, u16 val)
 
 	if (bus == NULL)
 		return -EINVAL;
+
+	dev_dbg(ds->master_dev, "-> addr: 0x%.2x reg: 0x%.2x val: 0x%.4x\n",
+		addr, reg, val);
 
 	mutex_lock(&ps->smi_mutex);
 	ret = __mv88e6xxx_reg_write(bus, ds->pd->sw_addr, addr, reg, val);
@@ -586,6 +595,110 @@ error:
 	return ret;
 }
 #endif /* CONFIG_NET_DSA_HWMON */
+
+static int mv88e6xxx_wait(struct dsa_switch *ds, int reg, int offset, u16 mask)
+{
+	unsigned long timeout = jiffies + HZ / 10;
+
+	while (time_before(jiffies, timeout)) {
+		int ret;
+
+		ret = REG_READ(reg, offset);
+		if (!(ret & mask))
+			return 0;
+
+		usleep_range(1000, 2000);
+	}
+	return -ETIMEDOUT;
+}
+
+int mv88e6xxx_phy_wait(struct dsa_switch *ds)
+{
+	return mv88e6xxx_wait(ds, REG_GLOBAL2, 0x18, 0x8000);
+}
+
+int mv88e6xxx_eeprom_load_wait(struct dsa_switch *ds)
+{
+	return mv88e6xxx_wait(ds, REG_GLOBAL2, 0x14, 0x0800);
+}
+
+int mv88e6xxx_eeprom_busy_wait(struct dsa_switch *ds)
+{
+	return mv88e6xxx_wait(ds, REG_GLOBAL2, 0x14, 0x8000);
+}
+
+int mv88e6xxx_phy_read_indirect(struct dsa_switch *ds, int addr, int regnum)
+{
+	int ret;
+
+	REG_WRITE(REG_GLOBAL2, 0x18, 0x9800 | (addr << 5) | regnum);
+
+	ret = mv88e6xxx_phy_wait(ds);
+	if (ret < 0)
+		return ret;
+
+	return REG_READ(REG_GLOBAL2, 0x19);
+}
+
+int mv88e6xxx_phy_write_indirect(struct dsa_switch *ds, int addr, int regnum,
+				 u16 val)
+{
+	REG_WRITE(REG_GLOBAL2, 0x19, val);
+	REG_WRITE(REG_GLOBAL2, 0x18, 0x9400 | (addr << 5) | regnum);
+
+	return mv88e6xxx_phy_wait(ds);
+}
+
+int mv88e6xxx_get_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e)
+{
+	int reg;
+
+	reg = mv88e6xxx_phy_read_indirect(ds, port, 16);
+	if (reg < 0)
+		return -EOPNOTSUPP;
+
+	e->eee_enabled = !!(reg & 0x0200);
+	e->tx_lpi_enabled = !!(reg & 0x0100);
+
+	reg = REG_READ(REG_PORT(port), 0);
+	e->eee_active = !!(reg & 0x0040);
+
+	return 0;
+}
+
+static int mv88e6xxx_eee_enable_set(struct dsa_switch *ds, int port,
+				    bool eee_enabled, bool tx_lpi_enabled)
+{
+	int reg, nreg;
+
+	reg = mv88e6xxx_phy_read_indirect(ds, port, 16);
+	if (reg < 0)
+		return reg;
+
+	nreg = reg & ~0x0300;
+	if (eee_enabled)
+		nreg |= 0x0200;
+	if (tx_lpi_enabled)
+		nreg |= 0x0100;
+
+	if (nreg != reg)
+		return mv88e6xxx_phy_write_indirect(ds, port, 16, nreg);
+
+	return 0;
+}
+
+int mv88e6xxx_set_eee(struct dsa_switch *ds, int port,
+		      struct phy_device *phydev, struct ethtool_eee *e)
+{
+	int ret;
+
+	ret = mv88e6xxx_eee_enable_set(ds, port, e->eee_enabled,
+				       e->tx_lpi_enabled);
+	if (ret)
+		return -EOPNOTSUPP;
+
+	return 0;
+}
 
 static int __init mv88e6xxx_init(void)
 {

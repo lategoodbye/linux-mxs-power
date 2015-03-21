@@ -167,35 +167,6 @@ void setKey(struct net_device *dev, u8 EntryNo, u8 KeyIndex, u16 KeyType,
 	RT_TRACE(COMP_SEC, "=========>after set key, usconfig:%x\n", usConfig);
 }
 
-void CAM_read_entry(struct net_device *dev, u32 iIndex)
-{
-	u32 target_command = 0;
-	u32 target_content = 0;
-	u8 entry_i = 0;
-	u32 ulStatus;
-	s32 i = 100;
-
-	for (entry_i = 0; entry_i < CAM_CONTENT_COUNT; entry_i++) {
-		target_command = entry_i+CAM_CONTENT_COUNT*iIndex;
-		target_command = target_command | BIT31;
-
-		while ((i--) >= 0) {
-			ulStatus = read_nic_dword(dev, RWCAM);
-			if (ulStatus & BIT31)
-				continue;
-			else
-				break;
-		}
-		write_nic_dword(dev, RWCAM, target_command);
-		RT_TRACE(COMP_SEC, "CAM_read_entry(): WRITE A0: %x\n",
-			 target_command);
-		target_content = read_nic_dword(dev, RCAMO);
-		RT_TRACE(COMP_SEC, "CAM_read_entry(): WRITE A8: %x\n",
-			 target_content);
-	}
-	printk(KERN_INFO "\n");
-}
-
 void CamRestoreAllEntry(struct net_device *dev)
 {
 	u8 EntryId = 0;
@@ -221,7 +192,7 @@ void CamRestoreAllEntry(struct net_device *dev)
 		for (EntryId = 0; EntryId < 4; EntryId++) {
 			MacAddr = CAM_CONST_ADDR[EntryId];
 			if (priv->rtllib->swcamtable[EntryId].bused) {
-				setKey(dev, EntryId , EntryId,
+				setKey(dev, EntryId, EntryId,
 				       priv->rtllib->pairwise_key_type, MacAddr,
 				       0, (u32 *)(&priv->rtllib->swcamtable
 				      [EntryId].key_buf[0]));
@@ -283,7 +254,7 @@ void CamRestoreAllEntry(struct net_device *dev)
 		MacAddr = CAM_CONST_BROAD;
 		for (EntryId = 1; EntryId < 4; EntryId++) {
 			if (priv->rtllib->swcamtable[EntryId].bused) {
-				setKey(dev, EntryId , EntryId,
+				setKey(dev, EntryId, EntryId,
 				       priv->rtllib->group_key_type,
 				       MacAddr, 0,
 				       (u32 *)(&priv->rtllib->swcamtable[EntryId].key_buf[0]));
@@ -292,7 +263,7 @@ void CamRestoreAllEntry(struct net_device *dev)
 
 		if (priv->rtllib->iw_mode == IW_MODE_ADHOC) {
 			if (priv->rtllib->swcamtable[0].bused) {
-				setKey(dev, 0 , 0,
+				setKey(dev, 0, 0,
 					priv->rtllib->group_key_type,
 					CAM_CONST_ADDR[0], 0,
 					(u32 *)(&priv->rtllib->swcamtable[0].key_buf[0]));

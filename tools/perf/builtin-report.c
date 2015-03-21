@@ -86,17 +86,6 @@ static int report__config(const char *var, const char *value, void *cb)
 	return perf_default_config(var, value, cb);
 }
 
-static void report__inc_stats(struct report *rep, struct hist_entry *he)
-{
-	/*
-	 * The @he is either of a newly created one or an existing one
-	 * merging current sample.  We only want to count a new one so
-	 * checking ->nr_events being 1.
-	 */
-	if (he->stat.nr_events == 1)
-		rep->nr_entries++;
-}
-
 static int hist_iter__report_callback(struct hist_entry_iter *iter,
 				      struct addr_location *al, bool single,
 				      void *arg)
@@ -107,8 +96,6 @@ static int hist_iter__report_callback(struct hist_entry_iter *iter,
 	struct perf_evsel *evsel = iter->evsel;
 	struct mem_info *mi;
 	struct branch_info *bi;
-
-	report__inc_stats(rep, he);
 
 	if (!ui__has_annotation())
 		return 0;
@@ -262,6 +249,8 @@ static int report__setup_sample_type(struct report *rep)
 		if ((sample_type & PERF_SAMPLE_REGS_USER) &&
 		    (sample_type & PERF_SAMPLE_STACK_USER))
 			callchain_param.record_mode = CALLCHAIN_DWARF;
+		else if (sample_type & PERF_SAMPLE_BRANCH_STACK)
+			callchain_param.record_mode = CALLCHAIN_LBR;
 		else
 			callchain_param.record_mode = CALLCHAIN_FP;
 	}
@@ -493,11 +482,14 @@ static int __cmd_report(struct report *rep)
 	if (ret)
 		return ret;
 
-	ret = perf_session__process_events(session, &rep->tool);
+	ret = perf_session__process_events(session);
 	if (ret)
 		return ret;
 
 	report__warn_kptr_restrict(rep);
+
+	evlist__for_each(session->evlist, pos)
+		rep->nr_entries += evsel__hists(pos)->nr_entries;
 
 	if (use_browser == 0) {
 		if (verbose > 3)
@@ -776,7 +768,7 @@ repeat:
 	 * 0/1 means the user chose a mode.
 	 */
 	if (((branch_mode == -1 && has_br_stack) || branch_mode == 1) &&
-	    branch_call_mode == -1) {
+	    !branch_call_mode) {
 		sort__mode = SORT_MODE__BRANCH;
 		symbol_conf.cumulate_callchain = false;
 	}

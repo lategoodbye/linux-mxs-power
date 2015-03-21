@@ -180,7 +180,7 @@ static int wm9712_hp_mixer_put(struct snd_kcontrol *kcontrol,
 	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kcontrol);
 	struct snd_soc_codec *codec = snd_soc_dapm_to_codec(dapm);
 	struct wm9712_priv *wm9712 = snd_soc_codec_get_drvdata(codec);
-	unsigned int val = ucontrol->value.enumerated.item[0];
+	unsigned int val = ucontrol->value.integer.value[0];
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
 	unsigned int mixer, mask, shift, old;
@@ -193,7 +193,7 @@ static int wm9712_hp_mixer_put(struct snd_kcontrol *kcontrol,
 
 	mutex_lock(&wm9712->lock);
 	old = wm9712->hp_mixer[mixer];
-	if (ucontrol->value.enumerated.item[0])
+	if (ucontrol->value.integer.value[0])
 		wm9712->hp_mixer[mixer] |= mask;
 	else
 		wm9712->hp_mixer[mixer] &= ~mask;
@@ -231,7 +231,7 @@ static int wm9712_hp_mixer_get(struct snd_kcontrol *kcontrol,
 	mixer = mc->shift >> 8;
 	shift = mc->shift & 0xff;
 
-	ucontrol->value.enumerated.item[0] =
+	ucontrol->value.integer.value[0] =
 		(wm9712->hp_mixer[mixer] >> shift) & 1;
 
 	return 0;
@@ -666,7 +666,7 @@ static int wm9712_soc_probe(struct snd_soc_codec *codec)
 	struct wm9712_priv *wm9712 = snd_soc_codec_get_drvdata(codec);
 	int ret = 0;
 
-	wm9712->ac97 = snd_soc_new_ac97_codec(codec);
+	wm9712->ac97 = snd_soc_alloc_ac97_codec(codec);
 	if (IS_ERR(wm9712->ac97)) {
 		ret = PTR_ERR(wm9712->ac97);
 		dev_err(codec->dev, "Failed to register AC97 codec: %d\n", ret);
@@ -675,15 +675,19 @@ static int wm9712_soc_probe(struct snd_soc_codec *codec)
 
 	ret = wm9712_reset(codec, 0);
 	if (ret < 0)
-		goto reset_err;
+		goto err_put_device;
+
+	ret = device_add(&wm9712->ac97->dev);
+	if (ret)
+		goto err_put_device;
 
 	/* set alc mux to none */
 	ac97_write(codec, AC97_VIDEO, ac97_read(codec, AC97_VIDEO) | 0x3000);
 
 	return 0;
 
-reset_err:
-	snd_soc_free_ac97_codec(wm9712->ac97);
+err_put_device:
+	put_device(&wm9712->ac97->dev);
 	return ret;
 }
 

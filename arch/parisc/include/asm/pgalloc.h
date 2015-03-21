@@ -38,6 +38,7 @@ static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 		/* The first pmd entry also is marked with _PAGE_GATEWAY as
 		 * a signal that this pmd may not be freed */
 		__pgd_val_set(*pgd, PxD_FLAG_ATTACHED);
+		mm_inc_nr_pmds(mm);
 #endif
 	}
 	return actual_pgd;
@@ -51,7 +52,7 @@ static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 	free_pages((unsigned long)pgd, PGD_ALLOC_ORDER);
 }
 
-#if PT_NLEVELS == 3
+#if CONFIG_PGTABLE_LEVELS == 3
 
 /* Three Level Page Table Support for pmd's */
 

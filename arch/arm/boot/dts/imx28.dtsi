@@ -1050,6 +1050,19 @@
 				interrupts = <6>;
 				ranges;
 
+				dcdc: regulator@80044010 {
+					reg = <0x80044010 0x10>,
+					      <0x80044090 0x10>,
+					      <0x800440c0 0x10>;
+					reg-names = "base-address",
+						    "misc-address",
+						    "status-address";
+					compatible = "fsl,imx28-dcdc";
+					regulator-name = "dcdc";
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
 				reg_vddd: regulator@80044040 {
 					reg = <0x80044040 0x10>,
 					      <0x80044010 0x10>,
@@ -1270,6 +1283,7 @@
 			interrupts = <92>;
 			clocks = <&clks 61>;
 			fsl,usbphy = <&usbphy1>;
+			dr_mode = "host";
 			status = "disabled";
 		};
 

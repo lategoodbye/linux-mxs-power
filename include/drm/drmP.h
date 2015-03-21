@@ -104,6 +104,9 @@ struct dma_buf_attachment;
  * PRIME: used in the prime code.
  *	  This is the category used by the DRM_DEBUG_PRIME() macro.
  *
+ * ATOMIC: used in the atomic code.
+ *	  This is the category used by the DRM_DEBUG_ATOMIC() macro.
+ *
  * Enabling verbose debug messages is done through the drm.debug parameter,
  * each category being enabled by a bit.
  *
@@ -121,6 +124,7 @@ struct dma_buf_attachment;
 #define DRM_UT_DRIVER		0x02
 #define DRM_UT_KMS		0x04
 #define DRM_UT_PRIME		0x08
+#define DRM_UT_ATOMIC		0x10
 
 extern __printf(2, 3)
 void drm_ut_debug_printk(const char *function_name,
@@ -143,6 +147,7 @@ void drm_err(const char *format, ...);
 #define DRIVER_MODESET     0x2000
 #define DRIVER_PRIME       0x4000
 #define DRIVER_RENDER      0x8000
+#define DRIVER_ATOMIC      0x10000
 
 /***********************************************************************/
 /** \name Macros to make printk easier */
@@ -204,6 +209,11 @@ void drm_err(const char *format, ...);
 #define DRM_DEBUG_PRIME(fmt, args...)					\
 	do {								\
 		if (unlikely(drm_debug & DRM_UT_PRIME))			\
+			drm_ut_debug_printk(__func__, fmt, ##args);	\
+	} while (0)
+#define DRM_DEBUG_ATOMIC(fmt, args...)					\
+	do {								\
+		if (unlikely(drm_debug & DRM_UT_ATOMIC))		\
 			drm_ut_debug_printk(__func__, fmt, ##args);	\
 	} while (0)
 
@@ -283,6 +293,8 @@ struct drm_file {
 	 * in the plane list
 	 */
 	unsigned universal_planes:1;
+	/* true if client understands atomic properties */
+	unsigned atomic:1;
 
 	struct pid *pid;
 	kuid_t uid;
@@ -744,8 +756,6 @@ struct drm_device {
 
 	/** \name Context support */
 	/*@{ */
-	bool irq_enabled;		/**< True if irq handler is enabled */
-	int irq;
 
 	__volatile__ long context_flag;	/**< Context swapping flag */
 	int last_context;		/**< Last current context */
@@ -753,6 +763,8 @@ struct drm_device {
 
 	/** \name VBLANK IRQ support */
 	/*@{ */
+	bool irq_enabled;
+	int irq;
 
 	/*
 	 * At load time, disabling the vblank interrupt won't be allowed since
@@ -919,6 +931,7 @@ extern void drm_crtc_wait_one_vblank(struct drm_crtc *crtc);
 extern void drm_vblank_off(struct drm_device *dev, int crtc);
 extern void drm_vblank_on(struct drm_device *dev, int crtc);
 extern void drm_crtc_vblank_off(struct drm_crtc *crtc);
+extern void drm_crtc_vblank_reset(struct drm_crtc *crtc);
 extern void drm_crtc_vblank_on(struct drm_crtc *crtc);
 extern void drm_vblank_cleanup(struct drm_device *dev);
 
@@ -954,6 +967,7 @@ extern void drm_master_put(struct drm_master **master);
 extern void drm_put_dev(struct drm_device *dev);
 extern void drm_unplug_dev(struct drm_device *dev);
 extern unsigned int drm_debug;
+extern bool drm_atomic;
 
 				/* Debugfs support */
 #if defined(CONFIG_DEBUG_FS)

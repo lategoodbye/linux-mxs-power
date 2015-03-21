@@ -280,6 +280,10 @@ static const match_table_t cifs_smb_version_tokens = {
 	{ Smb_21, SMB21_VERSION_STRING },
 	{ Smb_30, SMB30_VERSION_STRING },
 	{ Smb_302, SMB302_VERSION_STRING },
+#ifdef CONFIG_CIFS_SMB31
+	{ Smb_31, SMB31_VERSION_STRING },
+#endif /* SMB31 */
+	{ Smb_version_err, NULL }
 };
 
 static int ip_connect(struct TCP_Server_Info *server);
@@ -773,8 +777,7 @@ static void clean_demultiplex_info(struct TCP_Server_Info *server)
 
 	length = atomic_dec_return(&tcpSesAllocCount);
 	if (length > 0)
-		mempool_resize(cifs_req_poolp, length + cifs_min_rcv,
-				GFP_KERNEL);
+		mempool_resize(cifs_req_poolp, length + cifs_min_rcv);
 }
 
 static int
@@ -848,8 +851,7 @@ cifs_demultiplex_thread(void *p)
 
 	length = atomic_inc_return(&tcpSesAllocCount);
 	if (length > 1)
-		mempool_resize(cifs_req_poolp, length + cifs_min_rcv,
-				GFP_KERNEL);
+		mempool_resize(cifs_req_poolp, length + cifs_min_rcv);
 
 	set_freezable();
 	while (server->tcpStatus != CifsExiting) {
@@ -1134,6 +1136,12 @@ cifs_parse_smb_version(char *value, struct smb_vol *vol)
 		vol->ops = &smb30_operations; /* currently identical with 3.0 */
 		vol->vals = &smb302_values;
 		break;
+#ifdef CONFIG_CIFS_SMB31
+	case Smb_31:
+		vol->ops = &smb30_operations; /* currently identical with 3.0 */
+		vol->vals = &smb31_values;
+		break;
+#endif /* SMB31 */
 #endif
 	default:
 		cifs_dbg(VFS, "Unknown vers= option specified: %s\n", value);
@@ -3446,7 +3454,7 @@ cifs_mount(struct cifs_sb_info *cifs_sb, struct smb_vol *volume_info)
 	int referral_walks_count = 0;
 #endif
 
-	rc = bdi_setup_and_register(&cifs_sb->bdi, "cifs", BDI_CAP_MAP_COPY);
+	rc = bdi_setup_and_register(&cifs_sb->bdi, "cifs");
 	if (rc)
 		return rc;
 

@@ -25,12 +25,12 @@
  *  need in order to call the callback function that supplies the /proc read
  *  info for that file.
  */
-typedef struct {
+struct proc_dir_entry_context {
 	void (*show_property)(struct seq_file *, void *, int);
 	MYPROCOBJECT *procObject;
 	int propertyIndex;
 
-} PROCDIRENTRYCONTEXT;
+};
 
 /** This describes the attributes of a tree rooted at
  *  <procDirRoot>/<name[0]>/<name[1]>/...
@@ -86,7 +86,7 @@ struct MYPROCOBJECT_Tag {
 
 	/** this is a holding area for the context information that is needed
 	 *  to run the /proc callback function */
-	PROCDIRENTRYCONTEXT *procDirPropertyContexts;
+	struct proc_dir_entry_context *procDirPropertyContexts;
 };
 
 
@@ -96,8 +96,6 @@ createProcDir(const char *name, struct proc_dir_entry *parent)
 {
 	struct proc_dir_entry *p = proc_mkdir_mode(name, S_IFDIR, parent);
 
-	if (p == NULL)
-		ERRDRV("failed to create /proc directory %s", name);
 	return p;
 }
 
@@ -107,8 +105,6 @@ createProcFile(const char *name, struct proc_dir_entry *parent,
 {
 	struct proc_dir_entry *p = proc_create_data(name, 0, parent,
 						    fops, data);
-	if (p == NULL)
-		ERRDRV("failed to create /proc file %s", name);
 	return p;
 }
 
@@ -137,19 +133,16 @@ MYPROCTYPE *visor_proc_CreateType(struct proc_dir_entry *procDirRoot,
 	MYPROCTYPE *rc = NULL, *type = NULL;
 	struct proc_dir_entry *parent = NULL;
 
-	if (procDirRoot == NULL) {
-		ERRDRV("procDirRoot cannot be NULL!\n");
+	if (procDirRoot == NULL)
 		goto Away;
-	}
-	if (name == NULL || name[0] == NULL) {
-		ERRDRV("name must contain at least 1 node name!\n");
+
+	if (name == NULL || name[0] == NULL)
 		goto Away;
-	}
+
 	type = kzalloc(sizeof(MYPROCTYPE), GFP_KERNEL | __GFP_NORETRY);
-	if (type == NULL) {
-		ERRDRV("out of memory\n");
+	if (type == NULL)
 		goto Away;
-	}
+
 	type->name = name;
 	type->propertyNames = propertyNames;
 	type->nProperties = 0;
@@ -161,13 +154,11 @@ MYPROCTYPE *visor_proc_CreateType(struct proc_dir_entry *procDirRoot,
 			type->nProperties++;
 	while (type->name[type->nNames] != NULL)
 		type->nNames++;
-	type->procDirs = kzalloc((type->nNames + 1) *
+	type->procDirs = kcalloc((type->nNames + 1),
 				 sizeof(struct proc_dir_entry *),
 				 GFP_KERNEL | __GFP_NORETRY);
-	if (type->procDirs == NULL) {
-		ERRDRV("out of memory\n");
+	if (type->procDirs == NULL)
 		goto Away;
-	}
 	parent = procDirRoot;
 	for (i = 0; i < type->nNames; i++) {
 		type->procDirs[i] = createProcDir(type->name[i], parent);
@@ -226,15 +217,13 @@ MYPROCOBJECT *visor_proc_CreateObject(MYPROCTYPE *type,
 	MYPROCOBJECT *obj = NULL, *rc = NULL;
 	int i = 0;
 
-	if (type == NULL) {
-		ERRDRV("type cannot be NULL\n");
+	if (type == NULL)
 		goto Away;
-	}
+
 	obj = kzalloc(sizeof(MYPROCOBJECT), GFP_KERNEL | __GFP_NORETRY);
-	if (obj == NULL) {
-		ERRDRV("out of memory\n");
+	if (obj == NULL)
 		goto Away;
-	}
+
 	obj->type = type;
 	obj->context = context;
 	if (name == NULL) {
@@ -245,7 +234,6 @@ MYPROCOBJECT *visor_proc_CreateObject(MYPROCTYPE *type,
 		obj->name = kmalloc(obj->namesize, GFP_KERNEL | __GFP_NORETRY);
 		if (obj->name == NULL) {
 			obj->namesize = 0;
-			ERRDRV("out of memory\n");
 			goto Away;
 		}
 		strcpy(obj->name, name);
@@ -254,19 +242,16 @@ MYPROCOBJECT *visor_proc_CreateObject(MYPROCTYPE *type,
 			goto Away;
 	}
 	obj->procDirPropertyContexts =
-		kzalloc((type->nProperties + 1) * sizeof(PROCDIRENTRYCONTEXT),
+		kcalloc((type->nProperties + 1),
+			sizeof(struct proc_dir_entry_context),
 			GFP_KERNEL | __GFP_NORETRY);
-	if (obj->procDirPropertyContexts == NULL) {
-		ERRDRV("out of memory\n");
+	if (obj->procDirPropertyContexts == NULL)
 		goto Away;
-	}
-	obj->procDirProperties =
-		kzalloc((type->nProperties + 1) * sizeof(struct proc_dir_entry *),
-			GFP_KERNEL | __GFP_NORETRY);
-	if (obj->procDirProperties == NULL) {
-		ERRDRV("out of memory\n");
+	obj->procDirProperties = kcalloc((type->nProperties + 1),
+					 sizeof(struct proc_dir_entry *),
+					 GFP_KERNEL | __GFP_NORETRY);
+	if (obj->procDirProperties == NULL)
 		goto Away;
-	}
 	for (i = 0; i < type->nProperties; i++) {
 		obj->procDirPropertyContexts[i].procObject = obj;
 		obj->procDirPropertyContexts[i].propertyIndex = i;
@@ -276,8 +261,8 @@ MYPROCOBJECT *visor_proc_CreateObject(MYPROCTYPE *type,
 			/* only create properties that have names */
 			obj->procDirProperties[i] =
 				createProcFile(type->propertyNames[i],
-					       obj->procDir, &proc_fops,
-					       &obj->procDirPropertyContexts[i]);
+					obj->procDir, &proc_fops,
+					&obj->procDirPropertyContexts[i]);
 			if (obj->procDirProperties[i] == NULL) {
 				rc = NULL;
 				goto Away;
@@ -340,12 +325,10 @@ EXPORT_SYMBOL_GPL(visor_proc_DestroyObject);
 
 static int seq_show(struct seq_file *seq, void *offset)
 {
-	PROCDIRENTRYCONTEXT *ctx = (PROCDIRENTRYCONTEXT *)(seq->private);
+	struct proc_dir_entry_context *ctx = seq->private;
 
-	if (ctx == NULL) {
-		ERRDRV("I don't have a freakin' clue...");
+	if (ctx == NULL)
 		return 0;
-	}
 	(*ctx->show_property)(seq, ctx->procObject->context,
 			      ctx->propertyIndex);
 	return 0;

@@ -46,7 +46,7 @@ static int get_value(struct parse_opt_ctx_t *p,
 		return opterror(opt, "is not usable", flags);
 
 	if (opt->flags & PARSE_OPT_EXCLUSIVE) {
-		if (p->excl_opt) {
+		if (p->excl_opt && p->excl_opt != opt) {
 			char msg[128];
 
 			if (((flags & OPT_SHORT) && p->excl_opt->short_name) ||
@@ -505,13 +505,18 @@ int parse_options_subcommand(int argc, const char **argv, const struct option *o
 		break;
 	case PARSE_OPT_LIST_OPTS:
 		while (options->type != OPTION_END) {
-			printf("--%s ", options->long_name);
+			if (options->long_name)
+				printf("--%s ", options->long_name);
 			options++;
 		}
+		putchar('\n');
 		exit(130);
 	case PARSE_OPT_LIST_SUBCMDS:
-		for (int i = 0; subcommands[i]; i++)
-			printf("%s ", subcommands[i]);
+		if (subcommands) {
+			for (int i = 0; subcommands[i]; i++)
+				printf("%s ", subcommands[i]);
+		}
+		putchar('\n');
 		exit(130);
 	default: /* PARSE_OPT_UNKNOWN */
 		if (ctx.argv[0][1] == '-') {

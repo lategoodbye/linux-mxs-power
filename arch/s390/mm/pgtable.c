@@ -27,14 +27,8 @@
 #include <asm/tlbflush.h>
 #include <asm/mmu_context.h>
 
-#ifndef CONFIG_64BIT
-#define ALLOC_ORDER	1
-#define FRAG_MASK	0x0f
-#else
 #define ALLOC_ORDER	2
 #define FRAG_MASK	0x03
-#endif
-
 
 unsigned long *crst_table_alloc(struct mm_struct *mm)
 {
@@ -50,7 +44,6 @@ void crst_table_free(struct mm_struct *mm, unsigned long *table)
 	free_pages((unsigned long) table, ALLOC_ORDER);
 }
 
-#ifdef CONFIG_64BIT
 static void __crst_table_upgrade(void *arg)
 {
 	struct mm_struct *mm = arg;
@@ -140,7 +133,6 @@ void crst_table_downgrade(struct mm_struct *mm, unsigned long limit)
 	if (current->active_mm == mm)
 		set_user_asce(mm);
 }
-#endif
 
 #ifdef CONFIG_PGSTE
 
@@ -527,7 +519,7 @@ int __gmap_link(struct gmap *gmap, unsigned long gaddr, unsigned long vmaddr)
 		table += (gaddr >> 53) & 0x7ff;
 		if ((*table & _REGION_ENTRY_INVALID) &&
 		    gmap_alloc_table(gmap, table, _REGION2_ENTRY_EMPTY,
-				     gaddr & 0xffe0000000000000))
+				     gaddr & 0xffe0000000000000UL))
 			return -ENOMEM;
 		table = (unsigned long *)(*table & _REGION_ENTRY_ORIGIN);
 	}
@@ -535,7 +527,7 @@ int __gmap_link(struct gmap *gmap, unsigned long gaddr, unsigned long vmaddr)
 		table += (gaddr >> 42) & 0x7ff;
 		if ((*table & _REGION_ENTRY_INVALID) &&
 		    gmap_alloc_table(gmap, table, _REGION3_ENTRY_EMPTY,
-				     gaddr & 0xfffffc0000000000))
+				     gaddr & 0xfffffc0000000000UL))
 			return -ENOMEM;
 		table = (unsigned long *)(*table & _REGION_ENTRY_ORIGIN);
 	}
@@ -543,7 +535,7 @@ int __gmap_link(struct gmap *gmap, unsigned long gaddr, unsigned long vmaddr)
 		table += (gaddr >> 31) & 0x7ff;
 		if ((*table & _REGION_ENTRY_INVALID) &&
 		    gmap_alloc_table(gmap, table, _SEGMENT_ENTRY_EMPTY,
-				     gaddr & 0xffffffff80000000))
+				     gaddr & 0xffffffff80000000UL))
 			return -ENOMEM;
 		table = (unsigned long *)(*table & _REGION_ENTRY_ORIGIN);
 	}

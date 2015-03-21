@@ -550,7 +550,6 @@ static int macvlan_hard_header(struct sk_buff *skb, struct net_device *dev,
 
 static const struct header_ops macvlan_hard_header_ops = {
 	.create  	= macvlan_hard_header,
-	.rebuild	= eth_rebuild_header,
 	.parse		= eth_header_parse,
 	.cache		= eth_header_cache,
 	.cache_update	= eth_header_cache_update,
@@ -1471,11 +1470,17 @@ int macvlan_link_register(struct rtnl_link_ops *ops)
 };
 EXPORT_SYMBOL_GPL(macvlan_link_register);
 
+static struct net *macvlan_get_link_net(const struct net_device *dev)
+{
+	return dev_net(macvlan_dev_real_dev(dev));
+}
+
 static struct rtnl_link_ops macvlan_link_ops = {
 	.kind		= "macvlan",
 	.setup		= macvlan_setup,
 	.newlink	= macvlan_newlink,
 	.dellink	= macvlan_dellink,
+	.get_link_net	= macvlan_get_link_net,
 };
 
 static int macvlan_device_event(struct notifier_block *unused,

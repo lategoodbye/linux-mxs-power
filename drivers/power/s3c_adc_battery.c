@@ -316,7 +316,8 @@ static int s3c_adc_bat_probe(struct platform_device *pdev)
 		goto err_reg_main;
 	}
 	if (pdata->backup_volt_mult) {
-		struct power_supply_config psy_cfg = { .drv_data = &backup_bat, };
+		const struct power_supply_config psy_cfg
+						= { .drv_data = &backup_bat, };
 
 		backup_bat.client = client;
 		backup_bat.pdata = pdev->dev.platform_data;

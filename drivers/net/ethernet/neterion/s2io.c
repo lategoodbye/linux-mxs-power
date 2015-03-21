@@ -1343,7 +1343,7 @@ static int init_nic(struct s2io_nic *nic)
 		TX_PA_CFG_IGNORE_L2_ERR;
 	writeq(val64, &bar0->tx_pa_cfg);
 
-	/* Rx DMA intialization. */
+	/* Rx DMA initialization. */
 	val64 = 0;
 	for (i = 0; i < config->rx_ring_num; i++) {
 		struct rx_ring_config *rx_cfg = &config->rx_cfg[i];
@@ -4045,8 +4045,8 @@ static netdev_tx_t s2io_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	queue = 0;
-	if (vlan_tx_tag_present(skb))
-		vlan_tag = vlan_tx_tag_get(skb);
+	if (skb_vlan_tag_present(skb))
+		vlan_tag = skb_vlan_tag_get(skb);
 	if (sp->config.tx_steering_type == TX_DEFAULT_STEERING) {
 		if (skb->protocol == htons(ETH_P_IP)) {
 			struct iphdr *ip;

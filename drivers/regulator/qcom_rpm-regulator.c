@@ -205,6 +205,7 @@ static int rpm_reg_write(struct qcom_rpm_reg *vreg,
 	vreg->val[req->word] |= value << req->shift;
 
 	return qcom_rpm_write(vreg->rpm,
+			      QCOM_RPM_ACTIVE_STATE,
 			      vreg->resource,
 			      vreg->val,
 			      vreg->parts->request_len);
@@ -227,9 +228,11 @@ static int rpm_reg_set_mV_sel(struct regulator_dev *rdev,
 		return uV;
 
 	mutex_lock(&vreg->lock);
-	vreg->uV = uV;
 	if (vreg->is_enabled)
-		ret = rpm_reg_write(vreg, req, vreg->uV / 1000);
+		ret = rpm_reg_write(vreg, req, uV / 1000);
+
+	if (!ret)
+		vreg->uV = uV;
 	mutex_unlock(&vreg->lock);
 
 	return ret;
@@ -252,9 +255,11 @@ static int rpm_reg_set_uV_sel(struct regulator_dev *rdev,
 		return uV;
 
 	mutex_lock(&vreg->lock);
-	vreg->uV = uV;
 	if (vreg->is_enabled)
-		ret = rpm_reg_write(vreg, req, vreg->uV);
+		ret = rpm_reg_write(vreg, req, uV);
+
+	if (!ret)
+		vreg->uV = uV;
 	mutex_unlock(&vreg->lock);
 
 	return ret;
@@ -388,6 +393,28 @@ static int rpm_reg_is_enabled(struct regulator_dev *rdev)
 	return vreg->is_enabled;
 }
 
+static int rpm_reg_set_load(struct regulator_dev *rdev, int load_uA)
+{
+	struct qcom_rpm_reg *vreg = rdev_get_drvdata(rdev);
+	const struct rpm_reg_parts *parts = vreg->parts;
+	const struct request_member *req = &parts->ia;
+	int load_mA = load_uA / 1000;
+	int max_mA = req->mask >> req->shift;
+	int ret;
+
+	if (req->mask == 0)
+		return -EINVAL;
+
+	if (load_mA > max_mA)
+		load_mA = max_mA;
+
+	mutex_lock(&vreg->lock);
+	ret = rpm_reg_write(vreg, req, load_mA);
+	mutex_unlock(&vreg->lock);
+
+	return ret;
+}
+
 static struct regulator_ops uV_ops = {
 	.list_voltage = regulator_list_voltage_linear_range,
 
@@ -397,6 +424,8 @@ static struct regulator_ops uV_ops = {
 	.enable = rpm_reg_uV_enable,
 	.disable = rpm_reg_uV_disable,
 	.is_enabled = rpm_reg_is_enabled,
+
+	.set_load = rpm_reg_set_load,
 };
 
 static struct regulator_ops mV_ops = {
@@ -408,6 +437,8 @@ static struct regulator_ops mV_ops = {
 	.enable = rpm_reg_mV_enable,
 	.disable = rpm_reg_mV_disable,
 	.is_enabled = rpm_reg_is_enabled,
+
+	.set_load = rpm_reg_set_load,
 };
 
 static struct regulator_ops switch_ops = {
@@ -674,6 +705,7 @@ static int rpm_reg_probe(struct platform_device *pdev)
 	vreg->desc.owner = THIS_MODULE;
 	vreg->desc.type = REGULATOR_VOLTAGE;
 	vreg->desc.name = pdev->dev.of_node->name;
+	vreg->desc.supply_name = "vin";
 
 	vreg->rpm = dev_get_drvdata(pdev->dev.parent);
 	if (!vreg->rpm) {
@@ -699,6 +731,10 @@ static int rpm_reg_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "no voltage specified for regulator\n");
 		return -EINVAL;
 	}
+
+	/* Regulators with ia property suppports drms */
+	if (vreg->parts->ia.mask)
+		initdata->constraints.valid_ops_mask |= REGULATOR_CHANGE_DRMS;
 
 	key = "bias-pull-down";
 	if (of_property_read_bool(pdev->dev.of_node, key)) {
@@ -768,7 +804,7 @@ static int rpm_reg_probe(struct platform_device *pdev)
 			break;
 		}
 
-		if (force_mode < 0) {
+		if (force_mode == -1) {
 			dev_err(&pdev->dev, "invalid force mode\n");
 			return -EINVAL;
 		}

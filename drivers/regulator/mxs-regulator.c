@@ -5,7 +5,7 @@
  *
  * Copyright (C) 2014 Stefan Wahren
  * Copyright (C) 2010 Freescale Semiconductor, Inc.
- * Copyright 2008 Embedded Alley Solutions, Inc All Rights Reserved.
+ * Copyright (C) 2008 Embedded Alley Solutions, Inc All Rights Reserved.
  *
  * Inspired by imx-bootlets
  */
@@ -79,9 +79,28 @@
 #define BM_POWER_5VCTRL_ILIMIT_EQ_ZERO	BIT(2)
 #define BM_POWER_5VCTRL_ENABLE_DCDC	BIT(0)
 
+#define SHIFT_FREQSEL			4
+
+#define BM_POWER_MISC_FREQSEL		(7 << SHIFT_FREQSEL)
+
+#define HW_POWER_MISC_FREQSEL_20000_KHZ	1
+#define HW_POWER_MISC_FREQSEL_24000_KHZ	2
+#define HW_POWER_MISC_FREQSEL_19200_KHZ	3
+
+#define HW_POWER_MISC_SEL_PLLCLK	BIT(0)
+
+#define MXS_DCDC	1
 #define MXS_VDDIO	2
 #define MXS_VDDA	3
 #define MXS_VDDD	4
+
+struct mxs_dcdc {
+	struct regulator_desc desc;
+
+	void __iomem *base_addr;
+	void __iomem *status_addr;
+	void __iomem *misc_addr;
+};
 
 struct mxs_ldo {
 	struct regulator_desc desc;
@@ -273,6 +292,70 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
+int get_dcdc_clk_freq(struct mxs_dcdc *dcdc)
+{
+	int ret = -EINVAL;
+	u32 val;
+
+	val = readl(dcdc->misc_addr);
+
+	/* XTAL source */
+	if ((val & HW_POWER_MISC_SEL_PLLCLK) == 0)
+		return 24000;
+
+	switch ((val & BM_POWER_MISC_FREQSEL) >> SHIFT_FREQSEL) {
+	case HW_POWER_MISC_FREQSEL_20000_KHZ:
+		ret = 20000;
+		break;
+	case HW_POWER_MISC_FREQSEL_24000_KHZ:
+		ret = 24000;
+		break;
+	case HW_POWER_MISC_FREQSEL_19200_KHZ:
+		ret = 19200;
+		break;
+	}
+
+	return ret;
+}
+
+int set_dcdc_clk_freq(struct mxs_dcdc *dcdc, int khz)
+{
+	u32 val;
+	int ret = 0;
+
+	val = readl(dcdc->misc_addr);
+
+	val &= ~BM_POWER_MISC_FREQSEL;
+	val &= ~HW_POWER_MISC_SEL_PLLCLK;
+
+	/* Accept only values recommend by Freescale */
+	switch (khz) {
+	case 19200:
+		val |= HW_POWER_MISC_FREQSEL_19200_KHZ << SHIFT_FREQSEL;
+		break;
+	case 20000:
+		val |= HW_POWER_MISC_FREQSEL_20000_KHZ << SHIFT_FREQSEL;
+		break;
+	case 24000:
+		val |= HW_POWER_MISC_FREQSEL_24000_KHZ << SHIFT_FREQSEL;
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	if (ret)
+		return ret;
+
+	/* First program FREQSEL */
+	writel(val, dcdc->misc_addr);
+
+	/* then set PLL as clk for DC-DC converter */
+	writel(val | HW_POWER_MISC_SEL_PLLCLK, dcdc->misc_addr);
+
+	return 0;
+}
+
 void print_power_source(struct regulator_dev *reg)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
@@ -368,6 +451,16 @@ static int mxs_ldo_get_voltage_sel(struct regulator_dev *reg)
 	return ret;
 }
 
+static int mxs_dcdc_is_enabled(struct regulator_dev *reg)
+{
+	struct mxs_dcdc *dcdc = rdev_get_drvdata(reg);
+
+	if (readl(dcdc->base_addr) & BM_POWER_5VCTRL_ENABLE_DCDC)
+		return 1;
+
+	return 0;
+}
+
 static int mxs_ldo_is_enabled(struct regulator_dev *reg)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
@@ -386,12 +479,27 @@ static int mxs_ldo_is_enabled(struct regulator_dev *reg)
 	return 0;
 }
 
+static struct regulator_ops mxs_dcdc_ops = {
+	.is_enabled		= mxs_dcdc_is_enabled,
+};
+
 static struct regulator_ops mxs_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
 	.get_voltage_sel	= mxs_ldo_get_voltage_sel,
 	.is_enabled		= mxs_ldo_is_enabled,
+};
+
+static const struct mxs_dcdc mxs_info_dcdc = {
+	.desc = {
+		.name = "dcdc",
+		.id = MXS_DCDC,
+		.type = REGULATOR_VOLTAGE,
+		.owner = THIS_MODULE,
+		.ops = &mxs_dcdc_ops,
+		.enable_mask = (1 << 0),
+	},
 };
 
 static const struct mxs_ldo imx23_info_vddio = {
@@ -473,6 +581,8 @@ static const struct mxs_ldo mxs_info_vddd = {
 };
 
 static const struct of_device_id of_mxs_regulator_match[] = {
+	{ .compatible = "fsl,imx23-dcdc",  .data = &mxs_info_dcdc },
+	{ .compatible = "fsl,imx28-dcdc",  .data = &mxs_info_dcdc },
 	{ .compatible = "fsl,imx23-vddio", .data = &imx23_info_vddio },
 	{ .compatible = "fsl,imx23-vdda",  .data = &mxs_info_vdda },
 	{ .compatible = "fsl,imx23-vddd",  .data = &mxs_info_vddd },
@@ -483,17 +593,138 @@ static const struct of_device_id of_mxs_regulator_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_mxs_regulator_match);
 
+struct regulator_dev *mxs_dcdc_register(struct platform_device *pdev, const void *data)
+{
+	struct device *dev = &pdev->dev;
+	struct mxs_dcdc *dcdc;
+	struct regulator_init_data *initdata;
+	struct regulator_config config = { };
+	struct resource *res;
+	char *pname;
+	u32 dcdc_clk_freq;
+
+	dcdc = devm_kmemdup(dev, data, sizeof(*dcdc), GFP_KERNEL);
+	if (!dcdc)
+		return NULL;
+
+	pname = "base-address";
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
+	if (!res) {
+		dev_err(dev, "Missing '%s' IO resource\n", pname);
+		return NULL;
+	}
+	dcdc->base_addr = devm_ioremap_nocache(dev, res->start,
+						 resource_size(res));
+	if (IS_ERR(dcdc->base_addr))
+		return NULL;
+
+	/* status register is shared between the regulators */
+	pname = "status-address";
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
+	if (!res) {
+		dev_err(dev, "Missing '%s' IO resource\n", pname);
+		return NULL;
+	}
+	dcdc->status_addr = devm_ioremap_nocache(dev, res->start,
+						 resource_size(res));
+	if (IS_ERR(dcdc->status_addr))
+		return NULL;
+
+	pname = "misc-address";
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
+	if (!res) {
+		dev_err(dev, "Missing '%s' IO resource\n", pname);
+		return NULL;
+	}
+	dcdc->misc_addr = devm_ioremap_nocache(dev, res->start,
+						 resource_size(res));
+	if (IS_ERR(dcdc->misc_addr))
+		return NULL;
+
+	initdata = of_get_regulator_init_data(dev, dev->of_node, &dcdc->desc);
+	if (!initdata)
+		return NULL;
+
+	config.driver_data = dcdc;
+	config.dev = dev;
+	config.init_data = initdata;
+	config.of_node = dev->of_node;
+
+	pname = "switching-frequency";
+	if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
+		set_dcdc_clk_freq(dcdc, dcdc_clk_freq / 1000);
+
+	dcdc_clk_freq = get_dcdc_clk_freq(dcdc);
+	dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
+
+	return devm_regulator_register(dev, &dcdc->desc, &config);
+}
+
+struct regulator_dev *mxs_ldo_register(struct platform_device *pdev, const void *data)
+{
+	struct device *dev = &pdev->dev;
+	struct mxs_ldo *ldo;
+	struct regulator_init_data *initdata;
+	struct regulator_config config = { };
+	struct resource *res;
+	char *pname;
+
+	ldo = devm_kmemdup(dev, data, sizeof(*ldo), GFP_KERNEL);
+	if (!ldo)
+		return NULL;
+
+	pname = "base-address";
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
+	if (!res) {
+		dev_err(dev, "Missing '%s' IO resource\n", pname);
+		return NULL;
+	}
+	ldo->base_addr = devm_ioremap_nocache(dev, res->start,
+						 resource_size(res));
+	if (IS_ERR(ldo->base_addr))
+		return NULL;
+
+	/* status register is shared between the regulators */
+	pname = "status-address";
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
+	if (!res) {
+		dev_err(dev, "Missing '%s' IO resource\n", pname);
+		return NULL;
+	}
+	ldo->status_addr = devm_ioremap_nocache(dev, res->start,
+						 resource_size(res));
+	if (IS_ERR(ldo->status_addr))
+		return NULL;
+
+	pname = "v5ctrl-address";
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
+	if (!res) {
+		dev_err(dev, "Missing '%s' IO resource\n", pname);
+		return NULL;
+	}
+	ldo->v5ctrl_addr = devm_ioremap_nocache(dev, res->start,
+						 resource_size(res));
+	if (IS_ERR(ldo->v5ctrl_addr))
+		return NULL;
+
+	initdata = of_get_regulator_init_data(dev, dev->of_node, &ldo->desc);
+	if (!initdata)
+		return NULL;
+
+	config.dev = dev;
+	config.init_data = initdata;
+	config.driver_data = ldo;
+	config.of_node = dev->of_node;
+
+	return devm_regulator_register(dev, &ldo->desc, &config);
+}
+
 static int mxs_regulator_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *match;
 	struct regulator_dev *rdev = NULL;
-	struct mxs_ldo *ldo;
-	struct regulator_init_data *initdata;
-	struct regulator_config config = { };
-	struct resource *res;
 	int ret = 0;
-	char *pname;
 
 	match = of_match_device(of_mxs_regulator_match, dev);
 	if (!match) {
@@ -502,56 +733,13 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	ldo = devm_kmemdup(dev, match->data, sizeof(*ldo), GFP_KERNEL);
-	if (!ldo)
-		return -ENOMEM;
-
-	initdata = of_get_regulator_init_data(dev, dev->of_node, &ldo->desc);
-	if (!initdata) {
-		dev_err(dev, "missing regulator init data\n");
-		return -EINVAL;
+	if ((strcmp(match->compatible, "fsl,imx23-dcdc") == 0) ||
+	    (strcmp(match->compatible, "fsl,imx28-dcdc") == 0)) {
+		rdev = mxs_dcdc_register(pdev, match->data);
+	} else {
+		rdev = mxs_ldo_register(pdev, match->data);
 	}
 
-	pname = "base-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return -ENODEV;
-	}
-	ldo->base_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(ldo->base_addr))
-		return PTR_ERR(ldo->base_addr);
-
-	/* status register is shared between the regulators */
-	pname = "status-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return -ENODEV;
-	}
-	ldo->status_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(ldo->status_addr))
-		return PTR_ERR(ldo->status_addr);
-
-	pname = "v5ctrl-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return -ENODEV;
-	}
-	ldo->v5ctrl_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(ldo->v5ctrl_addr))
-		return PTR_ERR(ldo->v5ctrl_addr);
-
-	config.dev = dev;
-	config.init_data = initdata;
-	config.driver_data = ldo;
-	config.of_node = dev->of_node;
-
-	rdev = devm_regulator_register(dev, &ldo->desc, &config);
 	if (IS_ERR(rdev)) {
 		ret = PTR_ERR(rdev);
 		dev_err(dev, "%s: failed to register regulator(%d)\n",

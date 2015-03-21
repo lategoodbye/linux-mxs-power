@@ -775,7 +775,7 @@ static int ds2780_battery_probe(struct platform_device *pdev)
 	dev_info->bat_desc.name		= dev_name(&pdev->dev);
 	dev_info->bat_desc.type		= POWER_SUPPLY_TYPE_BATTERY;
 	dev_info->bat_desc.properties	= ds2780_battery_props;
-	dev_info->bat_desc.num_properties	= ARRAY_SIZE(ds2780_battery_props);
+	dev_info->bat_desc.num_properties = ARRAY_SIZE(ds2780_battery_props);
 	dev_info->bat_desc.get_property	= ds2780_battery_get_property;
 
 	psy_cfg.drv_data		= dev_info;

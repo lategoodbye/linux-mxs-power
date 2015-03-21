@@ -1029,9 +1029,9 @@ static int compal_probe(struct platform_device *pdev)
 	if (err)
 		return err;
 
-	hwmon_dev = hwmon_device_register_with_groups(&pdev->dev,
-						      "compal", data,
-						      compal_hwmon_groups);
+	hwmon_dev = devm_hwmon_device_register_with_groups(&pdev->dev,
+							   "compal", data,
+							   compal_hwmon_groups);
 	if (IS_ERR(hwmon_dev)) {
 		err = PTR_ERR(hwmon_dev);
 		goto remove;
@@ -1040,7 +1040,12 @@ static int compal_probe(struct platform_device *pdev)
 	/* Power supply */
 	initialize_power_supply_data(data);
 	psy_cfg.drv_data = data;
-	power_supply_register(&compal_device->dev, &data->psy, &psy_cfg);
+	data->psy = power_supply_register(&compal_device->dev, &psy_bat_desc,
+					  &psy_cfg);
+	if (IS_ERR(data->psy)) {
+		err = PTR_ERR(data->psy);
+		goto remove;
+	}
 
 	platform_set_drvdata(pdev, data);
 

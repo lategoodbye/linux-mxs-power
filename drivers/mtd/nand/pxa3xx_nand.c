@@ -480,6 +480,42 @@ static void disable_int(struct pxa3xx_nand_info *info, uint32_t int_mask)
 	nand_writel(info, NDCR, ndcr | int_mask);
 }
 
+static void drain_fifo(struct pxa3xx_nand_info *info, void *data, int len)
+{
+	if (info->ecc_bch) {
+		int timeout;
+
+		/*
+		 * According to the datasheet, when reading from NDDB
+		 * with BCH enabled, after each 32 bytes reads, we
+		 * have to make sure that the NDSR.RDDREQ bit is set.
+		 *
+		 * Drain the FIFO 8 32 bits reads at a time, and skip
+		 * the polling on the last read.
+		 */
+		while (len > 8) {
+			__raw_readsl(info->mmio_base + NDDB, data, 8);
+
+			for (timeout = 0;
+			     !(nand_readl(info, NDSR) & NDSR_RDDREQ);
+			     timeout++) {
+				if (timeout >= 5) {
+					dev_err(&info->pdev->dev,
+						"Timeout on RDDREQ while draining the FIFO\n");
+					return;
+				}
+
+				mdelay(1);
+			}
+
+			data += 32;
+			len -= 8;
+		}
+	}
+
+	__raw_readsl(info->mmio_base + NDDB, data, len);
+}
+
 static void handle_data_pio(struct pxa3xx_nand_info *info)
 {
 	unsigned int do_bytes = min(info->data_size, info->chunk_size);
@@ -496,14 +532,14 @@ static void handle_data_pio(struct pxa3xx_nand_info *info)
 				      DIV_ROUND_UP(info->oob_size, 4));
 		break;
 	case STATE_PIO_READING:
-		__raw_readsl(info->mmio_base + NDDB,
-			     info->data_buff + info->data_buff_pos,
-			     DIV_ROUND_UP(do_bytes, 4));
+		drain_fifo(info,
+			   info->data_buff + info->data_buff_pos,
+			   DIV_ROUND_UP(do_bytes, 4));
 
 		if (info->oob_size > 0)
-			__raw_readsl(info->mmio_base + NDDB,
-				     info->oob_buff + info->oob_buff_pos,
-				     DIV_ROUND_UP(info->oob_size, 4));
+			drain_fifo(info,
+				   info->oob_buff + info->oob_buff_pos,
+				   DIV_ROUND_UP(info->oob_size, 4));
 		break;
 	default:
 		dev_err(&info->pdev->dev, "%s: invalid state %d\n", __func__,
@@ -569,11 +605,24 @@ static void start_data_dma(struct pxa3xx_nand_info *info)
 {}
 #endif
 
+static irqreturn_t pxa3xx_nand_irq_thread(int irq, void *data)
+{
+	struct pxa3xx_nand_info *info = data;
+
+	handle_data_pio(info);
+
+	info->state = STATE_CMD_DONE;
+	nand_writel(info, NDSR, NDSR_WRDREQ | NDSR_RDDREQ);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t pxa3xx_nand_irq(int irq, void *devid)
 {
 	struct pxa3xx_nand_info *info = devid;
 	unsigned int status, is_completed = 0, is_ready = 0;
 	unsigned int ready, cmd_done;
+	irqreturn_t ret = IRQ_HANDLED;
 
 	if (info->cs == 0) {
 		ready           = NDSR_FLASH_RDY;
@@ -615,7 +664,8 @@ static irqreturn_t pxa3xx_nand_irq(int irq, void *devid)
 		} else {
 			info->state = (status & NDSR_RDDREQ) ?
 				      STATE_PIO_READING : STATE_PIO_WRITING;
-			handle_data_pio(info);
+			ret = IRQ_WAKE_THREAD;
+			goto NORMAL_IRQ_EXIT;
 		}
 	}
 	if (status & cmd_done) {
@@ -656,7 +706,7 @@ static irqreturn_t pxa3xx_nand_irq(int irq, void *devid)
 	if (is_ready)
 		complete(&info->dev_ready);
 NORMAL_IRQ_EXIT:
-	return IRQ_HANDLED;
+	return ret;
 }
 
 static inline int is_buf_blank(uint8_t *buf, size_t len)
@@ -1472,6 +1522,8 @@ static int pxa3xx_nand_scan(struct mtd_info *mtd)
 		return ret;
 	}
 
+	memset(pxa3xx_flash_ids, 0, sizeof(pxa3xx_flash_ids));
+
 	pxa3xx_flash_ids[0].name = f->name;
 	pxa3xx_flash_ids[0].dev_id = (f->chip_id >> 8) & 0xffff;
 	pxa3xx_flash_ids[0].pagesize = f->page_size;
@@ -1572,6 +1624,8 @@ static int alloc_nand_resource(struct platform_device *pdev)
 	int ret, irq, cs;
 
 	pdata = dev_get_platdata(&pdev->dev);
+	if (pdata->num_cs <= 0)
+		return -ENODEV;
 	info = devm_kzalloc(&pdev->dev, sizeof(*info) + (sizeof(*mtd) +
 			    sizeof(*host)) * pdata->num_cs, GFP_KERNEL);
 	if (!info)
@@ -1672,7 +1726,9 @@ static int alloc_nand_resource(struct platform_device *pdev)
 	/* initialize all interrupts to be disabled */
 	disable_int(info, NDSR_MASK);
 
-	ret = request_irq(irq, pxa3xx_nand_irq, 0, pdev->name, info);
+	ret = request_threaded_irq(irq, pxa3xx_nand_irq,
+				   pxa3xx_nand_irq_thread, IRQF_ONESHOT,
+				   pdev->name, info);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to request IRQ\n");
 		goto fail_free_buf;

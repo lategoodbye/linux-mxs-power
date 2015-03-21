@@ -34,7 +34,7 @@ MODULE_FIRMWARE("rtlwifi/rtl8723aufw_B.bin");
 MODULE_FIRMWARE("rtlwifi/rtl8723aufw_B_NoBT.bin");
 
 /* module param defaults */
-static int rtw_chip_version = 0x00;
+static int rtw_chip_version;
 static int rtw_rfintfs = HWPI;
 static int rtw_debug = 1;
 
@@ -91,7 +91,7 @@ static int rtw_bt_iso = 2;/*  0:Low, 1:High, 2:From Efuse */
 /*  0:Idle, 1:None-SCO, 2:SCO, 3:From Counter, 4.Busy, 5.OtherBusy */
 static int rtw_bt_sco = 3;
 /*  0:Disable BT control A-MPDU, 1:Enable BT control A-MPDU. */
-static int rtw_bt_ampdu = 1 ;
+static int rtw_bt_ampdu = 1;
 #endif
 
 /*  0:Reject AP's Add BA req, 1:Accept AP's Add BA req. */

@@ -80,15 +80,9 @@ static int broadwell_rt286_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_codec *codec = rtd->codec;
 	int ret = 0;
-	ret = snd_soc_jack_new(codec, "Headset",
-		SND_JACK_HEADSET | SND_JACK_BTN_0, &broadwell_headset);
-
-	if (ret)
-		return ret;
-
-	ret = snd_soc_jack_add_pins(&broadwell_headset,
-		ARRAY_SIZE(broadwell_headset_pins),
-		broadwell_headset_pins);
+	ret = snd_soc_card_jack_new(rtd->card, "Headset",
+		SND_JACK_HEADSET | SND_JACK_BTN_0, &broadwell_headset,
+		broadwell_headset_pins, ARRAY_SIZE(broadwell_headset_pins));
 	if (ret)
 		return ret;
 
@@ -110,9 +104,7 @@ static int broadwell_ssp0_fixup(struct snd_soc_pcm_runtime *rtd,
 	channels->min = channels->max = 2;
 
 	/* set SSP0 to 16 bit */
-	snd_mask_set(&params->masks[SNDRV_PCM_HW_PARAM_FORMAT -
-				    SNDRV_PCM_HW_PARAM_FIRST_MASK],
-				    SNDRV_PCM_FORMAT_S16_LE);
+	params_set_format(params, SNDRV_PCM_FORMAT_S16_LE);
 	return 0;
 }
 
@@ -140,8 +132,6 @@ static struct snd_soc_ops broadwell_rt286_ops = {
 
 static int broadwell_rtd_init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_codec *codec = rtd->codec;
-	struct snd_soc_dapm_context *dapm = &codec->dapm;
 	struct sst_pdata *pdata = dev_get_platdata(rtd->platform->dev);
 	struct sst_hsw *broadwell = pdata->dsp;
 	int ret;
@@ -154,14 +144,6 @@ static int broadwell_rtd_init(struct snd_soc_pcm_runtime *rtd)
 		dev_err(rtd->dev, "error: failed to set device config\n");
 		return ret;
 	}
-
-	/* always connected - check HP for jack detect */
-	snd_soc_dapm_enable_pin(dapm, "Headphone Jack");
-	snd_soc_dapm_enable_pin(dapm, "Speaker");
-	snd_soc_dapm_enable_pin(dapm, "Mic Jack");
-	snd_soc_dapm_enable_pin(dapm, "Line Jack");
-	snd_soc_dapm_enable_pin(dapm, "DMIC1");
-	snd_soc_dapm_enable_pin(dapm, "DMIC2");
 
 	return 0;
 }
@@ -237,6 +219,32 @@ static struct snd_soc_dai_link broadwell_rt286_dais[] = {
 	},
 };
 
+static int broadwell_suspend(struct snd_soc_card *card){
+	struct snd_soc_codec *codec;
+
+	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
+		if (!strcmp(codec->component.name, "i2c-INT343A:00")) {
+			dev_dbg(codec->dev, "disabling jack detect before going to suspend.\n");
+			rt286_mic_detect(codec, NULL);
+			break;
+		}
+	}
+	return 0;
+}
+
+static int broadwell_resume(struct snd_soc_card *card){
+	struct snd_soc_codec *codec;
+
+	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
+		if (!strcmp(codec->component.name, "i2c-INT343A:00")) {
+			dev_dbg(codec->dev, "enabling jack detect for resume.\n");
+			rt286_mic_detect(codec, &broadwell_headset);
+			break;
+		}
+	}
+	return 0;
+}
+
 /* broadwell audio machine driver for WPT + RT286S */
 static struct snd_soc_card broadwell_rt286 = {
 	.name = "broadwell-rt286",
@@ -250,6 +258,8 @@ static struct snd_soc_card broadwell_rt286 = {
 	.dapm_routes = broadwell_rt286_map,
 	.num_dapm_routes = ARRAY_SIZE(broadwell_rt286_map),
 	.fully_routed = true,
+	.suspend_pre = broadwell_suspend,
+	.resume_post = broadwell_resume,
 };
 
 static int broadwell_audio_probe(struct platform_device *pdev)

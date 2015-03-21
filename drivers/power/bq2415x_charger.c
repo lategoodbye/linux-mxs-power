@@ -13,12 +13,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- */
-
-/*
  * Datasheets:
  * http://www.ti.com/product/bq24150
  * http://www.ti.com/product/bq24150a
@@ -26,6 +20,8 @@
  * http://www.ti.com/product/bq24153
  * http://www.ti.com/product/bq24153a
  * http://www.ti.com/product/bq24155
+ * http://www.ti.com/product/bq24157s
+ * http://www.ti.com/product/bq24158
  */
 
 #include <linux/kernel.h>
@@ -147,6 +143,7 @@ enum bq2415x_chip {
 	BQ24155,
 	BQ24156,
 	BQ24156A,
+	BQ24157S,
 	BQ24158,
 };
 
@@ -162,6 +159,7 @@ static char *bq2415x_chip_name[] = {
 	"bq24155",
 	"bq24156",
 	"bq24156a",
+	"bq24157s",
 	"bq24158",
 };
 
@@ -174,7 +172,7 @@ struct bq2415x_device {
 	struct power_supply *notify_psy;
 	struct notifier_block nb;
 	enum bq2415x_mode reported_mode;/* mode reported by hook function */
-	enum bq2415x_mode mode;		/* current configured mode */
+	enum bq2415x_mode mode;		/* currently configured mode */
 	enum bq2415x_chip chip;
 	const char *timer_error;
 	char *model;
@@ -353,8 +351,7 @@ static int bq2415x_exec_command(struct bq2415x_device *bq,
 			BQ2415X_BIT_CE);
 		if (ret < 0)
 			return ret;
-		else
-			return ret > 0 ? 0 : 1;
+		return ret > 0 ? 0 : 1;
 	case BQ2415X_CHARGER_ENABLE:
 		return bq2415x_i2c_write_bit(bq, BQ2415X_REG_CONTROL,
 				0, BQ2415X_BIT_CE);
@@ -427,20 +424,17 @@ static enum bq2415x_chip bq2415x_detect_chip(struct bq2415x_device *bq)
 		case 0:
 			if (bq->chip == BQ24151A)
 				return bq->chip;
-			else
-				return BQ24151;
+			return BQ24151;
 		case 1:
 			if (bq->chip == BQ24150A ||
 				bq->chip == BQ24152 ||
 				bq->chip == BQ24155)
 				return bq->chip;
-			else
-				return BQ24150;
+			return BQ24150;
 		case 2:
 			if (bq->chip == BQ24153A)
 				return bq->chip;
-			else
-				return BQ24153;
+			return BQ24153;
 		default:
 			return BQUNKNOWN;
 		}
@@ -451,9 +445,10 @@ static enum bq2415x_chip bq2415x_detect_chip(struct bq2415x_device *bq)
 		case 0:
 			if (bq->chip == BQ24156A)
 				return bq->chip;
-			else
-				return BQ24156;
+			return BQ24156;
 		case 2:
+			if (bq->chip == BQ24157S)
+				return bq->chip;
 			return BQ24158;
 		default:
 			return BQUNKNOWN;
@@ -481,24 +476,22 @@ static int bq2415x_detect_revision(struct bq2415x_device *bq)
 	case BQ24152:
 		if (ret >= 0 && ret <= 3)
 			return ret;
-		else
-			return -1;
+		return -1;
 	case BQ24153:
 	case BQ24153A:
 	case BQ24156:
 	case BQ24156A:
+	case BQ24157S:
 	case BQ24158:
 		if (ret == 3)
 			return 0;
 		else if (ret == 1)
 			return 1;
-		else
-			return -1;
+		return -1;
 	case BQ24155:
 		if (ret == 3)
 			return 3;
-		else
-			return -1;
+		return -1;
 	case BQUNKNOWN:
 		return -1;
 	}
@@ -1601,27 +1594,27 @@ static int bq2415x_probe(struct i2c_client *client,
 		ret = of_property_read_u32(np, "ti,current-limit",
 				&bq->init_data.current_limit);
 		if (ret)
-			goto error_2;
+			goto error_3;
 		ret = of_property_read_u32(np, "ti,weak-battery-voltage",
 				&bq->init_data.weak_battery_voltage);
 		if (ret)
-			goto error_2;
+			goto error_3;
 		ret = of_property_read_u32(np, "ti,battery-regulation-voltage",
 				&bq->init_data.battery_regulation_voltage);
 		if (ret)
-			goto error_2;
+			goto error_3;
 		ret = of_property_read_u32(np, "ti,charge-current",
 				&bq->init_data.charge_current);
 		if (ret)
-			goto error_2;
+			goto error_3;
 		ret = of_property_read_u32(np, "ti,termination-current",
 				&bq->init_data.termination_current);
 		if (ret)
-			goto error_2;
+			goto error_3;
 		ret = of_property_read_u32(np, "ti,resistor-sense",
 				&bq->init_data.resistor_sense);
 		if (ret)
-			goto error_2;
+			goto error_3;
 	} else {
 		memcpy(&bq->init_data, pdata, sizeof(bq->init_data));
 	}
@@ -1631,19 +1624,19 @@ static int bq2415x_probe(struct i2c_client *client,
 	ret = bq2415x_power_supply_init(bq);
 	if (ret) {
 		dev_err(bq->dev, "failed to register power supply: %d\n", ret);
-		goto error_2;
+		goto error_3;
 	}
 
 	ret = bq2415x_sysfs_init(bq);
 	if (ret) {
 		dev_err(bq->dev, "failed to create sysfs entries: %d\n", ret);
-		goto error_3;
+		goto error_4;
 	}
 
 	ret = bq2415x_set_defaults(bq);
 	if (ret) {
 		dev_err(bq->dev, "failed to set default values: %d\n", ret);
-		goto error_4;
+		goto error_5;
 	}
 
 	if (bq->notify_psy) {
@@ -1651,7 +1644,7 @@ static int bq2415x_probe(struct i2c_client *client,
 		ret = power_supply_reg_notifier(&bq->nb);
 		if (ret) {
 			dev_err(bq->dev, "failed to reg notifier: %d\n", ret);
-			goto error_5;
+			goto error_6;
 		}
 
 		/* Query for initial reported_mode and set it */
@@ -1671,11 +1664,14 @@ static int bq2415x_probe(struct i2c_client *client,
 	dev_info(bq->dev, "driver registered\n");
 	return 0;
 
+error_6:
 error_5:
-error_4:
 	bq2415x_sysfs_exit(bq);
-error_3:
+error_4:
 	bq2415x_power_supply_exit(bq);
+error_3:
+	if (bq->notify_psy)
+		power_supply_put(bq->notify_psy);
 error_2:
 	kfree(name);
 error_1:
@@ -1692,8 +1688,10 @@ static int bq2415x_remove(struct i2c_client *client)
 {
 	struct bq2415x_device *bq = i2c_get_clientdata(client);
 
-	if (bq->notify_psy)
+	if (bq->notify_psy) {
 		power_supply_unreg_notifier(&bq->nb);
+		power_supply_put(bq->notify_psy);
+	}
 
 	bq2415x_sysfs_exit(bq);
 	bq2415x_power_supply_exit(bq);
@@ -1723,6 +1721,7 @@ static const struct i2c_device_id bq2415x_i2c_id_table[] = {
 	{ "bq24155", BQ24155 },
 	{ "bq24156", BQ24156 },
 	{ "bq24156a", BQ24156A },
+	{ "bq24157s", BQ24157S },
 	{ "bq24158", BQ24158 },
 	{},
 };

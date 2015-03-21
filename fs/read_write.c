@@ -9,7 +9,6 @@
 #include <linux/fcntl.h>
 #include <linux/file.h>
 #include <linux/uio.h>
-#include <linux/aio.h>
 #include <linux/fsnotify.h>
 #include <linux/security.h>
 #include <linux/export.h>
@@ -333,6 +332,46 @@ out_putf:
 }
 #endif
 
+ssize_t vfs_iter_read(struct file *file, struct iov_iter *iter, loff_t *ppos)
+{
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	if (!file->f_op->read_iter)
+		return -EINVAL;
+
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *ppos;
+
+	iter->type |= READ;
+	ret = file->f_op->read_iter(&kiocb, iter);
+	BUG_ON(ret == -EIOCBQUEUED);
+	if (ret > 0)
+		*ppos = kiocb.ki_pos;
+	return ret;
+}
+EXPORT_SYMBOL(vfs_iter_read);
+
+ssize_t vfs_iter_write(struct file *file, struct iov_iter *iter, loff_t *ppos)
+{
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	if (!file->f_op->write_iter)
+		return -EINVAL;
+
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *ppos;
+
+	iter->type |= WRITE;
+	ret = file->f_op->write_iter(&kiocb, iter);
+	BUG_ON(ret == -EIOCBQUEUED);
+	if (ret > 0)
+		*ppos = kiocb.ki_pos;
+	return ret;
+}
+EXPORT_SYMBOL(vfs_iter_write);
+
 /*
  * rw_verify_area doesn't like huge counts. We limit
  * them to something that fits in "int" so that others
@@ -358,7 +397,7 @@ int rw_verify_area(int read_write, struct file *file, const loff_t *ppos, size_t
 			return retval;
 	}
 
-	if (unlikely(inode->i_flock && mandatory_lock(inode))) {
+	if (unlikely(inode->i_flctx && mandatory_lock(inode))) {
 		retval = locks_mandatory_area(
 			read_write == READ ? FLOCK_VERIFY_READ : FLOCK_VERIFY_WRITE,
 			inode, file, pos, count);
@@ -380,11 +419,9 @@ ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
 
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = len;
 
 	ret = filp->f_op->aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
-	if (-EIOCBQUEUED == ret)
-		ret = wait_on_sync_kiocb(&kiocb);
+	BUG_ON(ret == -EIOCBQUEUED);
 	*ppos = kiocb.ki_pos;
 	return ret;
 }
@@ -400,12 +437,10 @@ ssize_t new_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *p
 
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = len;
 	iov_iter_init(&iter, READ, &iov, 1, len);
 
 	ret = filp->f_op->read_iter(&kiocb, &iter);
-	if (-EIOCBQUEUED == ret)
-		ret = wait_on_sync_kiocb(&kiocb);
+	BUG_ON(ret == -EIOCBQUEUED);
 	*ppos = kiocb.ki_pos;
 	return ret;
 }
@@ -464,11 +499,9 @@ ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, lof
 
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = len;
 
 	ret = filp->f_op->aio_write(&kiocb, &iov, 1, kiocb.ki_pos);
-	if (-EIOCBQUEUED == ret)
-		ret = wait_on_sync_kiocb(&kiocb);
+	BUG_ON(ret == -EIOCBQUEUED);
 	*ppos = kiocb.ki_pos;
 	return ret;
 }
@@ -484,12 +517,10 @@ ssize_t new_sync_write(struct file *filp, const char __user *buf, size_t len, lo
 
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = len;
 	iov_iter_init(&iter, WRITE, &iov, 1, len);
 
 	ret = filp->f_op->write_iter(&kiocb, &iter);
-	if (-EIOCBQUEUED == ret)
-		ret = wait_on_sync_kiocb(&kiocb);
+	BUG_ON(ret == -EIOCBQUEUED);
 	*ppos = kiocb.ki_pos;
 	return ret;
 }
@@ -673,12 +704,10 @@ static ssize_t do_iter_readv_writev(struct file *filp, int rw, const struct iove
 
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = len;
 
 	iov_iter_init(&iter, rw, iov, nr_segs, len);
 	ret = fn(&kiocb, &iter);
-	if (ret == -EIOCBQUEUED)
-		ret = wait_on_sync_kiocb(&kiocb);
+	BUG_ON(ret == -EIOCBQUEUED);
 	*ppos = kiocb.ki_pos;
 	return ret;
 }
@@ -691,11 +720,9 @@ static ssize_t do_sync_readv_writev(struct file *filp, const struct iovec *iov,
 
 	init_sync_kiocb(&kiocb, filp);
 	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = len;
 
 	ret = fn(&kiocb, iov, nr_segs, kiocb.ki_pos);
-	if (ret == -EIOCBQUEUED)
-		ret = wait_on_sync_kiocb(&kiocb);
+	BUG_ON(ret == -EIOCBQUEUED);
 	*ppos = kiocb.ki_pos;
 	return ret;
 }

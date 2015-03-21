@@ -1062,10 +1062,10 @@ static void acpi_device_notify_fixed(void *data)
 	acpi_device_notify(NULL, ACPI_FIXED_HARDWARE_EVENT, device);
 }
 
-static acpi_status acpi_device_fixed_event(void *data)
+static u32 acpi_device_fixed_event(void *data)
 {
 	acpi_os_execute(OSL_NOTIFY_HANDLER, acpi_device_notify_fixed, data);
-	return AE_OK;
+	return ACPI_INTERRUPT_HANDLED;
 }
 
 static int acpi_device_install_notify_handler(struct acpi_device *device)
@@ -2544,6 +2544,7 @@ int __init acpi_scan_init(void)
 	acpi_pci_link_init();
 	acpi_processor_init();
 	acpi_lpss_init();
+	acpi_apd_init();
 	acpi_cmos_rtc_init();
 	acpi_container_init();
 	acpi_memory_hotplug_init();

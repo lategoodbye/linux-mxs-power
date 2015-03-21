@@ -71,6 +71,9 @@
 				__DOMAIN_MAX_PFN(gaw), (unsigned long)-1))
 #define DOMAIN_MAX_ADDR(gaw)	(((uint64_t)__DOMAIN_MAX_PFN(gaw)) << VTD_PAGE_SHIFT)
 
+/* IO virtual address start page frame number */
+#define IOVA_START_PFN		(1)
+
 #define IOVA_PFN(addr)		((addr) >> PAGE_SHIFT)
 #define DMA_32BIT_PFN		IOVA_PFN(DMA_BIT_MASK(32))
 #define DMA_64BIT_PFN		IOVA_PFN(DMA_BIT_MASK(64))
@@ -485,7 +488,6 @@ __setup("intel_iommu=", intel_iommu_setup);
 
 static struct kmem_cache *iommu_domain_cache;
 static struct kmem_cache *iommu_devinfo_cache;
-static struct kmem_cache *iommu_iova_cache;
 
 static inline void *alloc_pgtable_page(int node)
 {
@@ -521,16 +523,6 @@ static inline void * alloc_devinfo_mem(void)
 static inline void free_devinfo_mem(void *vaddr)
 {
 	kmem_cache_free(iommu_devinfo_cache, vaddr);
-}
-
-struct iova *alloc_iova_mem(void)
-{
-	return kmem_cache_alloc(iommu_iova_cache, GFP_ATOMIC);
-}
-
-void free_iova_mem(struct iova *iova)
-{
-	kmem_cache_free(iommu_iova_cache, iova);
 }
 
 static inline int domain_type_is_vm(struct dmar_domain *domain)
@@ -603,12 +595,13 @@ static void domain_update_iommu_coherency(struct dmar_domain *domain)
 {
 	struct dmar_drhd_unit *drhd;
 	struct intel_iommu *iommu;
-	int i, found = 0;
+	bool found = false;
+	int i;
 
 	domain->iommu_coherency = 1;
 
 	for_each_set_bit(i, domain->iommu_bmp, g_num_of_iommus) {
-		found = 1;
+		found = true;
 		if (!ecap_coherent(g_iommus[i]->ecap)) {
 			domain->iommu_coherency = 0;
 			break;
@@ -692,7 +685,7 @@ static struct intel_iommu *device_to_iommu(struct device *dev, u8 *bus, u8 *devf
 	if (dev_is_pci(dev)) {
 		pdev = to_pci_dev(dev);
 		segment = pci_domain_nr(pdev->bus);
-	} else if (ACPI_COMPANION(dev))
+	} else if (has_acpi_companion(dev))
 		dev = &ACPI_COMPANION(dev)->dev;
 
 	rcu_read_lock();
@@ -1275,7 +1268,7 @@ static struct device_domain_info *
 iommu_support_dev_iotlb (struct dmar_domain *domain, struct intel_iommu *iommu,
 			 u8 bus, u8 devfn)
 {
-	int found = 0;
+	bool found = false;
 	unsigned long flags;
 	struct device_domain_info *info;
 	struct pci_dev *pdev;
@@ -1290,7 +1283,7 @@ iommu_support_dev_iotlb (struct dmar_domain *domain, struct intel_iommu *iommu,
 	list_for_each_entry(info, &domain->devices, link)
 		if (info->iommu == iommu && info->bus == bus &&
 		    info->devfn == devfn) {
-			found = 1;
+			found = true;
 			break;
 		}
 	spin_unlock_irqrestore(&device_domain_lock, flags);
@@ -1643,7 +1636,8 @@ static int dmar_init_reserved_ranges(void)
 	struct iova *iova;
 	int i;
 
-	init_iova_domain(&reserved_iova_list, DMA_32BIT_PFN);
+	init_iova_domain(&reserved_iova_list, VTD_PAGE_SIZE, IOVA_START_PFN,
+			DMA_32BIT_PFN);
 
 	lockdep_set_class(&reserved_iova_list.iova_rbtree_lock,
 		&reserved_rbtree_key);
@@ -1701,7 +1695,8 @@ static int domain_init(struct dmar_domain *domain, int guest_width)
 	int adjust_width, agaw;
 	unsigned long sagaw;
 
-	init_iova_domain(&domain->iovad, DMA_32BIT_PFN);
+	init_iova_domain(&domain->iovad, VTD_PAGE_SIZE, IOVA_START_PFN,
+			DMA_32BIT_PFN);
 	domain_reserve_special_ranges(domain);
 
 	/* calculate AGAW */
@@ -3427,23 +3422,6 @@ static inline int iommu_devinfo_cache_init(void)
 	return ret;
 }
 
-static inline int iommu_iova_cache_init(void)
-{
-	int ret = 0;
-
-	iommu_iova_cache = kmem_cache_create("iommu_iova",
-					 sizeof(struct iova),
-					 0,
-					 SLAB_HWCACHE_ALIGN,
-					 NULL);
-	if (!iommu_iova_cache) {
-		printk(KERN_ERR "Couldn't create iova cache\n");
-		ret = -ENOMEM;
-	}
-
-	return ret;
-}
-
 static int __init iommu_init_mempool(void)
 {
 	int ret;
@@ -3461,7 +3439,7 @@ static int __init iommu_init_mempool(void)
 
 	kmem_cache_destroy(iommu_domain_cache);
 domain_error:
-	kmem_cache_destroy(iommu_iova_cache);
+	iommu_iova_cache_destroy();
 
 	return -ENOMEM;
 }
@@ -3470,8 +3448,7 @@ static void __init iommu_exit_mempool(void)
 {
 	kmem_cache_destroy(iommu_devinfo_cache);
 	kmem_cache_destroy(iommu_domain_cache);
-	kmem_cache_destroy(iommu_iova_cache);
-
+	iommu_iova_cache_destroy();
 }
 
 static void quirk_ioat_snb_local_iommu(struct pci_dev *pdev)
@@ -4294,7 +4271,7 @@ static void domain_remove_one_dev_info(struct dmar_domain *domain,
 	struct device_domain_info *info, *tmp;
 	struct intel_iommu *iommu;
 	unsigned long flags;
-	int found = 0;
+	bool found = false;
 	u8 bus, devfn;
 
 	iommu = device_to_iommu(dev, &bus, &devfn);
@@ -4326,7 +4303,7 @@ static void domain_remove_one_dev_info(struct dmar_domain *domain,
 		 * update iommu count and coherency
 		 */
 		if (info->iommu == iommu)
-			found = 1;
+			found = true;
 	}
 
 	spin_unlock_irqrestore(&device_domain_lock, flags);
@@ -4342,7 +4319,8 @@ static int md_domain_init(struct dmar_domain *domain, int guest_width)
 {
 	int adjust_width;
 
-	init_iova_domain(&domain->iovad, DMA_32BIT_PFN);
+	init_iova_domain(&domain->iovad, VTD_PAGE_SIZE, IOVA_START_PFN,
+			DMA_32BIT_PFN);
 	domain_reserve_special_ranges(domain);
 
 	/* calculate AGAW */

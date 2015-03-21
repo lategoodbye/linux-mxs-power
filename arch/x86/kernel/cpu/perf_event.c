@@ -31,6 +31,8 @@
 #include <asm/nmi.h>
 #include <asm/smp.h>
 #include <asm/alternative.h>
+#include <asm/mmu_context.h>
+#include <asm/tlbflush.h>
 #include <asm/timer.h>
 #include <asm/desc.h>
 #include <asm/ldt.h>
@@ -42,6 +44,8 @@ struct x86_pmu x86_pmu __read_mostly;
 DEFINE_PER_CPU(struct cpu_hw_events, cpu_hw_events) = {
 	.enabled = 1,
 };
+
+struct static_key rdpmc_always_available = STATIC_KEY_INIT_FALSE;
 
 u64 __read_mostly hw_cache_event_ids
 				[PERF_COUNT_HW_CACHE_MAX]
@@ -395,38 +399,40 @@ int x86_pmu_hw_config(struct perf_event *event)
 
 		if (event->attr.precise_ip > precise)
 			return -EOPNOTSUPP;
-		/*
-		 * check that PEBS LBR correction does not conflict with
-		 * whatever the user is asking with attr->branch_sample_type
-		 */
-		if (event->attr.precise_ip > 1 &&
-		    x86_pmu.intel_cap.pebs_format < 2) {
-			u64 *br_type = &event->attr.branch_sample_type;
+	}
+	/*
+	 * check that PEBS LBR correction does not conflict with
+	 * whatever the user is asking with attr->branch_sample_type
+	 */
+	if (event->attr.precise_ip > 1 && x86_pmu.intel_cap.pebs_format < 2) {
+		u64 *br_type = &event->attr.branch_sample_type;
 
-			if (has_branch_stack(event)) {
-				if (!precise_br_compat(event))
-					return -EOPNOTSUPP;
+		if (has_branch_stack(event)) {
+			if (!precise_br_compat(event))
+				return -EOPNOTSUPP;
 
-				/* branch_sample_type is compatible */
+			/* branch_sample_type is compatible */
 
-			} else {
-				/*
-				 * user did not specify  branch_sample_type
-				 *
-				 * For PEBS fixups, we capture all
-				 * the branches at the priv level of the
-				 * event.
-				 */
-				*br_type = PERF_SAMPLE_BRANCH_ANY;
+		} else {
+			/*
+			 * user did not specify  branch_sample_type
+			 *
+			 * For PEBS fixups, we capture all
+			 * the branches at the priv level of the
+			 * event.
+			 */
+			*br_type = PERF_SAMPLE_BRANCH_ANY;
 
-				if (!event->attr.exclude_user)
-					*br_type |= PERF_SAMPLE_BRANCH_USER;
+			if (!event->attr.exclude_user)
+				*br_type |= PERF_SAMPLE_BRANCH_USER;
 
-				if (!event->attr.exclude_kernel)
-					*br_type |= PERF_SAMPLE_BRANCH_KERNEL;
-			}
+			if (!event->attr.exclude_kernel)
+				*br_type |= PERF_SAMPLE_BRANCH_KERNEL;
 		}
 	}
+
+	if (event->attr.branch_sample_type & PERF_SAMPLE_BRANCH_CALL_STACK)
+		event->attach_state |= PERF_ATTACH_TASK_DATA;
 
 	/*
 	 * Generate PMC IRQs:
@@ -1327,8 +1333,6 @@ x86_pmu_notifier(struct notifier_block *self, unsigned long action, void *hcpu)
 		break;
 
 	case CPU_STARTING:
-		if (x86_pmu.attr_rdpmc)
-			set_in_cr4(X86_CR4_PCE);
 		if (x86_pmu.cpu_starting)
 			x86_pmu.cpu_starting(cpu);
 		break;
@@ -1804,14 +1808,44 @@ static int x86_pmu_event_init(struct perf_event *event)
 			event->destroy(event);
 	}
 
+	if (ACCESS_ONCE(x86_pmu.attr_rdpmc))
+		event->hw.flags |= PERF_X86_EVENT_RDPMC_ALLOWED;
+
 	return err;
+}
+
+static void refresh_pce(void *ignored)
+{
+	if (current->mm)
+		load_mm_cr4(current->mm);
+}
+
+static void x86_pmu_event_mapped(struct perf_event *event)
+{
+	if (!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED))
+		return;
+
+	if (atomic_inc_return(&current->mm->context.perf_rdpmc_allowed) == 1)
+		on_each_cpu_mask(mm_cpumask(current->mm), refresh_pce, NULL, 1);
+}
+
+static void x86_pmu_event_unmapped(struct perf_event *event)
+{
+	if (!current->mm)
+		return;
+
+	if (!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED))
+		return;
+
+	if (atomic_dec_and_test(&current->mm->context.perf_rdpmc_allowed))
+		on_each_cpu_mask(mm_cpumask(current->mm), refresh_pce, NULL, 1);
 }
 
 static int x86_pmu_event_idx(struct perf_event *event)
 {
 	int idx = event->hw.idx;
 
-	if (!x86_pmu.attr_rdpmc)
+	if (!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED))
 		return 0;
 
 	if (x86_pmu.num_counters_fixed && idx >= INTEL_PMC_IDX_FIXED) {
@@ -1829,16 +1863,6 @@ static ssize_t get_attr_rdpmc(struct device *cdev,
 	return snprintf(buf, 40, "%d\n", x86_pmu.attr_rdpmc);
 }
 
-static void change_rdpmc(void *info)
-{
-	bool enable = !!(unsigned long)info;
-
-	if (enable)
-		set_in_cr4(X86_CR4_PCE);
-	else
-		clear_in_cr4(X86_CR4_PCE);
-}
-
 static ssize_t set_attr_rdpmc(struct device *cdev,
 			      struct device_attribute *attr,
 			      const char *buf, size_t count)
@@ -1850,13 +1874,26 @@ static ssize_t set_attr_rdpmc(struct device *cdev,
 	if (ret)
 		return ret;
 
+	if (val > 2)
+		return -EINVAL;
+
 	if (x86_pmu.attr_rdpmc_broken)
 		return -ENOTSUPP;
 
-	if (!!val != !!x86_pmu.attr_rdpmc) {
-		x86_pmu.attr_rdpmc = !!val;
-		on_each_cpu(change_rdpmc, (void *)val, 1);
+	if ((val == 2) != (x86_pmu.attr_rdpmc == 2)) {
+		/*
+		 * Changing into or out of always available, aka
+		 * perf-event-bypassing mode.  This path is extremely slow,
+		 * but only root can trigger it, so it's okay.
+		 */
+		if (val == 2)
+			static_key_slow_inc(&rdpmc_always_available);
+		else
+			static_key_slow_dec(&rdpmc_always_available);
+		on_each_cpu(refresh_pce, NULL, 1);
 	}
+
+	x86_pmu.attr_rdpmc = val;
 
 	return count;
 }
@@ -1879,10 +1916,10 @@ static const struct attribute_group *x86_pmu_attr_groups[] = {
 	NULL,
 };
 
-static void x86_pmu_flush_branch_stack(void)
+static void x86_pmu_sched_task(struct perf_event_context *ctx, bool sched_in)
 {
-	if (x86_pmu.flush_branch_stack)
-		x86_pmu.flush_branch_stack();
+	if (x86_pmu.sched_task)
+		x86_pmu.sched_task(ctx, sched_in);
 }
 
 void perf_check_microcode(void)
@@ -1900,6 +1937,9 @@ static struct pmu pmu = {
 
 	.event_init		= x86_pmu_event_init,
 
+	.event_mapped		= x86_pmu_event_mapped,
+	.event_unmapped		= x86_pmu_event_unmapped,
+
 	.add			= x86_pmu_add,
 	.del			= x86_pmu_del,
 	.start			= x86_pmu_start,
@@ -1911,16 +1951,19 @@ static struct pmu pmu = {
 	.commit_txn		= x86_pmu_commit_txn,
 
 	.event_idx		= x86_pmu_event_idx,
-	.flush_branch_stack	= x86_pmu_flush_branch_stack,
+	.sched_task		= x86_pmu_sched_task,
+	.task_ctx_size          = sizeof(struct x86_perf_task_context),
 };
 
-void arch_perf_update_userpage(struct perf_event_mmap_page *userpg, u64 now)
+void arch_perf_update_userpage(struct perf_event *event,
+			       struct perf_event_mmap_page *userpg, u64 now)
 {
 	struct cyc2ns_data *data;
 
 	userpg->cap_user_time = 0;
 	userpg->cap_user_time_zero = 0;
-	userpg->cap_user_rdpmc = x86_pmu.attr_rdpmc;
+	userpg->cap_user_rdpmc =
+		!!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED);
 	userpg->pmc_width = x86_pmu.cntval_bits;
 
 	if (!sched_clock_stable())

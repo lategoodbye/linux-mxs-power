@@ -107,7 +107,7 @@ static const struct nla_policy ifa_ipv4_policy[IFA_MAX+1] = {
 
 static struct hlist_head inet_addr_lst[IN4_ADDR_HSIZE];
 
-static u32 inet_addr_hash(struct net *net, __be32 addr)
+static u32 inet_addr_hash(const struct net *net, __be32 addr)
 {
 	u32 val = (__force u32) addr ^ net_hash_mix(net);
 
@@ -548,6 +548,26 @@ struct in_ifaddr *inet_ifa_byprefix(struct in_device *in_dev, __be32 prefix,
 	return NULL;
 }
 
+static int ip_mc_config(struct sock *sk, bool join, const struct in_ifaddr *ifa)
+{
+	struct ip_mreqn mreq = {
+		.imr_multiaddr.s_addr = ifa->ifa_address,
+		.imr_ifindex = ifa->ifa_dev->dev->ifindex,
+	};
+	int ret;
+
+	ASSERT_RTNL();
+
+	lock_sock(sk);
+	if (join)
+		ret = ip_mc_join_group(sk, &mreq);
+	else
+		ret = ip_mc_leave_group(sk, &mreq);
+	release_sock(sk);
+
+	return ret;
+}
+
 static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
@@ -584,6 +604,8 @@ static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh)
 		    !inet_ifa_match(nla_get_be32(tb[IFA_ADDRESS]), ifa)))
 			continue;
 
+		if (ipv4_is_multicast(ifa->ifa_address))
+			ip_mc_config(net->ipv4.mc_autojoin_sk, false, ifa);
 		__inet_del_ifa(in_dev, ifap, 1, nlh, NETLINK_CB(skb).portid);
 		return 0;
 	}
@@ -838,6 +860,15 @@ static int inet_rtm_newaddr(struct sk_buff *skb, struct nlmsghdr *nlh)
 		 * userspace already relies on not having to provide this.
 		 */
 		set_ifa_lifetime(ifa, valid_lft, prefered_lft);
+		if (ifa->ifa_flags & IFA_F_MCAUTOJOIN) {
+			int ret = ip_mc_config(net->ipv4.mc_autojoin_sk,
+					       true, ifa);
+
+			if (ret < 0) {
+				inet_free_ifa(ifa);
+				return ret;
+			}
+		}
 		return __inet_insert_ifa(ifa, nlh, NETLINK_CB(skb).portid);
 	} else {
 		inet_free_ifa(ifa);
@@ -1186,7 +1217,7 @@ __be32 inet_select_addr(const struct net_device *dev, __be32 dst, int scope)
 no_in_dev:
 
 	/* Not loopback addresses on loopback should be preferred
-	   in this case. It is importnat that lo is the first interface
+	   in this case. It is important that lo is the first interface
 	   in dev_base list.
 	 */
 	for_each_netdev_rcu(net, dev) {
@@ -1522,7 +1553,8 @@ static int inet_fill_ifaddr(struct sk_buff *skb, struct in_ifaddr *ifa,
 			  preferred, valid))
 		goto nla_put_failure;
 
-	return nlmsg_end(skb, nlh);
+	nlmsg_end(skb, nlh);
+	return 0;
 
 nla_put_failure:
 	nlmsg_cancel(skb, nlh);
@@ -1566,7 +1598,7 @@ static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 				if (inet_fill_ifaddr(skb, ifa,
 					     NETLINK_CB(cb->skb).portid,
 					     cb->nlh->nlmsg_seq,
-					     RTM_NEWADDR, NLM_F_MULTI) <= 0) {
+					     RTM_NEWADDR, NLM_F_MULTI) < 0) {
 					rcu_read_unlock();
 					goto done;
 				}
@@ -1749,7 +1781,8 @@ static int inet_netconf_fill_devconf(struct sk_buff *skb, int ifindex,
 			IPV4_DEVCONF(*devconf, PROXY_ARP)) < 0)
 		goto nla_put_failure;
 
-	return nlmsg_end(skb, nlh);
+	nlmsg_end(skb, nlh);
+	return 0;
 
 nla_put_failure:
 	nlmsg_cancel(skb, nlh);
@@ -1881,7 +1914,7 @@ static int inet_netconf_dump_devconf(struct sk_buff *skb,
 						      cb->nlh->nlmsg_seq,
 						      RTM_NEWNETCONF,
 						      NLM_F_MULTI,
-						      -1) <= 0) {
+						      -1) < 0) {
 				rcu_read_unlock();
 				goto done;
 			}
@@ -1897,7 +1930,7 @@ cont:
 					      NETLINK_CB(cb->skb).portid,
 					      cb->nlh->nlmsg_seq,
 					      RTM_NEWNETCONF, NLM_F_MULTI,
-					      -1) <= 0)
+					      -1) < 0)
 			goto done;
 		else
 			h++;
@@ -1908,7 +1941,7 @@ cont:
 					      NETLINK_CB(cb->skb).portid,
 					      cb->nlh->nlmsg_seq,
 					      RTM_NEWNETCONF, NLM_F_MULTI,
-					      -1) <= 0)
+					      -1) < 0)
 			goto done;
 		else
 			h++;
@@ -2320,7 +2353,7 @@ static __net_initdata struct pernet_operations devinet_ops = {
 	.exit = devinet_exit_net,
 };
 
-static struct rtnl_af_ops inet_af_ops = {
+static struct rtnl_af_ops inet_af_ops __read_mostly = {
 	.family		  = AF_INET,
 	.fill_link_af	  = inet_fill_link_af,
 	.get_link_af_size = inet_get_link_af_size,

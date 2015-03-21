@@ -32,7 +32,7 @@
 #include <linux/netfilter_ipv6.h>
 #include <linux/skbuff.h>
 #include <linux/compat.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/ioctls.h>
 
 #include <net/net_namespace.h>
@@ -456,9 +456,8 @@ int rawv6_rcv(struct sock *sk, struct sk_buff *skb)
  *	we return it, otherwise we block.
  */
 
-static int rawv6_recvmsg(struct kiocb *iocb, struct sock *sk,
-		  struct msghdr *msg, size_t len,
-		  int noblock, int flags, int *addr_len)
+static int rawv6_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+			 int noblock, int flags, int *addr_len)
 {
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	DECLARE_SOCKADDR(struct sockaddr_in6 *, sin6, msg->msg_name);
@@ -609,7 +608,7 @@ out:
 	return err;
 }
 
-static int rawv6_send_hdrinc(struct sock *sk, void *from, int length,
+static int rawv6_send_hdrinc(struct sock *sk, struct msghdr *msg, int length,
 			struct flowi6 *fl6, struct dst_entry **dstp,
 			unsigned int flags)
 {
@@ -648,7 +647,7 @@ static int rawv6_send_hdrinc(struct sock *sk, void *from, int length,
 	skb->ip_summed = CHECKSUM_NONE;
 
 	skb->transport_header = skb->network_header;
-	err = memcpy_fromiovecend((void *)iph, from, 0, length);
+	err = memcpy_from_msg(iph, msg, length);
 	if (err)
 		goto error_fault;
 
@@ -730,8 +729,7 @@ static int raw6_getfrag(void *from, char *to, int offset, int len, int odd,
 	return ip_generic_getfrag(rfv->msg, to, offset, len, odd, skb);
 }
 
-static int rawv6_sendmsg(struct kiocb *iocb, struct sock *sk,
-		   struct msghdr *msg, size_t len)
+static int rawv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 {
 	struct ipv6_txoptions opt_space;
 	DECLARE_SOCKADDR(struct sockaddr_in6 *, sin6, msg->msg_name);
@@ -886,8 +884,7 @@ static int rawv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 
 back_from_confirm:
 	if (inet->hdrincl)
-		/* XXX: stripping const */
-		err = rawv6_send_hdrinc(sk, (struct iovec *)msg->msg_iter.iov, len, &fl6, &dst, msg->msg_flags);
+		err = rawv6_send_hdrinc(sk, msg, len, &fl6, &dst, msg->msg_flags);
 	else {
 		lock_sock(sk);
 		err = ip6_append_data(sk, raw6_getfrag, &rfv,

@@ -377,6 +377,9 @@ static void dwc2_handle_disconnect_intr(struct dwc2_hsotg *hsotg)
 		dwc2_is_host_mode(hsotg) ? "Host" : "Device",
 		dwc2_op_state_str(hsotg));
 
+	if (hsotg->op_state == OTG_STATE_A_HOST)
+		dwc2_hcd_disconnect(hsotg);
+
 	/* Change to L3 (OFF) state */
 	hsotg->lx_state = DWC2_L3;
 
@@ -476,12 +479,12 @@ irqreturn_t dwc2_handle_common_intr(int irq, void *dev)
 	u32 gintsts;
 	irqreturn_t retval = IRQ_NONE;
 
+	spin_lock(&hsotg->lock);
+
 	if (!dwc2_is_controller_alive(hsotg)) {
 		dev_warn(hsotg->dev, "Controller is dead\n");
 		goto out;
 	}
-
-	spin_lock(&hsotg->lock);
 
 	gintsts = dwc2_read_common_intr(hsotg);
 	if (gintsts & ~GINTSTS_PRTINT)
@@ -515,8 +518,8 @@ irqreturn_t dwc2_handle_common_intr(int irq, void *dev)
 		}
 	}
 
-	spin_unlock(&hsotg->lock);
 out:
+	spin_unlock(&hsotg->lock);
 	return retval;
 }
 EXPORT_SYMBOL_GPL(dwc2_handle_common_intr);

@@ -1281,6 +1281,25 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  *	@alter contains the flag indicating whether changes are to be made.
  *	Return 0 if permission is granted.
  *
+ * @binder_set_context_mgr
+ *	Check whether @mgr is allowed to be the binder context manager.
+ *	@mgr contains the task_struct for the task being registered.
+ *	Return 0 if permission is granted.
+ * @binder_transaction
+ *	Check whether @from is allowed to invoke a binder transaction call
+ *	to @to.
+ *	@from contains the task_struct for the sending task.
+ *	@to contains the task_struct for the receiving task.
+ * @binder_transfer_binder
+ *	Check whether @from is allowed to transfer a binder reference to @to.
+ *	@from contains the task_struct for the sending task.
+ *	@to contains the task_struct for the receiving task.
+ * @binder_transfer_file
+ *	Check whether @from is allowed to transfer @file to @to.
+ *	@from contains the task_struct for the sending task.
+ *	@file contains the struct file being transferred.
+ *	@to contains the task_struct for the receiving task.
+ *
  * @ptrace_access_check:
  *	Check permission before allowing the current process to trace the
  *	@child process.
@@ -1441,6 +1460,14 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
 struct security_operations {
 	char name[SECURITY_NAME_MAX + 1];
 
+	int (*binder_set_context_mgr) (struct task_struct *mgr);
+	int (*binder_transaction) (struct task_struct *from,
+				   struct task_struct *to);
+	int (*binder_transfer_binder) (struct task_struct *from,
+				       struct task_struct *to);
+	int (*binder_transfer_file) (struct task_struct *from,
+				     struct task_struct *to, struct file *file);
+
 	int (*ptrace_access_check) (struct task_struct *child, unsigned int mode);
 	int (*ptrace_traceme) (struct task_struct *parent);
 	int (*capget) (struct task_struct *target,
@@ -1529,7 +1556,7 @@ struct security_operations {
 	int (*inode_follow_link) (struct dentry *dentry, struct nameidata *nd);
 	int (*inode_permission) (struct inode *inode, int mask);
 	int (*inode_setattr)	(struct dentry *dentry, struct iattr *attr);
-	int (*inode_getattr) (struct vfsmount *mnt, struct dentry *dentry);
+	int (*inode_getattr) (const struct path *path);
 	int (*inode_setxattr) (struct dentry *dentry, const char *name,
 			       const void *value, size_t size, int flags);
 	void (*inode_post_setxattr) (struct dentry *dentry, const char *name,
@@ -1739,6 +1766,13 @@ extern void __init security_fixup_ops(struct security_operations *ops);
 
 
 /* Security operations */
+int security_binder_set_context_mgr(struct task_struct *mgr);
+int security_binder_transaction(struct task_struct *from,
+				struct task_struct *to);
+int security_binder_transfer_binder(struct task_struct *from,
+				    struct task_struct *to);
+int security_binder_transfer_file(struct task_struct *from,
+				  struct task_struct *to, struct file *file);
 int security_ptrace_access_check(struct task_struct *child, unsigned int mode);
 int security_ptrace_traceme(struct task_struct *parent);
 int security_capget(struct task_struct *target,
@@ -1809,7 +1843,7 @@ int security_inode_readlink(struct dentry *dentry);
 int security_inode_follow_link(struct dentry *dentry, struct nameidata *nd);
 int security_inode_permission(struct inode *inode, int mask);
 int security_inode_setattr(struct dentry *dentry, struct iattr *attr);
-int security_inode_getattr(struct vfsmount *mnt, struct dentry *dentry);
+int security_inode_getattr(const struct path *path);
 int security_inode_setxattr(struct dentry *dentry, const char *name,
 			    const void *value, size_t size, int flags);
 void security_inode_post_setxattr(struct dentry *dentry, const char *name,
@@ -1923,6 +1957,30 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  */
 
 static inline int security_init(void)
+{
+	return 0;
+}
+
+static inline int security_binder_set_context_mgr(struct task_struct *mgr)
+{
+	return 0;
+}
+
+static inline int security_binder_transaction(struct task_struct *from,
+					      struct task_struct *to)
+{
+	return 0;
+}
+
+static inline int security_binder_transfer_binder(struct task_struct *from,
+						  struct task_struct *to)
+{
+	return 0;
+}
+
+static inline int security_binder_transfer_file(struct task_struct *from,
+						struct task_struct *to,
+						struct file *file)
 {
 	return 0;
 }
@@ -2201,8 +2259,7 @@ static inline int security_inode_setattr(struct dentry *dentry,
 	return 0;
 }
 
-static inline int security_inode_getattr(struct vfsmount *mnt,
-					  struct dentry *dentry)
+static inline int security_inode_getattr(const struct path *path)
 {
 	return 0;
 }

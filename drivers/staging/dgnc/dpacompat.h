@@ -11,12 +11,6 @@
  * but WITHOUT ANY WARRANTY, EXPRESS OR IMPLIED; without even the
  * implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
  * PURPOSE.  See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
- *      NOTE: THIS IS A SHARED HEADER. DO NOT CHANGE CODING STYLE!!!
  */
 
 
@@ -51,7 +45,7 @@ struct ni_info {
 
 #define RW_READ		1
 #define RW_WRITE        2
-#define DIGI_KME        ('e'<<8) | 98           /* Read/Write Host */
+#define DIGI_KME        (('e'<<8) | 98)         /* Read/Write Host */
 
 #define SUBTYPE         0007
 #define T_PCXI          0000
@@ -106,10 +100,10 @@ struct ni_info {
 
 /* Ioctls needed for dpa operation */
 
-#define DIGI_GETDD      ('d'<<8) | 248          /* get driver info      */
-#define DIGI_GETBD      ('d'<<8) | 249          /* get board info       */
-#define DIGI_GET_NI_INFO ('d'<<8) | 250		/* nonintelligent state snfo */
+#define DIGI_GETDD      (('d'<<8) | 248)       /* get driver info      */
+#define DIGI_GETBD      (('d'<<8) | 249)       /* get board info       */
+#define DIGI_GET_NI_INFO (('d'<<8) | 250)	/* nonintelligent state snfo */
 
 /* Other special ioctls */
-#define DIGI_TIMERIRQ ('d'<<8) | 251		/* Enable/disable RS_TIMER use */
-#define DIGI_LOOPBACK ('d'<<8) | 252		/* Enable/disable UART internal loopback */
+#define DIGI_TIMERIRQ (('d'<<8) | 251)		/* Enable/disable RS_TIMER use */
+#define DIGI_LOOPBACK (('d'<<8) | 252)		/* Enable/disable UART internal loopback */

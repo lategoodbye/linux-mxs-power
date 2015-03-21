@@ -75,6 +75,17 @@ static struct clk_pll pll3 = {
 	},
 };
 
+static struct clk_regmap pll4_vote = {
+	.enable_reg = 0x34c0,
+	.enable_mask = BIT(4),
+	.hw.init = &(struct clk_init_data){
+		.name = "pll4_vote",
+		.parent_names = (const char *[]){ "pll4" },
+		.num_parents = 1,
+		.ops = &clk_pll_vote_ops,
+	},
+};
+
 static struct clk_pll pll8 = {
 	.l_reg = 0x3144,
 	.m_reg = 0x3148,
@@ -514,8 +525,8 @@ static struct freq_tbl clk_tbl_gsbi_qup[] = {
 	{ 10800000, P_PXO,  1, 2,  5 },
 	{ 15060000, P_PLL8, 1, 2, 51 },
 	{ 24000000, P_PLL8, 4, 1,  4 },
+	{ 25000000, P_PXO,  1, 0,  0 },
 	{ 25600000, P_PLL8, 1, 1, 15 },
-	{ 27000000, P_PXO,  1, 0,  0 },
 	{ 48000000, P_PLL8, 4, 1,  2 },
 	{ 51200000, P_PLL8, 1, 2, 15 },
 	{ }
@@ -2163,6 +2174,7 @@ static struct clk_regmap *gcc_ipq806x_clks[] = {
 	[PLL0] = &pll0.clkr,
 	[PLL0_VOTE] = &pll0_vote,
 	[PLL3] = &pll3.clkr,
+	[PLL4_VOTE] = &pll4_vote,
 	[PLL8] = &pll8.clkr,
 	[PLL8_VOTE] = &pll8_vote,
 	[PLL14] = &pll14.clkr,

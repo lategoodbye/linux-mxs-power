@@ -267,7 +267,7 @@ static void dm_check_rate_adaptive(struct net_device *dev)
 	bool bshort_gi_enabled = false;
 	static u8 ping_rssi_state;
 
-	if (IS_NIC_DOWN(priv)) {
+	if (!priv->up) {
 		RT_TRACE(COMP_RATE, "<---- dm_check_rate_adaptive(): driver is going to unload\n");
 		return;
 	}
@@ -1569,7 +1569,7 @@ void dm_restore_dynamic_mechanism_state(struct net_device *dev)
 	u32	reg_ratr = priv->rate_adaptive.last_ratr;
 	u32 ratr_value;
 
-	if (IS_NIC_DOWN(priv)) {
+	if (!priv->up) {
 		RT_TRACE(COMP_RATE, "<---- dm_restore_dynamic_mechanism_state(): driver is going to unload\n");
 		return;
 	}
@@ -1661,8 +1661,8 @@ void dm_change_dynamic_initgain_thresh(struct net_device *dev,
 		dm_digtable.rssi_low_thresh = dm_value;
 	} else if (dm_type == DIG_TYPE_THRESH_HIGHPWR_HIGH) {
 		dm_digtable.rssi_high_power_highthresh = dm_value;
-	} else if (dm_type == DIG_TYPE_THRESH_HIGHPWR_HIGH) {
-		dm_digtable.rssi_high_power_highthresh = dm_value;
+	} else if (dm_type == DIG_TYPE_THRESH_HIGHPWR_LOW) {
+		dm_digtable.rssi_high_power_lowthresh = dm_value;
 	} else if (dm_type == DIG_TYPE_ENABLE) {
 		dm_digtable.dig_state		= DM_STA_DIG_MAX;
 		dm_digtable.dig_enable_flag	= true;
@@ -2665,14 +2665,14 @@ void dm_fsync_timer_callback(unsigned long data)
 			if (timer_pending(&priv->fsync_timer))
 				del_timer_sync(&priv->fsync_timer);
 			priv->fsync_timer.expires = jiffies +
-				 MSECS(priv->rtllib->fsync_time_interval *
+				 msecs_to_jiffies(priv->rtllib->fsync_time_interval *
 				 priv->rtllib->fsync_multiple_timeinterval);
 			add_timer(&priv->fsync_timer);
 		} else {
 			if (timer_pending(&priv->fsync_timer))
 				del_timer_sync(&priv->fsync_timer);
 			priv->fsync_timer.expires = jiffies +
-				 MSECS(priv->rtllib->fsync_time_interval);
+				 msecs_to_jiffies(priv->rtllib->fsync_time_interval);
 			add_timer(&priv->fsync_timer);
 		}
 	} else {
@@ -2762,7 +2762,7 @@ static void dm_StartSWFsync(struct net_device *dev)
 	if (timer_pending(&priv->fsync_timer))
 		del_timer_sync(&priv->fsync_timer);
 	priv->fsync_timer.expires = jiffies +
-				    MSECS(priv->rtllib->fsync_time_interval);
+				    msecs_to_jiffies(priv->rtllib->fsync_time_interval);
 	add_timer(&priv->fsync_timer);
 
 	write_nic_dword(dev, rOFDM0_RxDetector2, 0x465c12cd);

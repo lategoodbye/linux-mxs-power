@@ -676,7 +676,6 @@ void init_task_runnable_average(struct task_struct *p)
 {
 	u32 slice;
 
-	p->se.avg.decay_count = 0;
 	slice = sched_slice(task_cfs_rq(p), &p->se) >> 10;
 	p->se.avg.runnable_avg_sum = slice;
 	p->se.avg.runnable_avg_period = slice;
@@ -1197,9 +1196,11 @@ static void task_numa_assign(struct task_numa_env *env,
 static bool load_too_imbalanced(long src_load, long dst_load,
 				struct task_numa_env *env)
 {
-	long imb, old_imb;
-	long orig_src_load, orig_dst_load;
 	long src_capacity, dst_capacity;
+	long orig_src_load;
+	long load_a, load_b;
+	long moved_load;
+	long imb;
 
 	/*
 	 * The load is corrected for the CPU capacity available on each node.
@@ -1212,30 +1213,39 @@ static bool load_too_imbalanced(long src_load, long dst_load,
 	dst_capacity = env->dst_stats.compute_capacity;
 
 	/* We care about the slope of the imbalance, not the direction. */
-	if (dst_load < src_load)
-		swap(dst_load, src_load);
+	load_a = dst_load;
+	load_b = src_load;
+	if (load_a < load_b)
+		swap(load_a, load_b);
 
 	/* Is the difference below the threshold? */
-	imb = dst_load * src_capacity * 100 -
-	      src_load * dst_capacity * env->imbalance_pct;
+	imb = load_a * src_capacity * 100 -
+		load_b * dst_capacity * env->imbalance_pct;
 	if (imb <= 0)
 		return false;
 
 	/*
 	 * The imbalance is above the allowed threshold.
-	 * Compare it with the old imbalance.
+	 * Allow a move that brings us closer to a balanced situation,
+	 * without moving things past the point of balance.
 	 */
 	orig_src_load = env->src_stats.load;
-	orig_dst_load = env->dst_stats.load;
 
-	if (orig_dst_load < orig_src_load)
-		swap(orig_dst_load, orig_src_load);
+	/*
+	 * In a task swap, there will be one load moving from src to dst,
+	 * and another moving back. This is the net sum of both moves.
+	 * A simple task move will always have a positive value.
+	 * Allow the move if it brings the system closer to a balanced
+	 * situation, without crossing over the balance point.
+	 */
+	moved_load = orig_src_load - src_load;
 
-	old_imb = orig_dst_load * src_capacity * 100 -
-		  orig_src_load * dst_capacity * env->imbalance_pct;
-
-	/* Would this change make things worse? */
-	return (imb > old_imb);
+	if (moved_load > 0)
+		/* Moving src -> dst. Did we overshoot balance? */
+		return src_load * dst_capacity < dst_load * src_capacity;
+	else
+		/* Moving dst -> src. Did we overshoot balance? */
+		return dst_load * src_capacity < src_load * dst_capacity;
 }
 
 /*
@@ -1730,7 +1740,7 @@ static int preferred_group_nid(struct task_struct *p, int nid)
 	nodes = node_online_map;
 	for (dist = sched_max_numa_distance; dist > LOCAL_DISTANCE; dist--) {
 		unsigned long max_faults = 0;
-		nodemask_t max_group;
+		nodemask_t max_group = NODE_MASK_NONE;
 		int a, b;
 
 		/* Are there nodes at this distance from each other? */
@@ -1764,6 +1774,8 @@ static int preferred_group_nid(struct task_struct *p, int nid)
 			}
 		}
 		/* Next round, evaluate the nodes within max_group. */
+		if (!max_faults)
+			break;
 		nodes = max_group;
 	}
 	return nid;
@@ -2574,11 +2586,11 @@ static inline u64 __synchronize_entity_decay(struct sched_entity *se)
 	u64 decays = atomic64_read(&cfs_rq->decay_counter);
 
 	decays -= se->avg.decay_count;
+	se->avg.decay_count = 0;
 	if (!decays)
 		return 0;
 
 	se->avg.load_avg_contrib = decay_load(se->avg.load_avg_contrib, decays);
-	se->avg.decay_count = 0;
 
 	return decays;
 }
@@ -5157,7 +5169,7 @@ static void yield_task_fair(struct rq *rq)
 		 * so we don't do microscopic update in schedule()
 		 * and double the fastpath cost.
 		 */
-		 rq->skip_clock_update = 1;
+		rq_clock_skip_update(rq, true);
 	}
 
 	set_skip_buddy(se);
@@ -5949,8 +5961,8 @@ static unsigned long scale_rt_capacity(int cpu)
 	 */
 	age_stamp = ACCESS_ONCE(rq->age_stamp);
 	avg = ACCESS_ONCE(rq->rt_avg);
+	delta = __rq_clock_broken(rq) - age_stamp;
 
-	delta = rq_clock(rq) - age_stamp;
 	if (unlikely(delta < 0))
 		delta = 0;
 

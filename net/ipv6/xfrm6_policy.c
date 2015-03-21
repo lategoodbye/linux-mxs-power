@@ -130,12 +130,18 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 {
 	struct flowi6 *fl6 = &fl->u.ip6;
 	int onlyproto = 0;
-	u16 offset = skb_network_header_len(skb);
 	const struct ipv6hdr *hdr = ipv6_hdr(skb);
+	u16 offset = sizeof(*hdr);
 	struct ipv6_opt_hdr *exthdr;
 	const unsigned char *nh = skb_network_header(skb);
-	u8 nexthdr = nh[IP6CB(skb)->nhoff];
+	u16 nhoff = IP6CB(skb)->nhoff;
 	int oif = 0;
+	u8 nexthdr;
+
+	if (!nhoff)
+		nhoff = offsetof(struct ipv6hdr, nexthdr);
+
+	nexthdr = nh[nhoff];
 
 	if (skb_dst(skb))
 		oif = skb_dst(skb)->dev->ifindex;
@@ -194,6 +200,7 @@ _decode_session6(struct sk_buff *skb, struct flowi *fl, int reverse)
 
 #if IS_ENABLED(CONFIG_IPV6_MIP6)
 		case IPPROTO_MH:
+			offset += ipv6_optlen(exthdr);
 			if (!onlyproto && pskb_may_pull(skb, nh + offset + 3 - skb->data)) {
 				struct ip6_mh *mh;
 
@@ -286,7 +293,6 @@ static void xfrm6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 
 static struct dst_ops xfrm6_dst_ops = {
 	.family =		AF_INET6,
-	.protocol =		cpu_to_be16(ETH_P_IPV6),
 	.gc =			xfrm6_garbage_collect,
 	.update_pmtu =		xfrm6_update_pmtu,
 	.redirect =		xfrm6_redirect,

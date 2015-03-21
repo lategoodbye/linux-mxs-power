@@ -23,7 +23,7 @@ config MIPS
 	select HAVE_KRETPROBES
 	select HAVE_DEBUG_KMEMLEAK
 	select HAVE_SYSCALL_TRACEPOINTS
-	select ARCH_BINFMT_ELF_RANDOMIZE_PIE
+	select ARCH_HAS_ELF_RANDOMIZE
 	select HAVE_ARCH_TRANSPARENT_HUGEPAGE if CPU_SUPPORTS_HUGEPAGES && 64BIT
 	select RTC_LIB if !MACH_LOONGSON
 	select GENERIC_ATOMIC64 if !64BIT
@@ -54,6 +54,7 @@ config MIPS
 	select CPU_PM if CPU_IDLE
 	select ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST
 	select ARCH_BINFMT_ELF_STATE
+	select SYSCTL_EXCEPTION_TRACE
 
 menu "Machine selection"
 
@@ -351,6 +352,33 @@ config MACH_LOONGSON1
 	  the ICT (Institute of Computing Technology) and the Chinese Academy
 	  of Sciences.
 
+config MACH_PISTACHIO
+	bool "IMG Pistachio SoC based boards"
+	select ARCH_REQUIRE_GPIOLIB
+	select BOOT_ELF32
+	select BOOT_RAW
+	select CEVT_R4K
+	select CLKSRC_MIPS_GIC
+	select COMMON_CLK
+	select CSRC_R4K
+	select DMA_MAYBE_COHERENT
+	select IRQ_CPU
+	select LIBFDT
+	select MFD_SYSCON
+	select MIPS_CPU_SCACHE
+	select MIPS_GIC
+	select PINCTRL
+	select REGULATOR
+	select SYS_HAS_CPU_MIPS32_R2
+	select SYS_SUPPORTS_32BIT_KERNEL
+	select SYS_SUPPORTS_LITTLE_ENDIAN
+	select SYS_SUPPORTS_MIPS_CPS
+	select SYS_SUPPORTS_MULTITHREADING
+	select SYS_SUPPORTS_ZBOOT
+	select USE_OF
+	help
+	  This enables support for the IMG Pistachio SoC platform.
+
 config MIPS_MALTA
 	bool "MIPS Malta board"
 	select ARCH_MAY_HAVE_PC_FDC
@@ -376,13 +404,17 @@ config MIPS_MALTA
 	select SYS_HAS_CPU_MIPS32_R1
 	select SYS_HAS_CPU_MIPS32_R2
 	select SYS_HAS_CPU_MIPS32_R3_5
+	select SYS_HAS_CPU_MIPS32_R5
+	select SYS_HAS_CPU_MIPS32_R6
 	select SYS_HAS_CPU_MIPS64_R1
 	select SYS_HAS_CPU_MIPS64_R2
+	select SYS_HAS_CPU_MIPS64_R6
 	select SYS_HAS_CPU_NEVADA
 	select SYS_HAS_CPU_RM7000
 	select SYS_SUPPORTS_32BIT_KERNEL
 	select SYS_SUPPORTS_64BIT_KERNEL
 	select SYS_SUPPORTS_BIG_ENDIAN
+	select SYS_SUPPORTS_HIGHMEM
 	select SYS_SUPPORTS_LITTLE_ENDIAN
 	select SYS_SUPPORTS_MICROMIPS
 	select SYS_SUPPORTS_MIPS_CMP
@@ -1033,6 +1065,9 @@ config MIPS_MACHINE
 config NO_IOPORT_MAP
 	def_bool n
 
+config GENERIC_CSUM
+	bool
+
 config GENERIC_ISA_DMA
 	bool
 	select ZONE_DMA if GENERIC_ISA_DMA_SUPPORT_BROKEN=n
@@ -1145,6 +1180,9 @@ config SOC_PNX833X
 config SOC_PNX8335
 	bool
 	select SOC_PNX833X
+
+config MIPS_SPRAM
+	bool
 
 config SWAP_IO_SPACE
 	bool
@@ -1304,6 +1342,22 @@ config CPU_MIPS32_R2
 	  specific type of processor in your system, choose those that one
 	  otherwise CPU_MIPS32_R1 is a safe bet for any MIPS32 system.
 
+config CPU_MIPS32_R6
+	bool "MIPS32 Release 6 (EXPERIMENTAL)"
+	depends on SYS_HAS_CPU_MIPS32_R6
+	select CPU_HAS_PREFETCH
+	select CPU_SUPPORTS_32BIT_KERNEL
+	select CPU_SUPPORTS_HIGHMEM
+	select CPU_SUPPORTS_MSA
+	select GENERIC_CSUM
+	select HAVE_KVM
+	select MIPS_O32_FP64_SUPPORT
+	help
+	  Choose this option to build a kernel for release 6 or later of the
+	  MIPS32 architecture.  New MIPS processors, starting with the Warrior
+	  family, are based on a MIPS32r6 processor. If you own an older
+	  processor, you probably need to select MIPS32r1 or MIPS32r2 instead.
+
 config CPU_MIPS64_R1
 	bool "MIPS64 Release 1"
 	depends on SYS_HAS_CPU_MIPS64_R1
@@ -1338,6 +1392,21 @@ config CPU_MIPS64_R2
 	  MIPS processor are based on a MIPS64 processor.  If you know the
 	  specific type of processor in your system, choose those that one
 	  otherwise CPU_MIPS64_R1 is a safe bet for any MIPS64 system.
+
+config CPU_MIPS64_R6
+	bool "MIPS64 Release 6 (EXPERIMENTAL)"
+	depends on SYS_HAS_CPU_MIPS64_R6
+	select CPU_HAS_PREFETCH
+	select CPU_SUPPORTS_32BIT_KERNEL
+	select CPU_SUPPORTS_64BIT_KERNEL
+	select CPU_SUPPORTS_HIGHMEM
+	select CPU_SUPPORTS_MSA
+	select GENERIC_CSUM
+	help
+	  Choose this option to build a kernel for release 6 or later of the
+	  MIPS64 architecture.  New MIPS processors, starting with the Warrior
+	  family, are based on a MIPS64r6 processor. If you own an older
+	  processor, you probably need to select MIPS64r1 or MIPS64r2 instead.
 
 config CPU_R3000
 	bool "R3000"
@@ -1539,7 +1608,7 @@ endchoice
 config CPU_MIPS32_3_5_FEATURES
 	bool "MIPS32 Release 3.5 Features"
 	depends on SYS_HAS_CPU_MIPS32_R3_5
-	depends on CPU_MIPS32_R2
+	depends on CPU_MIPS32_R2 || CPU_MIPS32_R6
 	help
 	  Choose this option to build a kernel for release 2 or later of the
 	  MIPS32 architecture including features from the 3.5 release such as
@@ -1555,6 +1624,33 @@ config CPU_MIPS32_3_5_EVA
 	  Addressing (EVA) on your MIPS32 core (such as proAptiv).
 	  One of its primary benefits is an increase in the maximum size
 	  of lowmem (up to 3GB). If unsure, say 'N' here.
+
+config CPU_MIPS32_R5_FEATURES
+	bool "MIPS32 Release 5 Features"
+	depends on SYS_HAS_CPU_MIPS32_R5
+	depends on CPU_MIPS32_R2
+	help
+	  Choose this option to build a kernel for release 2 or later of the
+	  MIPS32 architecture including features from release 5 such as
+	  support for Extended Physical Addressing (XPA).
+
+config CPU_MIPS32_R5_XPA
+	bool "Extended Physical Addressing (XPA)"
+	depends on CPU_MIPS32_R5_FEATURES
+	depends on !EVA
+	depends on !PAGE_SIZE_4KB
+	depends on SYS_SUPPORTS_HIGHMEM
+	select XPA
+	select HIGHMEM
+	select ARCH_PHYS_ADDR_T_64BIT
+	default n
+	help
+	  Choose this option if you want to enable the Extended Physical
+	  Addressing (XPA) on your MIPS32 core (such as P5600 series). The
+	  benefit is to increase physical addressing equal to or greater
+	  than 40 bits. Note that this has the side effect of turning on
+	  64-bit addressing which in turn makes the PTEs 64-bit in size.
+	  If unsure, say 'N' here.
 
 if CPU_LOONGSON2F
 config CPU_NOP_WORKAROUNDS
@@ -1659,10 +1755,19 @@ config SYS_HAS_CPU_MIPS32_R2
 config SYS_HAS_CPU_MIPS32_R3_5
 	bool
 
+config SYS_HAS_CPU_MIPS32_R5
+	bool
+
+config SYS_HAS_CPU_MIPS32_R6
+	bool
+
 config SYS_HAS_CPU_MIPS64_R1
 	bool
 
 config SYS_HAS_CPU_MIPS64_R2
+	bool
+
+config SYS_HAS_CPU_MIPS64_R6
 	bool
 
 config SYS_HAS_CPU_R3000
@@ -1764,11 +1869,11 @@ endmenu
 #
 config CPU_MIPS32
 	bool
-	default y if CPU_MIPS32_R1 || CPU_MIPS32_R2
+	default y if CPU_MIPS32_R1 || CPU_MIPS32_R2 || CPU_MIPS32_R6
 
 config CPU_MIPS64
 	bool
-	default y if CPU_MIPS64_R1 || CPU_MIPS64_R2
+	default y if CPU_MIPS64_R1 || CPU_MIPS64_R2 || CPU_MIPS64_R6
 
 #
 # These two indicate the revision of the architecture, either Release 1 or Release 2
@@ -1780,8 +1885,17 @@ config CPU_MIPSR1
 config CPU_MIPSR2
 	bool
 	default y if CPU_MIPS32_R2 || CPU_MIPS64_R2 || CPU_CAVIUM_OCTEON
+	select MIPS_SPRAM
+
+config CPU_MIPSR6
+	bool
+	default y if CPU_MIPS32_R6 || CPU_MIPS64_R6
+	select MIPS_SPRAM
 
 config EVA
+	bool
+
+config XPA
 	bool
 
 config SYS_SUPPORTS_32BIT_KERNEL
@@ -2013,6 +2127,19 @@ config MIPS_MT_FPAFF
 	default y
 	depends on MIPS_MT_SMP
 
+config MIPSR2_TO_R6_EMULATOR
+	bool "MIPS R2-to-R6 emulator"
+	depends on CPU_MIPSR6 && !SMP
+	default y
+	help
+	  Choose this option if you want to run non-R6 MIPS userland code.
+	  Even if you say 'Y' here, the emulator will still be disabled by
+	  default. You can enable it using the 'mipsr2emul' kernel option.
+	  The only reason this is a build-time option is to save ~14K from the
+	  final kernel image.
+comment "MIPS R2-to-R6 emulator is only available for UP kernels"
+	depends on SMP && CPU_MIPSR6
+
 config MIPS_VPE_LOADER
 	bool "VPE loader support."
 	depends on SYS_SUPPORTS_MULTITHREADING && MODULES
@@ -2148,7 +2275,7 @@ config CPU_HAS_SMARTMIPS
 	  here.
 
 config CPU_MICROMIPS
-	depends on 32BIT && SYS_SUPPORTS_MICROMIPS
+	depends on 32BIT && SYS_SUPPORTS_MICROMIPS && !CPU_MIPSR6
 	bool "microMIPS"
 	help
 	  When this option is enabled the kernel will be built using the
@@ -2535,6 +2662,11 @@ config STACKTRACE_SUPPORT
 	bool
 	default y
 
+config PGTABLE_LEVELS
+	int
+	default 3 if 64BIT && !PAGE_SIZE_64KB
+	default 2
+
 source "init/Kconfig"
 
 source "kernel/Kconfig.freezer"
@@ -2656,27 +2788,21 @@ config TRAD_SIGNALS
 	bool
 
 config MIPS32_COMPAT
-	bool "Kernel support for Linux/MIPS 32-bit binary compatibility"
-	depends on 64BIT
-	help
-	  Select this option if you want Linux/MIPS 32-bit binary
-	  compatibility. Since all software available for Linux/MIPS is
-	  currently 32-bit you should say Y here.
+	bool
 
 config COMPAT
 	bool
-	depends on MIPS32_COMPAT
-	select ARCH_WANT_OLD_COMPAT_IPC
-	default y
 
 config SYSVIPC_COMPAT
 	bool
-	depends on COMPAT && SYSVIPC
-	default y
 
 config MIPS32_O32
 	bool "Kernel support for o32 binaries"
-	depends on MIPS32_COMPAT
+	depends on 64BIT
+	select ARCH_WANT_OLD_COMPAT_IPC
+	select COMPAT
+	select MIPS32_COMPAT
+	select SYSVIPC_COMPAT if SYSVIPC
 	help
 	  Select this option if you want to run o32 binaries.  These are pure
 	  32-bit binaries as used by the 32-bit Linux/MIPS port.  Most of
@@ -2686,7 +2812,10 @@ config MIPS32_O32
 
 config MIPS32_N32
 	bool "Kernel support for n32 binaries"
-	depends on MIPS32_COMPAT
+	depends on 64BIT
+	select COMPAT
+	select MIPS32_COMPAT
+	select SYSVIPC_COMPAT if SYSVIPC
 	help
 	  Select this option if you want to run n32 binaries.  These are
 	  64-bit binaries using 32-bit quantities for addressing and certain

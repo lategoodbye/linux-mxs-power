@@ -302,8 +302,8 @@ static int rockchip_spi_prepare_message(struct spi_master *master,
 	return 0;
 }
 
-static int rockchip_spi_unprepare_message(struct spi_master *master,
-					  struct spi_message *msg)
+static void rockchip_spi_handle_err(struct spi_master *master,
+				    struct spi_message *msg)
 {
 	unsigned long flags;
 	struct rockchip_spi *rs = spi_master_get_devdata(master);
@@ -313,8 +313,8 @@ static int rockchip_spi_unprepare_message(struct spi_master *master,
 	/*
 	 * For DMA mode, we need terminate DMA channel and flush
 	 * fifo for the next transfer if DMA thansfer timeout.
-	 * unprepare_message() was called by core if transfer complete
-	 * or timeout. Maybe it is reasonable for error handling here.
+	 * handle_err() was called by core if transfer failed.
+	 * Maybe it is reasonable for error handling here.
 	 */
 	if (rs->use_dma) {
 		if (rs->state & RXBUSY) {
@@ -327,6 +327,12 @@ static int rockchip_spi_unprepare_message(struct spi_master *master,
 	}
 
 	spin_unlock_irqrestore(&rs->lock, flags);
+}
+
+static int rockchip_spi_unprepare_message(struct spi_master *master,
+					  struct spi_message *msg)
+{
+	struct rockchip_spi *rs = spi_master_get_devdata(master);
 
 	spi_enable_chip(rs, 0);
 
@@ -437,6 +443,7 @@ static void rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 	rs->state &= ~TXBUSY;
 	spin_unlock_irqrestore(&rs->lock, flags);
 
+	rxdesc = NULL;
 	if (rs->rx) {
 		rxconf.direction = rs->dma_rx.direction;
 		rxconf.src_addr = rs->dma_rx.addr;
@@ -453,6 +460,7 @@ static void rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 		rxdesc->callback_param = rs;
 	}
 
+	txdesc = NULL;
 	if (rs->tx) {
 		txconf.direction = rs->dma_tx.direction;
 		txconf.dst_addr = rs->dma_tx.addr;
@@ -470,7 +478,7 @@ static void rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 	}
 
 	/* rx must be started before tx due to spi instinct */
-	if (rs->rx) {
+	if (rxdesc) {
 		spin_lock_irqsave(&rs->lock, flags);
 		rs->state |= RXBUSY;
 		spin_unlock_irqrestore(&rs->lock, flags);
@@ -478,7 +486,7 @@ static void rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 		dma_async_issue_pending(rs->dma_rx.ch);
 	}
 
-	if (rs->tx) {
+	if (txdesc) {
 		spin_lock_irqsave(&rs->lock, flags);
 		rs->state |= TXBUSY;
 		spin_unlock_irqrestore(&rs->lock, flags);
@@ -686,6 +694,7 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	master->prepare_message = rockchip_spi_prepare_message;
 	master->unprepare_message = rockchip_spi_unprepare_message;
 	master->transfer_one = rockchip_spi_transfer_one;
+	master->handle_err = rockchip_spi_handle_err;
 
 	rs->dma_tx.ch = dma_request_slave_channel(rs->dev, "tx");
 	if (!rs->dma_tx.ch)

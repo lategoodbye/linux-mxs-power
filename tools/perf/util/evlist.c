@@ -7,7 +7,6 @@
  * Released under the GPL v2. (and only v2, not any later version)
  */
 #include "util.h"
-#include <api/fs/debugfs.h>
 #include <api/fs/fs.h>
 #include <poll.h>
 #include "cpumap.h"
@@ -1086,6 +1085,38 @@ int perf_evlist__set_filter(struct perf_evlist *evlist, const char *filter)
 	return err;
 }
 
+int perf_evlist__set_filter_pids(struct perf_evlist *evlist, size_t npids, pid_t *pids)
+{
+	char *filter;
+	int ret = -1;
+	size_t i;
+
+	for (i = 0; i < npids; ++i) {
+		if (i == 0) {
+			if (asprintf(&filter, "common_pid != %d", pids[i]) < 0)
+				return -1;
+		} else {
+			char *tmp;
+
+			if (asprintf(&tmp, "%s && common_pid != %d", filter, pids[i]) < 0)
+				goto out_free;
+
+			free(filter);
+			filter = tmp;
+		}
+	}
+
+	ret = perf_evlist__set_filter(evlist, filter);
+out_free:
+	free(filter);
+	return ret;
+}
+
+int perf_evlist__set_filter_pid(struct perf_evlist *evlist, pid_t pid)
+{
+	return perf_evlist__set_filter_pids(evlist, 1, &pid);
+}
+
 bool perf_evlist__valid_sample_type(struct perf_evlist *evlist)
 {
 	struct perf_evsel *pos;
@@ -1329,7 +1360,7 @@ int perf_evlist__prepare_workload(struct perf_evlist *evlist, struct target *tar
 		 * writing exactly one byte, in workload.cork_fd, usually via
 		 * perf_evlist__start_workload().
 		 *
-		 * For cancelling the workload without actuallin running it,
+		 * For cancelling the workload without actually running it,
 		 * the parent will just close workload.cork_fd, without writing
 		 * anything, i.e. read will return zero and we just exit()
 		 * here.
@@ -1434,33 +1465,6 @@ size_t perf_evlist__fprintf(struct perf_evlist *evlist, FILE *fp)
 	}
 
 	return printed + fprintf(fp, "\n");
-}
-
-int perf_evlist__strerror_tp(struct perf_evlist *evlist __maybe_unused,
-			     int err, char *buf, size_t size)
-{
-	char sbuf[128];
-
-	switch (err) {
-	case ENOENT:
-		scnprintf(buf, size, "%s",
-			  "Error:\tUnable to find debugfs\n"
-			  "Hint:\tWas your kernel was compiled with debugfs support?\n"
-			  "Hint:\tIs the debugfs filesystem mounted?\n"
-			  "Hint:\tTry 'sudo mount -t debugfs nodev /sys/kernel/debug'");
-		break;
-	case EACCES:
-		scnprintf(buf, size,
-			  "Error:\tNo permissions to read %s/tracing/events/raw_syscalls\n"
-			  "Hint:\tTry 'sudo mount -o remount,mode=755 %s'\n",
-			  debugfs_mountpoint, debugfs_mountpoint);
-		break;
-	default:
-		scnprintf(buf, size, "%s", strerror_r(err, sbuf, sizeof(sbuf)));
-		break;
-	}
-
-	return 0;
 }
 
 int perf_evlist__strerror_open(struct perf_evlist *evlist __maybe_unused,

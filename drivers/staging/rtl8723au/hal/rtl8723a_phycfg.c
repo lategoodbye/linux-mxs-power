@@ -126,7 +126,7 @@ PHY_SetBBReg(struct rtw_adapter *Adapter, u32 RegAddr, u32 BitMask, u32	Data)
 	if (BitMask != bMaskDWord) {/* if not "double word" write */
 		OriginalValue = rtl8723au_read32(Adapter, RegAddr);
 		BitShift = phy_CalculateBitShift(BitMask);
-		Data = ((OriginalValue & (~BitMask)) | (Data << BitShift));
+		Data = (OriginalValue & (~BitMask)) | (Data << BitShift);
 	}
 
 	rtl8723au_write32(Adapter, RegAddr, Data);
@@ -190,25 +190,24 @@ phy_RFSerialRead(struct rtw_adapter *Adapter, enum RF_RADIO_PATH eRFPath,
 	/*  For 92S LSSI Read RFLSSIRead */
 	/*  For RF A/B write 0x824/82c(does not work in the future) */
 	/*  We must use 0x824 for RF A and B to execute read trigger */
-	tmplong = PHY_QueryBBReg(Adapter, rFPGA0_XA_HSSIParameter2, bMaskDWord);
+	tmplong = rtl8723au_read32(Adapter, rFPGA0_XA_HSSIParameter2);
 	if (eRFPath == RF_PATH_A)
 		tmplong2 = tmplong;
 	else
-		tmplong2 = PHY_QueryBBReg(Adapter, pPhyReg->rfHSSIPara2,
-					  bMaskDWord);
+		tmplong2 = rtl8723au_read32(Adapter, pPhyReg->rfHSSIPara2);
 
 	tmplong2 = (tmplong2 & ~bLSSIReadAddress) |
 		(NewOffset << 23) | bLSSIReadEdge;	/* T65 RF */
 
-	PHY_SetBBReg(Adapter, rFPGA0_XA_HSSIParameter2,
-		     bMaskDWord, tmplong & (~bLSSIReadEdge));
+	rtl8723au_write32(Adapter, rFPGA0_XA_HSSIParameter2,
+			  tmplong & (~bLSSIReadEdge));
 	udelay(10);/*  PlatformStallExecution(10); */
 
-	PHY_SetBBReg(Adapter, pPhyReg->rfHSSIPara2, bMaskDWord, tmplong2);
+	rtl8723au_write32(Adapter, pPhyReg->rfHSSIPara2, tmplong2);
 	udelay(100);/* PlatformStallExecution(100); */
 
-	PHY_SetBBReg(Adapter, rFPGA0_XA_HSSIParameter2, bMaskDWord,
-		     tmplong | bLSSIReadEdge);
+	rtl8723au_write32(Adapter, rFPGA0_XA_HSSIParameter2,
+			  tmplong | bLSSIReadEdge);
 	udelay(10);/* PlatformStallExecution(10); */
 
 	if (eRFPath == RF_PATH_A)
@@ -319,9 +318,7 @@ phy_RFSerialWrite(struct rtw_adapter *Adapter, enum RF_RADIO_PATH eRFPath,
 	/*  */
 	/*  Write Operation */
 	/*  */
-	PHY_SetBBReg(Adapter, pPhyReg->rf3wireOffset, bMaskDWord, DataAndAddr);
-	/* RTPRINT(FPHY, PHY_RFW, ("RFW-%d Addr[0x%lx]= 0x%lx\n", eRFPath, pPhyReg->rf3wireOffset, DataAndAddr)); */
-
+	rtl8723au_write32(Adapter, pPhyReg->rf3wireOffset, DataAndAddr);
 }
 
 /**
@@ -392,7 +389,7 @@ PHY_SetRFReg(struct rtw_adapter *Adapter, enum RF_RADIO_PATH eRFPath,
 	if (BitMask != bRFRegOffsetMask) {
 		Original_Value = phy_RFSerialRead(Adapter, eRFPath, RegAddr);
 		BitShift =  phy_CalculateBitShift(BitMask);
-		Data = ((Original_Value & (~BitMask)) | (Data << BitShift));
+		Data = (Original_Value & (~BitMask)) | (Data << BitShift);
 	}
 
 	phy_RFSerialWrite(Adapter, eRFPath, RegAddr, Data);
@@ -419,7 +416,6 @@ PHY_SetRFReg(struct rtw_adapter *Adapter, enum RF_RADIO_PATH eRFPath,
 int PHY_MACConfig8723A(struct rtw_adapter *Adapter)
 {
 	struct hal_data_8723a *pHalData = GET_HAL_DATA(Adapter);
-	bool is92C = IS_92C_SERIAL(pHalData->VersionID);
 
 	/*  */
 	/*  Config MAC */
@@ -427,9 +423,9 @@ int PHY_MACConfig8723A(struct rtw_adapter *Adapter)
 	ODM_ReadAndConfig_MAC_REG_8723A(&pHalData->odmpriv);
 
 	/*  2010.07.13 AMPDU aggregation number 9 */
-	/* rtw_write16(Adapter, REG_MAX_AGGR_NUM, MAX_AGGR_NUM); */
 	rtl8723au_write8(Adapter, REG_MAX_AGGR_NUM, 0x0A);
-	if (is92C && (BOARD_USB_DONGLE == pHalData->BoardType))
+	if (pHalData->rf_type == RF_2T2R &&
+	    BOARD_USB_DONGLE == pHalData->BoardType)
 		rtl8723au_write8(Adapter, 0x40, 0x04);
 
 	return _SUCCESS;
@@ -698,7 +694,7 @@ storePwrIndexDiffRateOffset(struct rtw_adapter *Adapter, u32 RegAddr,
  * 11/10/2008	tynli	Modify to mew files.
  *---------------------------------------------------------------------------*/
 static	int
-phy_ConfigBBWithPgHeaderFile(struct rtw_adapter *Adapter, u8 ConfigType)
+phy_ConfigBBWithPgHeaderFile(struct rtw_adapter *Adapter)
 {
 	int i;
 	u32 *Rtl819XPHY_REGArray_Table_PG;
@@ -707,17 +703,15 @@ phy_ConfigBBWithPgHeaderFile(struct rtw_adapter *Adapter, u8 ConfigType)
 	PHY_REGArrayPGLen = Rtl8723_PHY_REG_Array_PGLength;
 	Rtl819XPHY_REGArray_Table_PG = (u32 *)Rtl8723_PHY_REG_Array_PG;
 
-	if (ConfigType == BaseBand_Config_PHY_REG) {
-		for (i = 0; i < PHY_REGArrayPGLen; i = i + 3) {
-			storePwrIndexDiffRateOffset(Adapter,
-				Rtl819XPHY_REGArray_Table_PG[i],
-				Rtl819XPHY_REGArray_Table_PG[i+1],
-				Rtl819XPHY_REGArray_Table_PG[i+2]);
-		}
+	for (i = 0; i < PHY_REGArrayPGLen; i = i + 3) {
+		storePwrIndexDiffRateOffset(Adapter,
+					    Rtl819XPHY_REGArray_Table_PG[i],
+					    Rtl819XPHY_REGArray_Table_PG[i+1],
+					    Rtl819XPHY_REGArray_Table_PG[i+2]);
 	}
 
 	return _SUCCESS;
-}	/* phy_ConfigBBWithPgHeaderFile */
+}
 
 static void
 phy_BB8192C_Config_1T(struct rtw_adapter *Adapter)
@@ -768,8 +762,7 @@ phy_BB8723a_Config_ParaFile(struct rtw_adapter *Adapter)
 	if (pEEPROM->bautoload_fail_flag == false) {
 		pHalData->pwrGroupCnt = 0;
 
-		rtStatus = phy_ConfigBBWithPgHeaderFile(Adapter,
-							BaseBand_Config_PHY_REG);
+		rtStatus = phy_ConfigBBWithPgHeaderFile(Adapter);
 	}
 
 	if (rtStatus != _SUCCESS)
@@ -834,7 +827,7 @@ PHY_BBConfig8723A(struct rtw_adapter *Adapter)
 			     (CrystalCap | (CrystalCap << 6)));
 	}
 
-	PHY_SetBBReg(Adapter, REG_LDOA15_CTRL, bMaskDWord, 0x01572505);
+	rtl8723au_write32(Adapter, REG_LDOA15_CTRL, 0x01572505);
 	return rtStatus;
 }
 
@@ -923,13 +916,6 @@ _PHY_SetBWMode23a92C(struct rtw_adapter *Adapter)
 	u8 regBwOpMode;
 	u8 regRRSR_RSC;
 
-	if (pHalData->rf_chip == RF_PSEUDO_11N)
-		return;
-
-	/*  There is no 40MHz mode in RF_8225. */
-	if (pHalData->rf_chip == RF_8225)
-		return;
-
 	if (Adapter->bDriverStopped)
 		return;
 
@@ -1003,39 +989,7 @@ _PHY_SetBWMode23a92C(struct rtw_adapter *Adapter)
 	/* RT_TRACE(COMP_SCAN, DBG_LOUD, ("SetBWMode23aCallback8190Pci: time
 	   of SetBWMode23a = %I64d us!\n", (EndTime - BeginTime))); */
 
-	/* 3<3>Set RF related register */
-	switch (pHalData->rf_chip) {
-	case RF_8225:
-		/* PHY_SetRF8225Bandwidth(Adapter,
-		   pHalData->CurrentChannelBW); */
-		break;
-
-	case RF_8256:
-		/*  Please implement this function in Hal8190PciPhy8256.c */
-		/* PHY_SetRF8256Bandwidth(Adapter,
-		   pHalData->CurrentChannelBW); */
-		break;
-
-	case RF_8258:
-		/*  Please implement this function in Hal8190PciPhy8258.c */
-		/*  PHY_SetRF8258Bandwidth(); */
-		break;
-
-	case RF_PSEUDO_11N:
-		/*  Do Nothing */
-		break;
-
-	case RF_6052:
-		rtl8723a_phy_rf6052set_bw(Adapter, pHalData->CurrentChannelBW);
-		break;
-
-	default:
-		/* RT_ASSERT(false, ("Unknown RFChipID: %d\n",
-		   pHalData->RFChipID)); */
-		break;
-	}
-
-	/* pHalData->SetBWMode23aInProgress = false; */
+	rtl8723a_phy_rf6052set_bw(Adapter, pHalData->CurrentChannelBW);
 
 	/* RT_TRACE(COMP_SCAN, DBG_LOUD,
 	   ("<== PHY_SetBWMode23aCallback8192C() \n")); */
@@ -1074,7 +1028,7 @@ PHY_SetBWMode23a8723A(struct rtw_adapter *Adapter,
 
 static void _PHY_SwChnl8723A(struct rtw_adapter *Adapter, u8 channel)
 {
-	u8 eRFPath;
+	enum RF_RADIO_PATH eRFPath;
 	u32 param1, param2;
 	struct hal_data_8723a *pHalData = GET_HAL_DATA(Adapter);
 
@@ -1088,7 +1042,7 @@ static void _PHY_SwChnl8723A(struct rtw_adapter *Adapter, u8 channel)
 	for (eRFPath = 0; eRFPath < pHalData->NumTotalRFPath; eRFPath++) {
 		pHalData->RfRegChnlVal[eRFPath] =
 			(pHalData->RfRegChnlVal[eRFPath] & 0xfffffc00) | param2;
-		PHY_SetRFReg(Adapter, (enum RF_RADIO_PATH)eRFPath, param1,
+		PHY_SetRFReg(Adapter, eRFPath, param1,
 			     bRFRegOffsetMask, pHalData->RfRegChnlVal[eRFPath]);
 	}
 
@@ -1100,11 +1054,6 @@ void PHY_SwChnl8723A(struct rtw_adapter *Adapter, u8 channel)
 	struct hal_data_8723a *pHalData = GET_HAL_DATA(Adapter);
 	u8 tmpchannel = pHalData->CurrentChannel;
 	bool  result = true;
-
-	if (pHalData->rf_chip == RF_PSEUDO_11N) {
-		/* return immediately if it is peudo-phy */
-		return;
-	}
 
 	if (channel == 0)
 		channel = 1;

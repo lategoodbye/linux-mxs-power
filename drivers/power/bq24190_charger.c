@@ -919,13 +919,13 @@ static char *bq24190_charger_supplied_to[] = {
 };
 
 static const struct power_supply_desc bq24190_charger_desc = {
-	.name = "bq24190-charger",
-	.type = POWER_SUPPLY_TYPE_USB,
-	.properties = bq24190_charger_properties,
-	.num_properties = ARRAY_SIZE(bq24190_charger_properties),
-	.get_property = bq24190_charger_get_property,
-	.set_property = bq24190_charger_set_property,
-	.property_is_writeable = bq24190_charger_property_is_writeable,
+	.name			= "bq24190-charger",
+	.type			= POWER_SUPPLY_TYPE_USB,
+	.properties		= bq24190_charger_properties,
+	.num_properties		= ARRAY_SIZE(bq24190_charger_properties),
+	.get_property		= bq24190_charger_get_property,
+	.set_property		= bq24190_charger_set_property,
+	.property_is_writeable	= bq24190_charger_property_is_writeable,
 };
 
 /* Battery power supply property routines */
@@ -1185,20 +1185,20 @@ static enum power_supply_property bq24190_battery_properties[] = {
 };
 
 static const struct power_supply_desc bq24190_battery_desc = {
-	.name = "bq24190-battery",
-	.type = POWER_SUPPLY_TYPE_BATTERY,
-	.properties = bq24190_battery_properties,
-	.num_properties = ARRAY_SIZE(bq24190_battery_properties),
-	.get_property = bq24190_battery_get_property,
-	.set_property = bq24190_battery_set_property,
-	.property_is_writeable = bq24190_battery_property_is_writeable,
+	.name			= "bq24190-battery",
+	.type			= POWER_SUPPLY_TYPE_BATTERY,
+	.properties		= bq24190_battery_properties,
+	.num_properties		= ARRAY_SIZE(bq24190_battery_properties),
+	.get_property		= bq24190_battery_get_property,
+	.set_property		= bq24190_battery_set_property,
+	.property_is_writeable	= bq24190_battery_property_is_writeable,
 };
 
 static irqreturn_t bq24190_irq_handler_thread(int irq, void *data)
 {
 	struct bq24190_dev_info *bdi = data;
 	bool alert_userspace = false;
-	u8 ss_reg, f_reg;
+	u8 ss_reg = 0, f_reg = 0;
 	int ret;
 
 	pm_runtime_get_sync(bdi->dev);

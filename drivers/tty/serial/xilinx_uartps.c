@@ -637,10 +637,12 @@ static void cdns_uart_set_termios(struct uart_port *port,
 
 	spin_lock_irqsave(&port->lock, flags);
 
-	/* Empty the receive FIFO 1st before making changes */
-	while ((cdns_uart_readl(CDNS_UART_SR_OFFSET) &
-		 CDNS_UART_SR_RXEMPTY) != CDNS_UART_SR_RXEMPTY) {
-		cdns_uart_readl(CDNS_UART_FIFO_OFFSET);
+	/* Wait for the transmit FIFO to empty before making changes */
+	if (!(cdns_uart_readl(CDNS_UART_CR_OFFSET) & CDNS_UART_CR_TX_DIS)) {
+		while (!(cdns_uart_readl(CDNS_UART_SR_OFFSET) &
+				CDNS_UART_SR_TXEMPTY)) {
+			cpu_relax();
+		}
 	}
 
 	/* Disable the TX and RX to set baud rate */
@@ -1152,7 +1154,8 @@ static int __init cdns_uart_console_setup(struct console *co, char *options)
 		return -EINVAL;
 
 	if (!port->mapbase) {
-		pr_debug("console on ttyPS%i not present\n", co->index);
+		pr_debug("console on " CDNS_UART_TTY_NAME "%i not present\n",
+			 co->index);
 		return -ENODEV;
 	}
 

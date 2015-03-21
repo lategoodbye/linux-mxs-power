@@ -48,7 +48,7 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc,
 	unsigned int err = 0;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 #define COPY(x)		err |= __get_user(regs->x, &sc->sc_##x)
 	COPY(r4);
@@ -213,8 +213,6 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	regs->r1 = (unsigned long)&frame->info;
 	regs->r2 = (unsigned long)&frame->uc;
 	regs->bpc = (unsigned long)ksig->ka.sa.sa_handler;
-
-	set_fs(USER_DS);
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p\n",

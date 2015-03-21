@@ -11,6 +11,11 @@
 #include <symbol/kallsyms.h>
 #include "debug.h"
 
+#ifndef EM_AARCH64
+#define EM_AARCH64	183  /* ARM 64 bit */
+#endif
+
+
 #ifdef HAVE_CPLUS_DEMANGLE_SUPPORT
 extern char *cplus_demangle(const char *, int);
 
@@ -68,6 +73,10 @@ static inline uint8_t elf_sym__type(const GElf_Sym *sym)
 {
 	return GELF_ST_TYPE(sym->st_info);
 }
+
+#ifndef STT_GNU_IFUNC
+#define STT_GNU_IFUNC 10
+#endif
 
 static inline int elf_sym__is_function(const GElf_Sym *sym)
 {
@@ -574,13 +583,16 @@ static int decompress_kmodule(struct dso *dso, const char *name,
 	const char *ext = strrchr(name, '.');
 	char tmpbuf[] = "/tmp/perf-kmod-XXXXXX";
 
-	if ((type != DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE_COMP &&
-	     type != DSO_BINARY_TYPE__GUEST_KMODULE_COMP) ||
-	    type != dso->symtab_type)
+	if (type != DSO_BINARY_TYPE__SYSTEM_PATH_KMODULE_COMP &&
+	    type != DSO_BINARY_TYPE__GUEST_KMODULE_COMP &&
+	    type != DSO_BINARY_TYPE__BUILD_ID_CACHE)
 		return -1;
 
-	if (!ext || !is_supported_compression(ext + 1))
-		return -1;
+	if (!ext || !is_supported_compression(ext + 1)) {
+		ext = strrchr(dso->name, '.');
+		if (!ext || !is_supported_compression(ext + 1))
+			return -1;
+	}
 
 	fd = mkstemp(tmpbuf);
 	if (fd < 0)
@@ -856,10 +868,9 @@ int dso__load_sym(struct dso *dso, struct map *map,
 		/* Reject ARM ELF "mapping symbols": these aren't unique and
 		 * don't identify functions, so will confuse the profile
 		 * output: */
-		if (ehdr.e_machine == EM_ARM) {
-			if (!strcmp(elf_name, "$a") ||
-			    !strcmp(elf_name, "$d") ||
-			    !strcmp(elf_name, "$t"))
+		if (ehdr.e_machine == EM_ARM || ehdr.e_machine == EM_AARCH64) {
+			if (elf_name[0] == '$' && strchr("adtx", elf_name[1])
+			    && (elf_name[2] == '\0' || elf_name[2] == '.'))
 				continue;
 		}
 
@@ -1037,7 +1048,8 @@ new_symbol:
 	 * For misannotated, zeroed, ASM function sizes.
 	 */
 	if (nr > 0) {
-		symbols__fixup_duplicate(&dso->symbols[map->type]);
+		if (!symbol_conf.allow_aliases)
+			symbols__fixup_duplicate(&dso->symbols[map->type]);
 		symbols__fixup_end(&dso->symbols[map->type]);
 		if (kmap) {
 			/*

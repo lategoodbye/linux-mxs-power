@@ -73,10 +73,8 @@ int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 	else if (rtc->ops->set_time)
 		err = rtc->ops->set_time(rtc->dev.parent, tm);
 	else if (rtc->ops->set_mmss) {
-		unsigned long secs;
-		err = rtc_tm_to_time(tm, &secs);
-		if (err == 0)
-			err = rtc->ops->set_mmss(rtc->dev.parent, secs);
+		time64_t secs64 = rtc_tm_to_time64(tm);
+		err = rtc->ops->set_mmss(rtc->dev.parent, secs64);
 	} else
 		err = -EINVAL;
 
@@ -105,7 +103,7 @@ int rtc_set_mmss(struct rtc_device *rtc, unsigned long secs)
 
 		err = rtc->ops->read_time(rtc->dev.parent, &old);
 		if (err == 0) {
-			rtc_time_to_tm(secs, &new);
+			rtc_time64_to_tm(secs, &new);
 
 			/*
 			 * avoid writing when we're going to change the day of
@@ -157,7 +155,7 @@ int __rtc_read_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 	int err;
 	struct rtc_time before, now;
 	int first_time = 1;
-	unsigned long t_now, t_alm;
+	time64_t t_now, t_alm;
 	enum { none, day, month, year } missing = none;
 	unsigned days;
 
@@ -258,8 +256,8 @@ int __rtc_read_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 	}
 
 	/* with luck, no rollover is needed */
-	rtc_tm_to_time(&now, &t_now);
-	rtc_tm_to_time(&alarm->time, &t_alm);
+	t_now = rtc_tm_to_time64(&now);
+	t_alm = rtc_tm_to_time64(&alarm->time);
 	if (t_now < t_alm)
 		goto done;
 
@@ -273,7 +271,7 @@ int __rtc_read_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 	case day:
 		dev_dbg(&rtc->dev, "alarm rollover: %s\n", "day");
 		t_alm += 24 * 60 * 60;
-		rtc_time_to_tm(t_alm, &alarm->time);
+		rtc_time64_to_tm(t_alm, &alarm->time);
 		break;
 
 	/* Month rollover ... if it's the 31th, an alarm on the 3rd will
@@ -346,19 +344,19 @@ EXPORT_SYMBOL_GPL(rtc_read_alarm);
 static int __rtc_set_alarm(struct rtc_device *rtc, struct rtc_wkalrm *alarm)
 {
 	struct rtc_time tm;
-	long now, scheduled;
+	time64_t now, scheduled;
 	int err;
 
 	err = rtc_valid_tm(&alarm->time);
 	if (err)
 		return err;
-	rtc_tm_to_time(&alarm->time, &scheduled);
+	scheduled = rtc_tm_to_time64(&alarm->time);
 
 	/* Make sure we're not setting alarms in the past */
 	err = __rtc_read_time(rtc, &tm);
 	if (err)
 		return err;
-	rtc_tm_to_time(&tm, &now);
+	now = rtc_tm_to_time64(&tm);
 	if (scheduled <= now)
 		return -ETIME;
 	/*
@@ -489,7 +487,10 @@ int rtc_update_irq_enable(struct rtc_device *rtc, unsigned int enabled)
 		struct rtc_time tm;
 		ktime_t now, onesec;
 
-		__rtc_read_time(rtc, &tm);
+		err = __rtc_read_time(rtc, &tm);
+		if (err < 0)
+			goto out;
+
 		onesec = ktime_set(1, 0);
 		now = rtc_tm_to_ktime(tm);
 		rtc->uie_rtctimer.node.expires = ktime_add(now, onesec);
@@ -867,13 +868,17 @@ void rtc_timer_do_work(struct work_struct *work)
 	struct timerqueue_node *next;
 	ktime_t now;
 	struct rtc_time tm;
+	int err = 0;
 
 	struct rtc_device *rtc =
 		container_of(work, struct rtc_device, irqwork);
 
 	mutex_lock(&rtc->ops_lock);
 again:
-	__rtc_read_time(rtc, &tm);
+	err = __rtc_read_time(rtc, &tm);
+	if (err < 0)
+		goto out;
+
 	now = rtc_tm_to_ktime(tm);
 	while ((next = timerqueue_getnext(&rtc->timerqueue))) {
 		if (next->expires.tv64 > now.tv64)
@@ -898,7 +903,6 @@ again:
 	/* Set next alarm */
 	if (next) {
 		struct rtc_wkalrm alarm;
-		int err;
 		int retry = 3;
 
 		alarm.time = rtc_ktime_to_tm(next->expires);
@@ -920,6 +924,7 @@ reprogram:
 	} else
 		rtc_alarm_disable(rtc);
 
+out:
 	pm_relax(rtc->dev.parent);
 	mutex_unlock(&rtc->ops_lock);
 }

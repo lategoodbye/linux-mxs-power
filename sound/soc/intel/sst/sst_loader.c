@@ -39,7 +39,15 @@
 #include "sst.h"
 #include "../sst-dsp.h"
 
-static inline void memcpy32_toio(void __iomem *dst, const void *src, int count)
+void memcpy32_toio(void __iomem *dst, const void *src, int count)
+{
+	/* __iowrite32_copy uses 32-bit count values so divide by 4 for
+	 * right count in words
+	 */
+	__iowrite32_copy(dst, src, count/4);
+}
+
+void memcpy32_fromio(void *dst, const void __iomem *src, int count)
 {
 	/* __iowrite32_copy uses 32-bit count values so divide by 4 for
 	 * right count in words
@@ -324,8 +332,7 @@ void sst_firmware_load_cb(const struct firmware *fw, void *context)
 
 	if (ctx->sst_state != SST_RESET ||
 			ctx->fw_in_mem != NULL) {
-		if (fw != NULL)
-			release_firmware(fw);
+		release_firmware(fw);
 		mutex_unlock(&ctx->sst_lock);
 		return;
 	}

@@ -543,7 +543,8 @@ static int da9030_battery_probe(struct platform_device *pdev)
 
 	da9030_battery_setup_psy(charger);
 	psy_cfg.drv_data = charger;
-	charger->psy = power_supply_register(&pdev->dev, &charger->psy_desc, &psy_cfg);
+	charger->psy = power_supply_register(&pdev->dev, &charger->psy_desc,
+					     &psy_cfg);
 	if (IS_ERR(charger->psy)) {
 		ret = PTR_ERR(charger->psy);
 		goto err_ps_register;

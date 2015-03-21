@@ -509,8 +509,6 @@ static void brcmf_pcie_attach(struct brcmf_pciedev_info *devinfo)
 
 static int brcmf_pcie_enter_download_state(struct brcmf_pciedev_info *devinfo)
 {
-	brcmf_chip_enter_download(devinfo->ci);
-
 	if (devinfo->ci->chip == BRCM_CC_43602_CHIP_ID) {
 		brcmf_pcie_select_core(devinfo, BCMA_CORE_ARM_CR4);
 		brcmf_pcie_write_reg32(devinfo, BRCMF_PCIE_ARMCR4REG_BANKIDX,
@@ -536,7 +534,7 @@ static int brcmf_pcie_exit_download_state(struct brcmf_pciedev_info *devinfo,
 		brcmf_chip_resetcore(core, 0, 0, 0);
 	}
 
-	return !brcmf_chip_exit_download(devinfo->ci, resetintr);
+	return !brcmf_chip_set_active(devinfo->ci, resetintr);
 }
 
 
@@ -959,14 +957,14 @@ brcmf_pcie_init_dmabuffer_for_device(struct brcmf_pciedev_info *devinfo,
 				     dma_addr_t *dma_handle)
 {
 	void *ring;
-	long long address;
+	u64 address;
 
 	ring = dma_alloc_coherent(&devinfo->pdev->dev, size, dma_handle,
 				  GFP_KERNEL);
 	if (!ring)
 		return NULL;
 
-	address = (long long)(long)*dma_handle;
+	address = (u64)*dma_handle;
 	brcmf_pcie_write_tcm32(devinfo, tcm_dma_phys_addr,
 			       address & 0xffffffff);
 	brcmf_pcie_write_tcm32(devinfo, tcm_dma_phys_addr + 4, address >> 32);
@@ -1166,7 +1164,7 @@ brcmf_pcie_release_scratchbuffers(struct brcmf_pciedev_info *devinfo)
 
 static int brcmf_pcie_init_scratchbuffers(struct brcmf_pciedev_info *devinfo)
 {
-	long long address;
+	u64 address;
 	u32 addr;
 
 	devinfo->shared.scratch = dma_alloc_coherent(&devinfo->pdev->dev,
@@ -1180,7 +1178,7 @@ static int brcmf_pcie_init_scratchbuffers(struct brcmf_pciedev_info *devinfo)
 
 	addr = devinfo->shared.tcm_base_address +
 	       BRCMF_SHARED_DMA_SCRATCH_ADDR_OFFSET;
-	address = (long long)(long)devinfo->shared.scratch_dmahandle;
+	address = (u64)devinfo->shared.scratch_dmahandle;
 	brcmf_pcie_write_tcm32(devinfo, addr, address & 0xffffffff);
 	brcmf_pcie_write_tcm32(devinfo, addr + 4, address >> 32);
 	addr = devinfo->shared.tcm_base_address +
@@ -1198,7 +1196,7 @@ static int brcmf_pcie_init_scratchbuffers(struct brcmf_pciedev_info *devinfo)
 
 	addr = devinfo->shared.tcm_base_address +
 	       BRCMF_SHARED_DMA_RINGUPD_ADDR_OFFSET;
-	address = (long long)(long)devinfo->shared.ringupd_dmahandle;
+	address = (u64)devinfo->shared.ringupd_dmahandle;
 	brcmf_pcie_write_tcm32(devinfo, addr, address & 0xffffffff);
 	brcmf_pcie_write_tcm32(devinfo, addr + 4, address >> 32);
 	addr = devinfo->shared.tcm_base_address +
@@ -1566,8 +1564,8 @@ static int brcmf_pcie_buscoreprep(void *ctx)
 }
 
 
-static void brcmf_pcie_buscore_exitdl(void *ctx, struct brcmf_chip *chip,
-				      u32 rstvec)
+static void brcmf_pcie_buscore_activate(void *ctx, struct brcmf_chip *chip,
+					u32 rstvec)
 {
 	struct brcmf_pciedev_info *devinfo = (struct brcmf_pciedev_info *)ctx;
 
@@ -1577,7 +1575,7 @@ static void brcmf_pcie_buscore_exitdl(void *ctx, struct brcmf_chip *chip,
 
 static const struct brcmf_buscore_ops brcmf_pcie_buscore_ops = {
 	.prepare = brcmf_pcie_buscoreprep,
-	.exit_dl = brcmf_pcie_buscore_exitdl,
+	.activate = brcmf_pcie_buscore_activate,
 	.read32 = brcmf_pcie_buscore_read32,
 	.write32 = brcmf_pcie_buscore_write32,
 };
@@ -1828,7 +1826,7 @@ static int brcmf_pcie_resume(struct pci_dev *pdev)
 				goto cleanup;
 			brcmf_dbg(PCIE, "Hot resume, continue....\n");
 			brcmf_pcie_select_core(devinfo, BCMA_CORE_PCIE2);
-			brcmf_bus_change_state(bus, BRCMF_BUS_DATA);
+			brcmf_bus_change_state(bus, BRCMF_BUS_UP);
 			brcmf_pcie_intr_enable(devinfo);
 			return 0;
 		}

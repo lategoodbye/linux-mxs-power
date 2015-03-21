@@ -768,12 +768,13 @@ static int ds2781_battery_probe(struct platform_device *pdev)
 	dev_info->bat_desc.name		= dev_name(&pdev->dev);
 	dev_info->bat_desc.type		= POWER_SUPPLY_TYPE_BATTERY;
 	dev_info->bat_desc.properties	= ds2781_battery_props;
-	dev_info->bat_desc.num_properties	= ARRAY_SIZE(ds2781_battery_props);
+	dev_info->bat_desc.num_properties = ARRAY_SIZE(ds2781_battery_props);
 	dev_info->bat_desc.get_property	= ds2781_battery_get_property;
 
 	psy_cfg.drv_data		= dev_info;
 
-	dev_info->bat = power_supply_register(&pdev->dev, &dev_info->bat_desc, &psy_cfg);
+	dev_info->bat = power_supply_register(&pdev->dev, &dev_info->bat_desc,
+						&psy_cfg);
 	if (IS_ERR(dev_info->bat)) {
 		dev_err(dev_info->dev, "failed to register battery\n");
 		ret = PTR_ERR(dev_info->bat);

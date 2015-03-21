@@ -73,9 +73,7 @@
 
 struct mr_table {
 	struct list_head	list;
-#ifdef CONFIG_NET_NS
-	struct net		*net;
-#endif
+	possible_net_t		net;
 	u32			id;
 	struct sock __rcu	*mroute_sk;
 	struct timer_list	ipmr_expire_timer;
@@ -2290,7 +2288,8 @@ static int ipmr_fill_mroute(struct mr_table *mrt, struct sk_buff *skb,
 	if (err < 0 && err != -ENOENT)
 		goto nla_put_failure;
 
-	return nlmsg_end(skb, nlh);
+	nlmsg_end(skb, nlh);
+	return 0;
 
 nla_put_failure:
 	nlmsg_cancel(skb, nlh);

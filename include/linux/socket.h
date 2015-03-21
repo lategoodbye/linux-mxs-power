@@ -181,6 +181,7 @@ struct ucred {
 #define AF_WANPIPE	25	/* Wanpipe API Sockets */
 #define AF_LLC		26	/* Linux LLC			*/
 #define AF_IB		27	/* Native InfiniBand address	*/
+#define AF_MPLS		28	/* MPLS */
 #define AF_CAN		29	/* Controller Area Network      */
 #define AF_TIPC		30	/* TIPC sockets			*/
 #define AF_BLUETOOTH	31	/* Bluetooth sockets 		*/
@@ -226,6 +227,7 @@ struct ucred {
 #define PF_WANPIPE	AF_WANPIPE
 #define PF_LLC		AF_LLC
 #define PF_IB		AF_IB
+#define PF_MPLS		AF_MPLS
 #define PF_CAN		AF_CAN
 #define PF_TIPC		AF_TIPC
 #define PF_BLUETOOTH	AF_BLUETOOTH
@@ -317,13 +319,6 @@ struct ucred {
 
 /* IPX options */
 #define IPX_TYPE	1
-
-extern int csum_partial_copy_fromiovecend(unsigned char *kdata, 
-					  struct iovec *iov, 
-					  int offset, 
-					  unsigned int len, __wsum *csump);
-extern unsigned long iov_pages(const struct iovec *iov, int offset,
-			       unsigned long nr_segs);
 
 extern int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr_storage *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);

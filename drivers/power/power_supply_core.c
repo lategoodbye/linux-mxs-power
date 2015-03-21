@@ -718,6 +718,19 @@ dev_set_name_failed:
 	return ERR_PTR(rc);
 }
 
+/**
+ * power_supply_register() - Register new power supply
+ * @parent:	Device to be a parent of power supply's device
+ * @desc:	Description of power supply, must be valid through whole
+ *		lifetime of this power supply
+ * @cfg:	Run-time specific configuration accessed during registering,
+ *		may be NULL
+ *
+ * Return: A pointer to newly allocated power_supply on success
+ * or ERR_PTR otherwise.
+ * Use power_supply_unregister() on returned power_supply pointer to release
+ * resources.
+ */
 struct power_supply *__must_check power_supply_register(struct device *parent,
 		const struct power_supply_desc *desc,
 		const struct power_supply_config *cfg)
@@ -726,6 +739,19 @@ struct power_supply *__must_check power_supply_register(struct device *parent,
 }
 EXPORT_SYMBOL_GPL(power_supply_register);
 
+/**
+ * power_supply_register() - Register new non-waking-source power supply
+ * @parent:	Device to be a parent of power supply's device
+ * @desc:	Description of power supply, must be valid through whole
+ *		lifetime of this power supply
+ * @cfg:	Run-time specific configuration accessed during registering,
+ *		may be NULL
+ *
+ * Return: A pointer to newly allocated power_supply on success
+ * or ERR_PTR otherwise.
+ * Use power_supply_unregister() on returned power_supply pointer to release
+ * resources.
+ */
 struct power_supply *__must_check
 power_supply_register_no_ws(struct device *parent,
 		const struct power_supply_desc *desc,
@@ -735,6 +761,90 @@ power_supply_register_no_ws(struct device *parent,
 }
 EXPORT_SYMBOL_GPL(power_supply_register_no_ws);
 
+static void devm_power_supply_release(struct device *dev, void *res)
+{
+	struct power_supply **psy = res;
+
+	power_supply_unregister(*psy);
+}
+
+/**
+ * power_supply_register() - Register managed power supply
+ * @parent:	Device to be a parent of power supply's device
+ * @desc:	Description of power supply, must be valid through whole
+ *		lifetime of this power supply
+ * @cfg:	Run-time specific configuration accessed during registering,
+ *		may be NULL
+ *
+ * Return: A pointer to newly allocated power_supply on success
+ * or ERR_PTR otherwise.
+ * The returned power_supply pointer will be automatically unregistered
+ * on driver detach.
+ */
+struct power_supply *__must_check
+devm_power_supply_register(struct device *parent,
+		const struct power_supply_desc *desc,
+		const struct power_supply_config *cfg)
+{
+	struct power_supply **ptr, *psy;
+
+	ptr = devres_alloc(devm_power_supply_release, sizeof(*ptr), GFP_KERNEL);
+
+	if (!ptr)
+		return ERR_PTR(-ENOMEM);
+	psy = __power_supply_register(parent, desc, cfg, true);
+	if (IS_ERR(psy)) {
+		devres_free(ptr);
+	} else {
+		*ptr = psy;
+		devres_add(parent, ptr);
+	}
+	return psy;
+}
+EXPORT_SYMBOL_GPL(devm_power_supply_register);
+
+/**
+ * power_supply_register() - Register managed non-waking-source power supply
+ * @parent:	Device to be a parent of power supply's device
+ * @desc:	Description of power supply, must be valid through whole
+ *		lifetime of this power supply
+ * @cfg:	Run-time specific configuration accessed during registering,
+ *		may be NULL
+ *
+ * Return: A pointer to newly allocated power_supply on success
+ * or ERR_PTR otherwise.
+ * The returned power_supply pointer will be automatically unregistered
+ * on driver detach.
+ */
+struct power_supply *__must_check
+devm_power_supply_register_no_ws(struct device *parent,
+		const struct power_supply_desc *desc,
+		const struct power_supply_config *cfg)
+{
+	struct power_supply **ptr, *psy;
+
+	ptr = devres_alloc(devm_power_supply_release, sizeof(*ptr), GFP_KERNEL);
+
+	if (!ptr)
+		return ERR_PTR(-ENOMEM);
+	psy = __power_supply_register(parent, desc, cfg, false);
+	if (IS_ERR(psy)) {
+		devres_free(ptr);
+	} else {
+		*ptr = psy;
+		devres_add(parent, ptr);
+	}
+	return psy;
+}
+EXPORT_SYMBOL_GPL(devm_power_supply_register_no_ws);
+
+/**
+ * power_supply_unregister() - Remove this power supply from system
+ * @psy:	Pointer to power supply to unregister
+ *
+ * Remove this power supply from the system. The resources of power supply
+ * will be freed here or on last power_supply_put() call.
+ */
 void power_supply_unregister(struct power_supply *psy)
 {
 	WARN_ON(atomic_dec_return(&psy->use_cnt));

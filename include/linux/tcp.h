@@ -111,10 +111,11 @@ struct tcp_request_sock_ops;
 struct tcp_request_sock {
 	struct inet_request_sock 	req;
 	const struct tcp_request_sock_ops *af_specific;
-	struct sock			*listener; /* needed for TFO */
+	bool				tfo_listener;
 	u32				rcv_isn;
 	u32				snt_isn;
 	u32				snt_synack; /* synack sent time */
+	u32				last_oow_ack_time; /* last SYNACK */
 	u32				rcv_nxt; /* the ack # by SYNACK. For
 						  * FastOpen it's the seq#
 						  * after data-in-SYN.
@@ -152,6 +153,7 @@ struct tcp_sock {
  	u32	snd_sml;	/* Last byte of the most recently transmitted small packet */
 	u32	rcv_tstamp;	/* timestamp of last received ACK (for keepalives) */
 	u32	lsndtime;	/* timestamp of last sent data packet (for restart window) */
+	u32	last_oow_ack_time;  /* timestamp of last out-of-window ACK */
 
 	u32	tsoffset;	/* timestamp offset */
 
@@ -234,7 +236,6 @@ struct tcp_sock {
 	u32	lost_out;	/* Lost packets			*/
 	u32	sacked_out;	/* SACK'd packets			*/
 	u32	fackets_out;	/* FACK'd packets			*/
-	u32	tso_deferred;
 
 	/* from STCP, retrans queue hinting */
 	struct sk_buff* lost_skb_hint;
@@ -340,6 +341,10 @@ struct tcp_timewait_sock {
 	u32			  tw_rcv_wnd;
 	u32			  tw_ts_offset;
 	u32			  tw_ts_recent;
+
+	/* The time we sent the last out-of-window ACK: */
+	u32			  tw_last_oow_ack_time;
+
 	long			  tw_ts_recent_stamp;
 #ifdef CONFIG_TCP_MD5SIG
 	struct tcp_md5sig_key	  *tw_md5_key;

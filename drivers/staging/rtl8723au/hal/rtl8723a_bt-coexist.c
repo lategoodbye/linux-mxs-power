@@ -3208,7 +3208,7 @@ bthci_CmdDisconnectPhysicalLink(struct rtw_adapter *padapter,
 	pBtDbg->dbgHciInfo.hciCmdCntDisconnectPhyLink++;
 
 	PLH = *((u8 *)pHciCmd->Data);
-	PhysLinkDisconnectReason = (*((u8 *)pHciCmd->Data+1));
+	PhysLinkDisconnectReason = *((u8 *)pHciCmd->Data+1);
 	RTPRINT(FIOCTL, IOCTL_BT_HCICMD, ("HCI_DISCONNECT_PHYSICAL_LINK  PhyHandle = 0x%x, Reason = 0x%x\n",
 		PLH, PhysLinkDisconnectReason));
 
@@ -5796,7 +5796,7 @@ static void
 btdm_1AntUpdateHalRAMask(struct rtw_adapter *padapter, u32 mac_id, u32 filter)
 {
 	u8 init_rate = 0;
-	u8 raid;
+	u8 raid, arg;
 	u32 mask;
 	u8 shortGIrate = false;
 	int supportRateNum = 0;
@@ -5860,26 +5860,16 @@ btdm_1AntUpdateHalRAMask(struct rtw_adapter *padapter, u32 mac_id, u32 filter)
 	mask &= ~filter;
 	init_rate = get_highest_rate_idx23a(mask)&0x3f;
 
-	if (pHalData->fw_ractrl) {
-		u8 arg = 0;
+	arg = mac_id&0x1f;/* MACID */
+	arg |= BIT(7);
+	if (true == shortGIrate)
+		arg |= BIT(5);
 
-		arg = mac_id&0x1f;/* MACID */
-		arg |= BIT(7);
-		if (true == shortGIrate)
-			arg |= BIT(5);
+	RTPRINT(FBT, BT_TRACE,
+		("[BTCoex], Update FW RAID entry, MASK = 0x%08x, "
+		 "arg = 0x%02x\n", mask, arg));
 
-		RTPRINT(FBT, BT_TRACE,
-			("[BTCoex], Update FW RAID entry, MASK = 0x%08x, "
-			 "arg = 0x%02x\n", mask, arg));
-
-		rtl8723a_set_raid_cmd(padapter, mask, arg);
-	} else {
-		if (shortGIrate)
-			init_rate |= BIT(6);
-
-		rtl8723au_write8(padapter, REG_INIDATA_RATE_SEL + mac_id,
-				 init_rate);
-	}
+	rtl8723a_set_raid_cmd(padapter, mask, arg);
 
 	psta->init_rate = init_rate;
 	pdmpriv->INIDATA_RATE[mac_id] = init_rate;
@@ -7255,63 +7245,19 @@ btdm_2AntTdmaDurationAdjust(struct rtw_adapter *padapter, u8 bScoHid,
 		RTPRINT(FBT, BT_TRACE, ("[BTCoex], first run TdmaDurationAdjust()!!\n"));
 		if (bScoHid) {
 			if (bTxPause) {
-				if (maxInterval == 1) {
-					btdm_2AntPsTdma(padapter, true, 15);
-					pBtdm8723->psTdmaDuAdjType = 15;
-				} else if (maxInterval == 2) {
-					btdm_2AntPsTdma(padapter, true, 15);
-					pBtdm8723->psTdmaDuAdjType = 15;
-				} else if (maxInterval == 3) {
-					btdm_2AntPsTdma(padapter, true, 15);
-					pBtdm8723->psTdmaDuAdjType = 15;
-				} else {
-					btdm_2AntPsTdma(padapter, true, 15);
-					pBtdm8723->psTdmaDuAdjType = 15;
-				}
+				btdm_2AntPsTdma(padapter, true, 15);
+				pBtdm8723->psTdmaDuAdjType = 15;
 			} else {
-				if (maxInterval == 1) {
-					btdm_2AntPsTdma(padapter, true, 11);
-					pBtdm8723->psTdmaDuAdjType = 11;
-				} else if (maxInterval == 2) {
-					btdm_2AntPsTdma(padapter, true, 11);
-					pBtdm8723->psTdmaDuAdjType = 11;
-				} else if (maxInterval == 3) {
-					btdm_2AntPsTdma(padapter, true, 11);
-					pBtdm8723->psTdmaDuAdjType = 11;
-				} else {
-					btdm_2AntPsTdma(padapter, true, 11);
-					pBtdm8723->psTdmaDuAdjType = 11;
-				}
+				btdm_2AntPsTdma(padapter, true, 11);
+				pBtdm8723->psTdmaDuAdjType = 11;
 			}
 		} else {
 			if (bTxPause) {
-				if (maxInterval == 1) {
-					btdm_2AntPsTdma(padapter, true, 7);
-					pBtdm8723->psTdmaDuAdjType = 7;
-				} else if (maxInterval == 2) {
-					btdm_2AntPsTdma(padapter, true, 7);
-					pBtdm8723->psTdmaDuAdjType = 7;
-				} else if (maxInterval == 3) {
-					btdm_2AntPsTdma(padapter, true, 7);
-					pBtdm8723->psTdmaDuAdjType = 7;
-				} else {
-					btdm_2AntPsTdma(padapter, true, 7);
-					pBtdm8723->psTdmaDuAdjType = 7;
-				}
+				btdm_2AntPsTdma(padapter, true, 7);
+				pBtdm8723->psTdmaDuAdjType = 7;
 			} else {
-				if (maxInterval == 1) {
-					btdm_2AntPsTdma(padapter, true, 3);
-					pBtdm8723->psTdmaDuAdjType = 3;
-				} else if (maxInterval == 2) {
-					btdm_2AntPsTdma(padapter, true, 3);
-					pBtdm8723->psTdmaDuAdjType = 3;
-				} else if (maxInterval == 3) {
-					btdm_2AntPsTdma(padapter, true, 3);
-					pBtdm8723->psTdmaDuAdjType = 3;
-				} else {
-					btdm_2AntPsTdma(padapter, true, 3);
-					pBtdm8723->psTdmaDuAdjType = 3;
-				}
+				btdm_2AntPsTdma(padapter, true, 3);
+				pBtdm8723->psTdmaDuAdjType = 3;
 			}
 		}
 		up = 0;
@@ -9145,7 +9091,7 @@ u32 BTDM_BtTxRxCounterL(struct rtw_adapter *padapter)
 	u32	counters = 0;
 
 	counters = pHalData->bt_coexist.halCoex8723.lowPriorityTx+
-		pHalData->bt_coexist.halCoex8723.lowPriorityRx ;
+		pHalData->bt_coexist.halCoex8723.lowPriorityRx;
 	return counters;
 }
 

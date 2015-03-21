@@ -87,6 +87,7 @@ struct symbol_conf {
 			ignore_vmlinux_buildid,
 			show_kernel_path,
 			use_modules,
+			allow_aliases,
 			sort_by_name,
 			show_nr_samples,
 			show_total_period,
@@ -231,6 +232,7 @@ struct symbol *dso__find_symbol(struct dso *dso, enum map_type type,
 				u64 addr);
 struct symbol *dso__find_symbol_by_name(struct dso *dso, enum map_type type,
 					const char *name);
+struct symbol *symbol__next_by_name(struct symbol *sym);
 
 struct symbol *dso__first_symbol(struct dso *dso, enum map_type type);
 struct symbol *dso__next_symbol(struct symbol *sym);

@@ -32,7 +32,6 @@
 #define BM_POWER_CTRL_ENIRQ_VBUS_VALID		BIT(3)
 
 #define HW_POWER_5VCTRL_OFFSET	0x10
-#define HW_POWER_MISC_OFFSET	0x90
 
 #define BM_POWER_5VCTRL_VBUSVALID_THRESH	(7 << 8)
 #define BM_POWER_5VCTRL_PWDN_5VBRNOUT		BIT(7)
@@ -41,91 +40,10 @@
 
 #define HW_POWER_5VCTRL_VBUSVALID_THRESH_4_40V	(5 << 8)
 
-#define SHIFT_FREQSEL	4
-
-#define BM_POWER_MISC_FREQSEL			(7 << SHIFT_FREQSEL)
-
-#define HW_POWER_MISC_FREQSEL_20000_KHZ		1
-#define HW_POWER_MISC_FREQSEL_24000_KHZ		2
-#define HW_POWER_MISC_FREQSEL_19200_KHZ		3
-
-#define HW_POWER_MISC_SEL_PLLCLK		BIT(0)
-
-static int dcdc_pll;
-module_param(dcdc_pll, int, 0);
-MODULE_PARM_DESC(dcdc_pll,
-		 "DC-DC PLL frequency (kHz). Use 19200, 20000 or 24000");
-
 struct mxs_power_data {
 	void __iomem *base_addr;
 	struct power_supply *ac;
 };
-
-int get_dcdc_clk_freq(struct mxs_power_data *pdata)
-{
-	void __iomem *base = pdata->base_addr;
-	int ret = -EINVAL;
-	u32 val;
-
-	val = readl(base + HW_POWER_MISC_OFFSET);
-
-	/* XTAL source */
-	if ((val & HW_POWER_MISC_SEL_PLLCLK) == 0)
-		return 24000;
-
-	switch ((val & BM_POWER_MISC_FREQSEL) >> SHIFT_FREQSEL) {
-	case HW_POWER_MISC_FREQSEL_20000_KHZ:
-		ret = 20000;
-		break;
-	case HW_POWER_MISC_FREQSEL_24000_KHZ:
-		ret = 24000;
-		break;
-	case HW_POWER_MISC_FREQSEL_19200_KHZ:
-		ret = 19200;
-		break;
-	}
-
-	return ret;
-}
-
-int set_dcdc_clk_freq(struct mxs_power_data *pdata, int khz)
-{
-	void __iomem *misc = pdata->base_addr + HW_POWER_MISC_OFFSET;
-	u32 val;
-	int ret = 0;
-
-	val = readl(misc);
-
-	val &= ~BM_POWER_MISC_FREQSEL;
-	val &= ~HW_POWER_MISC_SEL_PLLCLK;
-
-	/* Accept only values recommend by Freescale */
-	switch (khz) {
-	case 19200:
-		val |= HW_POWER_MISC_FREQSEL_19200_KHZ << SHIFT_FREQSEL;
-		break;
-	case 20000:
-		val |= HW_POWER_MISC_FREQSEL_20000_KHZ << SHIFT_FREQSEL;
-		break;
-	case 24000:
-		val |= HW_POWER_MISC_FREQSEL_24000_KHZ << SHIFT_FREQSEL;
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-
-	if (ret)
-		return ret;
-
-	/* First program FREQSEL */
-	writel(val, misc);
-
-	/* then set PLL as clk for DC-DC converter */
-	writel(val | HW_POWER_MISC_SEL_PLLCLK, misc);
-
-	return 0;
-}
 
 static enum power_supply_property mxs_power_ac_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
@@ -171,7 +89,6 @@ static int mxs_power_probe(struct platform_device *pdev)
 	struct mxs_power_data *data;
 	struct power_supply_config psy_cfg = {};
 	void __iomem *v5ctrl_addr;
-	int dcdc_clk_freq;
 
 	if (!np) {
 		dev_err(dev, "missing device tree\n");
@@ -194,13 +111,6 @@ static int mxs_power_probe(struct platform_device *pdev)
 		return PTR_ERR(data->ac);
 
 	platform_set_drvdata(pdev, data);
-
-	if (dcdc_pll)
-		set_dcdc_clk_freq(data, dcdc_pll);
-
-	dcdc_clk_freq = get_dcdc_clk_freq(data);
-
-	dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
 
 	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL_OFFSET;
 

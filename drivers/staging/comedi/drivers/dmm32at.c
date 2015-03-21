@@ -19,7 +19,7 @@
 /*
  * Driver: dmm32at
  * Description: Diamond Systems Diamond-MM-32-AT
- * Devices: (Diamond Systems) Diamond-MM-32-AT [dmm32at]
+ * Devices: [Diamond Systems] Diamond-MM-32-AT (dmm32at)
  * Author: Perry J. Piplani <perry.j.piplani@nasa.gov>
  * Updated: Fri Jun  4 09:13:24 CDT 2004
  * Status: experimental
@@ -30,7 +30,7 @@
  * This driver is for the Diamond Systems MM-32-AT board
  *	http://www.diamondsystems.com/products/diamondmm32at
  *
- * It is being used on serveral projects inside NASA, without
+ * It is being used on several projects inside NASA, without
  * problems so far. For analog input commands, TRIG_EXT is not
  * yet supported.
  */
@@ -365,7 +365,7 @@ static void dmm32at_setaitimer(struct comedi_device *dev, unsigned int nansec)
 	/* enable the ai conversion interrupt and the clock to start scans */
 	outb(DMM32AT_INTCLK_ADINT |
 	     DMM32AT_INTCLK_CLKEN | DMM32AT_INTCLK_CLKSEL,
-             dev->iobase + DMM32AT_INTCLK_REG);
+	     dev->iobase + DMM32AT_INTCLK_REG);
 }
 
 static int dmm32at_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
@@ -391,13 +391,12 @@ static int dmm32at_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 		/* start the clock and enable the interrupts */
 		dmm32at_setaitimer(dev, cmd->scan_begin_arg);
 	} else {
-		/* start the interrups and initiate a single scan */
+		/* start the interrupts and initiate a single scan */
 		outb(DMM32AT_INTCLK_ADINT, dev->iobase + DMM32AT_INTCLK_REG);
 		outb(0xff, dev->iobase + DMM32AT_AI_START_CONV_REG);
 	}
 
 	return 0;
-
 }
 
 static int dmm32at_ai_cancel(struct comedi_device *dev,

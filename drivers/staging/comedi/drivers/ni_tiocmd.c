@@ -16,29 +16,28 @@
 */
 
 /*
-Driver: ni_tiocmd
-Description: National Instruments general purpose counters command support
-Devices:
-Author: J.P. Mellor <jpmellor@rose-hulman.edu>,
-	Herman.Bruyninckx@mech.kuleuven.ac.be,
-	Wim.Meeussen@mech.kuleuven.ac.be,
-	Klaas.Gadeyne@mech.kuleuven.ac.be,
-	Frank Mori Hess <fmhess@users.sourceforge.net>
-Updated: Fri, 11 Apr 2008 12:32:35 +0100
-Status: works
+ * Module: ni_tiocmd
+ * Description: National Instruments general purpose counters command support
+ * Author: J.P. Mellor <jpmellor@rose-hulman.edu>,
+ *         Herman.Bruyninckx@mech.kuleuven.ac.be,
+ *         Wim.Meeussen@mech.kuleuven.ac.be,
+ *         Klaas.Gadeyne@mech.kuleuven.ac.be,
+ *         Frank Mori Hess <fmhess@users.sourceforge.net>
+ * Updated: Fri, 11 Apr 2008 12:32:35 +0100
+ * Status: works
+ *
+ * This module is not used directly by end-users.  Rather, it
+ * is used by other drivers (for example ni_660x and ni_pcimio)
+ * to provide command support for NI's general purpose counters.
+ * It was originally split out of ni_tio.c to stop the 'ni_tio'
+ * module depending on the 'mite' module.
+ *
+ * References:
+ * DAQ 660x Register-Level Programmer Manual  (NI 370505A-01)
+ * DAQ 6601/6602 User Manual (NI 322137B-01)
+ * 340934b.pdf  DAQ-STC reference manual
+ */
 
-This module is not used directly by end-users.  Rather, it
-is used by other drivers (for example ni_660x and ni_pcimio)
-to provide command support for NI's general purpose counters.
-It was originally split out of ni_tio.c to stop the 'ni_tio'
-module depending on the 'mite' module.
-
-References:
-DAQ 660x Register-Level Programmer Manual  (NI 370505A-01)
-DAQ 6601/6602 User Manual (NI 322137B-01)
-340934b.pdf  DAQ-STC reference manual
-
-*/
 /*
 TODO:
 	Support use of both banks X and Y
@@ -202,7 +201,7 @@ int ni_tio_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 	unsigned long flags;
 
 	spin_lock_irqsave(&counter->lock, flags);
-	if (counter->mite_chan == NULL) {
+	if (!counter->mite_chan) {
 		dev_err(counter->counter_dev->dev->class_dev,
 			"commands only supported with DMA.  ");
 		dev_err(counter->counter_dev->dev->class_dev,
@@ -330,7 +329,7 @@ static int should_ack_gate(struct ni_gpct *counter)
 	case ni_gpct_variant_e_series:
 		spin_lock_irqsave(&counter->lock, flags);
 		{
-			if (counter->mite_chan == NULL ||
+			if (!counter->mite_chan ||
 			    counter->mite_chan->dir != COMEDI_INPUT ||
 			    (mite_done(counter->mite_chan))) {
 				retval = 1;
@@ -367,7 +366,7 @@ static void ni_tio_acknowledge_and_confirm(struct ni_gpct *counter,
 	if (gxx_status & GI_GATE_ERROR(cidx)) {
 		ack |= GI_GATE_ERROR_CONFIRM(cidx);
 		if (gate_error) {
-			/*660x don't support automatic acknowledgement
+			/*660x don't support automatic acknowledgment
 			  of gate interrupt via dma read/write
 			   and report bogus gate errors */
 			if (counter->counter_dev->variant !=
@@ -444,7 +443,7 @@ void ni_tio_handle_interrupt(struct ni_gpct *counter,
 		break;
 	}
 	spin_lock_irqsave(&counter->lock, flags);
-	if (counter->mite_chan == NULL) {
+	if (!counter->mite_chan) {
 		spin_unlock_irqrestore(&counter->lock, flags);
 		return;
 	}

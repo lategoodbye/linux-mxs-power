@@ -190,7 +190,7 @@ struct usb_ep {
  * @ep:the endpoint being configured
  * @maxpacket_limit:value of maximum packet size limit
  *
- * This function shoud be used only in UDC drivers to initialize endpoint
+ * This function should be used only in UDC drivers to initialize endpoint
  * (usually in probe function).
  */
 static inline void usb_ep_set_maxpacket_limit(struct usb_ep *ep,
@@ -523,6 +523,7 @@ struct usb_gadget_ops {
  *	enabled HNP support.
  * @quirk_ep_out_aligned_size: epout requires buffer size to be aligned to
  *	MaxPacketSize.
+ * @is_selfpowered: if the gadget is self-powered.
  *
  * Gadgets have a mostly-portable "gadget driver" implementing device
  * functions, handling all usb configurations and interfaces.  Gadget
@@ -563,6 +564,7 @@ struct usb_gadget {
 	unsigned			a_hnp_support:1;
 	unsigned			a_alt_hnp_support:1;
 	unsigned			quirk_ep_out_aligned_size:1;
+	unsigned			is_selfpowered:1;
 };
 #define work_to_gadget(w)	(container_of((w), struct usb_gadget, work))
 

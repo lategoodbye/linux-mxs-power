@@ -80,8 +80,10 @@ static int vmbus_negotiate_version(struct vmbus_channel_msginfo *msginfo,
 	msg->interrupt_page = virt_to_phys(vmbus_connection.int_page);
 	msg->monitor_page1 = virt_to_phys(vmbus_connection.monitor_pages[0]);
 	msg->monitor_page2 = virt_to_phys(vmbus_connection.monitor_pages[1]);
-	if (version == VERSION_WIN8_1)
-		msg->target_vcpu = hv_context.vp_index[smp_processor_id()];
+	if (version == VERSION_WIN8_1) {
+		msg->target_vcpu = hv_context.vp_index[get_cpu()];
+		put_cpu();
+	}
 
 	/*
 	 * Add to list before we send the request since we may
@@ -214,10 +216,21 @@ int vmbus_connect(void)
 
 cleanup:
 	pr_err("Unable to connect to host\n");
-	vmbus_connection.conn_state = DISCONNECTED;
 
-	if (vmbus_connection.work_queue)
+	vmbus_connection.conn_state = DISCONNECTED;
+	vmbus_disconnect();
+
+	kfree(msginfo);
+
+	return ret;
+}
+
+void vmbus_disconnect(void)
+{
+	if (vmbus_connection.work_queue) {
+		drain_workqueue(vmbus_connection.work_queue);
 		destroy_workqueue(vmbus_connection.work_queue);
+	}
 
 	if (vmbus_connection.int_page) {
 		free_pages((unsigned long)vmbus_connection.int_page, 0);
@@ -228,10 +241,6 @@ cleanup:
 	free_pages((unsigned long)vmbus_connection.monitor_pages[1], 0);
 	vmbus_connection.monitor_pages[0] = NULL;
 	vmbus_connection.monitor_pages[1] = NULL;
-
-	kfree(msginfo);
-
-	return ret;
 }
 
 /*
@@ -309,10 +318,8 @@ static void process_chn_event(u32 relid)
 	 */
 	channel = pcpu_relid2channel(relid);
 
-	if (!channel) {
-		pr_err("channel not found for relid - %u\n", relid);
+	if (!channel)
 		return;
-	}
 
 	/*
 	 * A channel once created is persistent even when there
@@ -347,10 +354,7 @@ static void process_chn_event(u32 relid)
 			else
 				bytes_to_read = 0;
 		} while (read_state && (bytes_to_read != 0));
-	} else {
-		pr_err("no channel callback for relid - %u\n", relid);
 	}
-
 }
 
 /*
@@ -431,9 +435,16 @@ int vmbus_post_msg(void *buffer, size_t buflen)
 		ret = hv_post_message(conn_id, 1, buffer, buflen);
 
 		switch (ret) {
+		case HV_STATUS_INVALID_CONNECTION_ID:
+			/*
+			 * We could get this if we send messages too
+			 * frequently.
+			 */
+			ret = -EAGAIN;
+			break;
+		case HV_STATUS_INSUFFICIENT_MEMORY:
 		case HV_STATUS_INSUFFICIENT_BUFFERS:
 			ret = -ENOMEM;
-		case -ENOMEM:
 			break;
 		case HV_STATUS_SUCCESS:
 			return ret;
@@ -443,7 +454,7 @@ int vmbus_post_msg(void *buffer, size_t buflen)
 		}
 
 		retries++;
-		msleep(100);
+		msleep(1000);
 	}
 	return ret;
 }

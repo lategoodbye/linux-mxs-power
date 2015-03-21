@@ -159,6 +159,7 @@ struct hid_item {
 #define HID_UP_LED		0x00080000
 #define HID_UP_BUTTON		0x00090000
 #define HID_UP_ORDINAL		0x000a0000
+#define HID_UP_TELEPHONY	0x000b0000
 #define HID_UP_CONSUMER		0x000c0000
 #define HID_UP_DIGITIZER	0x000d0000
 #define HID_UP_PID		0x000f0000
@@ -269,6 +270,7 @@ struct hid_item {
 #define HID_DG_DEVICEINDEX	0x000d0053
 #define HID_DG_CONTACTCOUNT	0x000d0054
 #define HID_DG_CONTACTMAX	0x000d0055
+#define HID_DG_BUTTONTYPE	0x000d0059
 #define HID_DG_BARRELSWITCH2	0x000d005a
 #define HID_DG_TOOLSERIALNUMBER	0x000d005b
 
@@ -574,7 +576,9 @@ static inline void hid_set_drvdata(struct hid_device *hdev, void *data)
 #define HID_GLOBAL_STACK_SIZE 4
 #define HID_COLLECTION_STACK_SIZE 4
 
-#define HID_SCAN_FLAG_MT_WIN_8			0x00000001
+#define HID_SCAN_FLAG_MT_WIN_8			BIT(0)
+#define HID_SCAN_FLAG_VENDOR_SPECIFIC		BIT(1)
+#define HID_SCAN_FLAG_GD_POINTER		BIT(2)
 
 struct hid_parser {
 	struct hid_global     global;

@@ -156,7 +156,7 @@ asmlinkage int sys_sigreturn(void)
 	int r0;
 
         /* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 	if (!access_ok(VERIFY_READ, frame, sizeof(*frame)))
 		goto badframe;
@@ -186,7 +186,7 @@ asmlinkage int sys_rt_sigreturn(void)
 	int r0;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 	if (!access_ok(VERIFY_READ, frame, sizeof(*frame)))
 		goto badframe;
@@ -329,8 +329,6 @@ static int setup_frame(struct ksignal *ksig, sigset_t *set,
 	if (err)
 		return -EFAULT;
 
-	set_fs(USER_DS);
-
 	pr_debug("SIG deliver (%s:%d): sp=%p pc=%08lx pr=%08lx\n",
 		 current->comm, task_pid_nr(current), frame, regs->pc, regs->pr);
 
@@ -407,8 +405,6 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 
 	if (err)
 		return -EFAULT;
-
-	set_fs(USER_DS);
 
 	pr_debug("SIG deliver (%s:%d): sp=%p pc=%08lx pr=%08lx\n",
 		 current->comm, task_pid_nr(current), frame, regs->pc, regs->pr);

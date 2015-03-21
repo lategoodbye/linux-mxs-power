@@ -522,6 +522,20 @@ static void free_pending_td(struct ci_hw_ep *hwep)
 	kfree(pending);
 }
 
+static int reprime_dtd(struct ci_hdrc *ci, struct ci_hw_ep *hwep,
+					   struct td_node *node)
+{
+	hwep->qh.ptr->td.next = node->dma;
+	hwep->qh.ptr->td.token &=
+		cpu_to_le32(~(TD_STATUS_HALTED | TD_STATUS_ACTIVE));
+
+	/* Synchronize before ep prime */
+	wmb();
+
+	return hw_ep_prime(ci, hwep->num, hwep->dir,
+				hwep->type == USB_ENDPOINT_XFER_CONTROL);
+}
+
 /**
  * _hardware_dequeue: handles a request at hardware level
  * @gadget: gadget
@@ -535,6 +549,7 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	struct td_node *node, *tmpnode;
 	unsigned remaining_length;
 	unsigned actual = hwreq->req.length;
+	struct ci_hdrc *ci = hwep->ci;
 
 	if (hwreq->req.status != -EALREADY)
 		return -EINVAL;
@@ -544,6 +559,11 @@ static int _hardware_dequeue(struct ci_hw_ep *hwep, struct ci_hw_req *hwreq)
 	list_for_each_entry_safe(node, tmpnode, &hwreq->tds, td) {
 		tmptoken = le32_to_cpu(node->ptr->token);
 		if ((TD_STATUS_ACTIVE & tmptoken) != 0) {
+			int n = hw_ep_bit(hwep->num, hwep->dir);
+
+			if (ci->rev == CI_REVISION_24)
+				if (!hw_read(ci, OP_ENDPTSTAT, BIT(n)))
+					reprime_dtd(ci, hwep, node);
 			hwreq->req.status = -EALREADY;
 			return -EBUSY;
 		}
@@ -819,8 +839,8 @@ __acquires(hwep->lock)
 	}
 
 	if ((setup->bRequestType & USB_RECIP_MASK) == USB_RECIP_DEVICE) {
-		/* Assume that device is bus powered for now. */
-		*(u16 *)req->buf = ci->remote_wakeup << 1;
+		*(u16 *)req->buf = (ci->remote_wakeup << 1) |
+			ci->gadget.is_selfpowered;
 	} else if ((setup->bRequestType & USB_RECIP_MASK) \
 		   == USB_RECIP_ENDPOINT) {
 		dir = (le16_to_cpu(setup->wIndex) & USB_ENDPOINT_DIR_MASK) ?
@@ -927,6 +947,13 @@ __acquires(hwep->lock)
 		retval = 0;
 
 	return retval;
+}
+
+static int otg_a_alt_hnp_support(struct ci_hdrc *ci)
+{
+	dev_warn(&ci->gadget.dev,
+		"connect the device to an alternate port if you want HNP\n");
+	return isr_setup_status_phase(ci);
 }
 
 /**
@@ -1061,6 +1088,10 @@ __acquires(ci->lock)
 							ci);
 				}
 				break;
+			case USB_DEVICE_A_ALT_HNP_SUPPORT:
+				if (ci_otg_is_fsm_mode(ci))
+					err = otg_a_alt_hnp_support(ci);
+				break;
 			default:
 				goto delegate;
 			}
@@ -1151,10 +1182,13 @@ static int ep_enable(struct usb_ep *ep,
 
 	/* only internal SW should enable ctrl endpts */
 
-	hwep->ep.desc = desc;
-
-	if (!list_empty(&hwep->qh.queue))
+	if (!list_empty(&hwep->qh.queue)) {
 		dev_warn(hwep->ci->dev, "enabling a non-empty endpoint!\n");
+		spin_unlock_irqrestore(hwep->lock, flags);
+		return -EBUSY;
+	}
+
+	hwep->ep.desc = desc;
 
 	hwep->dir  = usb_endpoint_dir_in(desc) ? TX : RX;
 	hwep->num  = usb_endpoint_num(desc);
@@ -1520,6 +1554,19 @@ static int ci_udc_vbus_draw(struct usb_gadget *_gadget, unsigned ma)
 	return -ENOTSUPP;
 }
 
+static int ci_udc_selfpowered(struct usb_gadget *_gadget, int is_on)
+{
+	struct ci_hdrc *ci = container_of(_gadget, struct ci_hdrc, gadget);
+	struct ci_hw_ep *hwep = ci->ep0in;
+	unsigned long flags;
+
+	spin_lock_irqsave(hwep->lock, flags);
+	_gadget->is_selfpowered = (is_on != 0);
+	spin_unlock_irqrestore(hwep->lock, flags);
+
+	return 0;
+}
+
 /* Change Data+ pullup status
  * this func is used by usb_gadget_connect/disconnet
  */
@@ -1549,6 +1596,7 @@ static int ci_udc_stop(struct usb_gadget *gadget);
 static const struct usb_gadget_ops usb_gadget_ops = {
 	.vbus_session	= ci_udc_vbus_session,
 	.wakeup		= ci_udc_wakeup,
+	.set_selfpowered	= ci_udc_selfpowered,
 	.pullup		= ci_udc_pullup,
 	.vbus_draw	= ci_udc_vbus_draw,
 	.udc_start	= ci_udc_start,

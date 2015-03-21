@@ -162,6 +162,7 @@ static int nokia_modem_probe(struct device *dev)
 		return -ENOMEM;
 	}
 	dev_set_drvdata(dev, modem);
+	modem->device = dev;
 
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
@@ -199,6 +200,7 @@ static int nokia_modem_probe(struct device *dev)
 	modem->ssi_protocol = hsi_new_client(port, &ssip);
 	if (!modem->ssi_protocol) {
 		dev_err(dev, "Could not register ssi-protocol device\n");
+		err = -ENOMEM;
 		goto error2;
 	}
 

@@ -205,7 +205,7 @@ s_uGetRTSCTSRsvTime(
 	unsigned short wCurrentRate
 )
 {
-	unsigned int uRrvTime  , uRTSTime, uCTSTime, uAckTime, uDataTime;
+	unsigned int uRrvTime, uRTSTime, uCTSTime, uAckTime, uDataTime;
 
 	uRrvTime = uRTSTime = uCTSTime = uAckTime = uDataTime = 0;
 
@@ -248,11 +248,11 @@ s_uGetDataDuration(
 	unsigned char byFBOption
 )
 {
-	bool bLastFrag = 0;
+	bool bLastFrag = false;
 	unsigned int uAckTime = 0, uNextPktTime = 0;
 
 	if (uFragIdx == (uMACfragNum-1))
-		bLastFrag = 1;
+		bLastFrag = true;
 
 	switch (byDurType) {
 	case DATADUR_B:    //DATADUR_B
@@ -1207,7 +1207,6 @@ s_cbFillTxBufHead(struct vnt_private *pDevice, unsigned char byPktType,
 	ptdCurr->pTDInfo->dwReqCount = cbReqCount;
 	ptdCurr->pTDInfo->dwHeaderLength = cbHeaderLength;
 	ptdCurr->pTDInfo->skb_dma = ptdCurr->pTDInfo->buf_dma;
-	ptdCurr->buff_addr = cpu_to_le32(ptdCurr->pTDInfo->skb_dma);
 
 	return cbHeaderLength;
 }
@@ -1506,8 +1505,6 @@ int vnt_beacon_make(struct vnt_private *priv, struct ieee80211_vif *vif)
 int vnt_beacon_enable(struct vnt_private *priv, struct ieee80211_vif *vif,
 		      struct ieee80211_bss_conf *conf)
 {
-	int ret;
-
 	VNSvOutPortB(priv->PortOffset + MAC_REG_TFTCTL, TFTCTL_TSFCNTRST);
 
 	VNSvOutPortB(priv->PortOffset + MAC_REG_TFTCTL, TFTCTL_TSFCNTREN);
@@ -1516,7 +1513,5 @@ int vnt_beacon_enable(struct vnt_private *priv, struct ieee80211_vif *vif,
 
 	CARDbSetBeaconPeriod(priv, conf->beacon_int);
 
-	ret = vnt_beacon_make(priv, vif);
-
-	return ret;
+	return vnt_beacon_make(priv, vif);
 }

@@ -203,7 +203,7 @@ lst_group_add_ioctl(lstio_group_add_args_t *args)
 	if (args->lstio_grp_key != console_session.ses_key)
 		return -EACCES;
 
-	if (args->lstio_grp_namep == NULL||
+	if (args->lstio_grp_namep == NULL ||
 	    args->lstio_grp_nmlen <= 0 ||
 	    args->lstio_grp_nmlen > LST_NAME_SIZE)
 		return -EINVAL;
@@ -721,7 +721,7 @@ lst_stat_query_ioctl(lstio_stat_args_t *args)
 	return rc;
 }
 
-int lst_test_add_ioctl(lstio_test_args_t *args)
+static int lst_test_add_ioctl(lstio_test_args_t *args)
 {
 	char		*batch_name;
 	char		*src_name = NULL;

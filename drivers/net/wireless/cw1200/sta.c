@@ -213,6 +213,7 @@ int cw1200_add_interface(struct ieee80211_hw *dev,
 	/* __le32 auto_calibration_mode = __cpu_to_le32(1); */
 
 	vif->driver_flags |= IEEE80211_VIF_BEACON_FILTER |
+			     IEEE80211_VIF_SUPPORTS_UAPSD |
 			     IEEE80211_VIF_SUPPORTS_CQM_RSSI;
 
 	mutex_lock(&priv->conf_mutex);
@@ -292,7 +293,7 @@ void cw1200_remove_interface(struct ieee80211_hw *dev,
 	}
 	priv->vif = NULL;
 	priv->mode = NL80211_IFTYPE_MONITOR;
-	memset(priv->mac_addr, 0, ETH_ALEN);
+	eth_zero_addr(priv->mac_addr);
 	memset(&priv->p2p_ps_modeinfo, 0, sizeof(priv->p2p_ps_modeinfo));
 	cw1200_free_keys(priv);
 	cw1200_setup_mac(priv);
@@ -708,7 +709,8 @@ int cw1200_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 		if (sta)
 			peer_addr = sta->addr;
 
-		key->flags |= IEEE80211_KEY_FLAG_PUT_IV_SPACE;
+		key->flags |= IEEE80211_KEY_FLAG_PUT_IV_SPACE |
+			      IEEE80211_KEY_FLAG_RESERVE_TAILROOM;
 
 		switch (key->cipher) {
 		case WLAN_CIPHER_SUITE_WEP40:

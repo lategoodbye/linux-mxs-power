@@ -46,7 +46,6 @@
 #include <linux/stddef.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
-#include <linux/aio.h>
 #include <linux/kernel.h>
 #include <linux/export.h>
 #include <linux/spinlock.h>
@@ -337,7 +336,7 @@ int raw_rcv(struct sock *sk, struct sk_buff *skb)
 }
 
 static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
-			   void *from, size_t length,
+			   struct msghdr *msg, size_t length,
 			   struct rtable **rtp,
 			   unsigned int flags)
 {
@@ -382,7 +381,7 @@ static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
 
 	skb->transport_header = skb->network_header;
 	err = -EFAULT;
-	if (memcpy_fromiovecend((void *)iph, from, 0, length))
+	if (memcpy_from_msg(iph, msg, length))
 		goto error_free;
 
 	iphlen = iph->ihl * 4;
@@ -481,8 +480,7 @@ static int raw_getfrag(void *from, char *to, int offset, int len, int odd,
 	return ip_generic_getfrag(rfv->msg, to, offset, len, odd, skb);
 }
 
-static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
-		       size_t len)
+static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct ipcm_cookie ipc;
@@ -625,8 +623,7 @@ static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 back_from_confirm:
 
 	if (inet->hdrincl)
-		/* XXX: stripping const */
-		err = raw_send_hdrinc(sk, &fl4, (struct iovec *)msg->msg_iter.iov, len,
+		err = raw_send_hdrinc(sk, &fl4, msg, len,
 				      &rt, msg->msg_flags);
 
 	 else {
@@ -710,8 +707,8 @@ out:	return ret;
  *	we return it, otherwise we block.
  */
 
-static int raw_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
-		       size_t len, int noblock, int flags, int *addr_len)
+static int raw_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+		       int noblock, int flags, int *addr_len)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	size_t copied = 0;

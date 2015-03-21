@@ -687,12 +687,45 @@ static int get_amp_val_to_activate(struct hda_codec *codec, hda_nid_t nid,
 	return val;
 }
 
+/* is this a stereo widget or a stereo-to-mono mix? */
+static bool is_stereo_amps(struct hda_codec *codec, hda_nid_t nid, int dir)
+{
+	unsigned int wcaps = get_wcaps(codec, nid);
+	hda_nid_t conn;
+
+	if (wcaps & AC_WCAP_STEREO)
+		return true;
+	if (dir != HDA_INPUT || get_wcaps_type(wcaps) != AC_WID_AUD_MIX)
+		return false;
+	if (snd_hda_get_num_conns(codec, nid) != 1)
+		return false;
+	if (snd_hda_get_connections(codec, nid, &conn, 1) < 0)
+		return false;
+	return !!(get_wcaps(codec, conn) & AC_WCAP_STEREO);
+}
+
 /* initialize the amp value (only at the first time) */
 static void init_amp(struct hda_codec *codec, hda_nid_t nid, int dir, int idx)
 {
 	unsigned int caps = query_amp_caps(codec, nid, dir);
 	int val = get_amp_val_to_activate(codec, nid, dir, caps, false);
-	snd_hda_codec_amp_init_stereo(codec, nid, dir, idx, 0xff, val);
+
+	if (is_stereo_amps(codec, nid, dir))
+		snd_hda_codec_amp_init_stereo(codec, nid, dir, idx, 0xff, val);
+	else
+		snd_hda_codec_amp_init(codec, nid, 0, dir, idx, 0xff, val);
+}
+
+/* update the amp, doing in stereo or mono depending on NID */
+static int update_amp(struct hda_codec *codec, hda_nid_t nid, int dir, int idx,
+		      unsigned int mask, unsigned int val)
+{
+	if (is_stereo_amps(codec, nid, dir))
+		return snd_hda_codec_amp_stereo(codec, nid, dir, idx,
+						mask, val);
+	else
+		return snd_hda_codec_amp_update(codec, nid, 0, dir, idx,
+						mask, val);
 }
 
 /* calculate amp value mask we can modify;
@@ -732,7 +765,7 @@ static void activate_amp(struct hda_codec *codec, hda_nid_t nid, int dir,
 		return;
 
 	val &= mask;
-	snd_hda_codec_amp_stereo(codec, nid, dir, idx, mask, val);
+	update_amp(codec, nid, dir, idx, mask, val);
 }
 
 static void activate_amp_out(struct hda_codec *codec, struct nid_path *path,
@@ -4424,13 +4457,11 @@ static void mute_all_mixer_nid(struct hda_codec *codec, hda_nid_t mix)
 	has_amp = nid_has_mute(codec, mix, HDA_INPUT);
 	for (i = 0; i < nums; i++) {
 		if (has_amp)
-			snd_hda_codec_amp_stereo(codec, mix,
-						 HDA_INPUT, i,
-						 0xff, HDA_AMP_MUTE);
+			update_amp(codec, mix, HDA_INPUT, i,
+				   0xff, HDA_AMP_MUTE);
 		else if (nid_has_volume(codec, conn[i], HDA_OUTPUT))
-			snd_hda_codec_amp_stereo(codec, conn[i],
-						 HDA_OUTPUT, 0,
-						 0xff, HDA_AMP_MUTE);
+			update_amp(codec, conn[i], HDA_OUTPUT, 0,
+				   0xff, HDA_AMP_MUTE);
 	}
 }
 
@@ -4644,7 +4675,7 @@ int snd_hda_gen_build_controls(struct hda_codec *codec)
 		err = snd_hda_create_dig_out_ctls(codec,
 						  spec->multiout.dig_out_nid,
 						  spec->multiout.dig_out_nid,
-						  spec->pcm_rec[1].pcm_type);
+						  spec->pcm_rec[1]->pcm_type);
 		if (err < 0)
 			return err;
 		if (!spec->no_analog) {
@@ -5115,12 +5146,9 @@ static void fill_pcm_stream_name(char *str, size_t len, const char *sfx,
 int snd_hda_gen_build_pcms(struct hda_codec *codec)
 {
 	struct hda_gen_spec *spec = codec->spec;
-	struct hda_pcm *info = spec->pcm_rec;
+	struct hda_pcm *info;
 	const struct hda_pcm_stream *p;
 	bool have_multi_adcs;
-
-	codec->num_pcms = 1;
-	codec->pcm_info = info;
 
 	if (spec->no_analog)
 		goto skip_analog;
@@ -5128,7 +5156,10 @@ int snd_hda_gen_build_pcms(struct hda_codec *codec)
 	fill_pcm_stream_name(spec->stream_name_analog,
 			     sizeof(spec->stream_name_analog),
 			     " Analog", codec->chip_name);
-	info->name = spec->stream_name_analog;
+	info = snd_hda_codec_pcm_new(codec, "%s", spec->stream_name_analog);
+	if (!info)
+		return -ENOMEM;
+	spec->pcm_rec[0] = info;
 
 	if (spec->multiout.num_dacs > 0) {
 		p = spec->stream_analog_playback;
@@ -5161,10 +5192,12 @@ int snd_hda_gen_build_pcms(struct hda_codec *codec)
 		fill_pcm_stream_name(spec->stream_name_digital,
 				     sizeof(spec->stream_name_digital),
 				     " Digital", codec->chip_name);
-		codec->num_pcms = 2;
+		info = snd_hda_codec_pcm_new(codec, "%s",
+					     spec->stream_name_digital);
+		if (!info)
+			return -ENOMEM;
 		codec->slave_dig_outs = spec->multiout.slave_dig_outs;
-		info = spec->pcm_rec + 1;
-		info->name = spec->stream_name_digital;
+		spec->pcm_rec[1] = info;
 		if (spec->dig_out_type)
 			info->pcm_type = spec->dig_out_type;
 		else
@@ -5198,9 +5231,11 @@ int snd_hda_gen_build_pcms(struct hda_codec *codec)
 		fill_pcm_stream_name(spec->stream_name_alt_analog,
 				     sizeof(spec->stream_name_alt_analog),
 			     " Alt Analog", codec->chip_name);
-		codec->num_pcms = 3;
-		info = spec->pcm_rec + 2;
-		info->name = spec->stream_name_alt_analog;
+		info = snd_hda_codec_pcm_new(codec, "%s",
+					     spec->stream_name_alt_analog);
+		if (!info)
+			return -ENOMEM;
+		spec->pcm_rec[2] = info;
 		if (spec->alt_dac_nid) {
 			p = spec->stream_analog_alt_playback;
 			if (!p)
@@ -5493,13 +5528,11 @@ static const struct hda_codec_ops generic_patch_ops = {
 #endif
 };
 
-/**
+/*
  * snd_hda_parse_generic_codec - Generic codec parser
  * @codec: the HDA codec
- *
- * This should be called from the HDA codec core.
  */
-int snd_hda_parse_generic_codec(struct hda_codec *codec)
+static int snd_hda_parse_generic_codec(struct hda_codec *codec)
 {
 	struct hda_gen_spec *spec;
 	int err;
@@ -5525,7 +5558,17 @@ error:
 	snd_hda_gen_free(codec);
 	return err;
 }
-EXPORT_SYMBOL_GPL(snd_hda_parse_generic_codec);
+
+static const struct hda_codec_preset snd_hda_preset_generic[] = {
+	{ .id = HDA_CODEC_ID_GENERIC, .patch = snd_hda_parse_generic_codec },
+	{} /* terminator */
+};
+
+static struct hda_codec_driver generic_driver = {
+	.preset = snd_hda_preset_generic,
+};
+
+module_hda_codec_driver(generic_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Generic HD-audio codec parser");

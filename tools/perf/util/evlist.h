@@ -28,7 +28,7 @@ struct perf_mmap {
 	int		 mask;
 	int		 refcnt;
 	unsigned int	 prev;
-	char		 event_copy[PERF_SAMPLE_MAX_SIZE];
+	char		 event_copy[PERF_SAMPLE_MAX_SIZE] __attribute__((aligned(8)));
 };
 
 struct perf_evlist {
@@ -51,6 +51,7 @@ struct perf_evlist {
 	struct thread_map *threads;
 	struct cpu_map	  *cpus;
 	struct perf_evsel *selected;
+	struct events_stats stats;
 };
 
 struct perf_evsel_str_handler {
@@ -77,6 +78,8 @@ int perf_evlist__add_newtp(struct perf_evlist *evlist,
 			   const char *sys, const char *name, void *handler);
 
 int perf_evlist__set_filter(struct perf_evlist *evlist, const char *filter);
+int perf_evlist__set_filter_pid(struct perf_evlist *evlist, pid_t pid);
+int perf_evlist__set_filter_pids(struct perf_evlist *evlist, size_t npids, pid_t *pids);
 
 struct perf_evsel *
 perf_evlist__find_tracepoint_by_id(struct perf_evlist *evlist, int id);
@@ -183,7 +186,6 @@ static inline struct perf_evsel *perf_evlist__last(struct perf_evlist *evlist)
 
 size_t perf_evlist__fprintf(struct perf_evlist *evlist, FILE *fp);
 
-int perf_evlist__strerror_tp(struct perf_evlist *evlist, int err, char *buf, size_t size);
 int perf_evlist__strerror_open(struct perf_evlist *evlist, int err, char *buf, size_t size);
 int perf_evlist__strerror_mmap(struct perf_evlist *evlist, int err, char *buf, size_t size);
 

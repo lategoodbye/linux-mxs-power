@@ -28,7 +28,7 @@
 #include <target/configfs_macros.h>
 #include <target/iscsi/iscsi_transport.h>
 
-#include "iscsi_target_core.h"
+#include <target/iscsi/iscsi_target_core.h>
 #include "iscsi_target_parameters.h"
 #include "iscsi_target_device.h"
 #include "iscsi_target_erl0.h"
@@ -36,7 +36,7 @@
 #include "iscsi_target_tpg.h"
 #include "iscsi_target_util.h"
 #include "iscsi_target.h"
-#include "iscsi_target_stat.h"
+#include <target/iscsi/iscsi_target_stat.h>
 #include "iscsi_target_configfs.h"
 
 struct target_fabric_configfs *lio_target_fabric_configfs;
@@ -674,12 +674,9 @@ static ssize_t lio_target_nacl_show_info(
 		rb += sprintf(page+rb, "InitiatorAlias: %s\n",
 			sess->sess_ops->InitiatorAlias);
 
-		rb += sprintf(page+rb, "LIO Session ID: %u   "
-			"ISID: 0x%02x %02x %02x %02x %02x %02x  "
-			"TSIH: %hu  ", sess->sid,
-			sess->isid[0], sess->isid[1], sess->isid[2],
-			sess->isid[3], sess->isid[4], sess->isid[5],
-			sess->tsih);
+		rb += sprintf(page+rb,
+			      "LIO Session ID: %u   ISID: 0x%6ph  TSIH: %hu  ",
+			      sess->sid, sess->isid, sess->tsih);
 		rb += sprintf(page+rb, "SessionType: %s\n",
 				(sess->sess_ops->SessionType) ?
 				"Discovery" : "Normal");
@@ -1413,8 +1410,18 @@ out:
 
 TF_TPG_BASE_ATTR(lio_target, enable, S_IRUGO | S_IWUSR);
 
+static ssize_t lio_target_tpg_show_dynamic_sessions(
+	struct se_portal_group *se_tpg,
+	char *page)
+{
+	return target_show_dynamic_sessions(se_tpg, page);
+}
+
+TF_TPG_BASE_ATTR_RO(lio_target, dynamic_sessions);
+
 static struct configfs_attribute *lio_target_tpg_attrs[] = {
 	&lio_target_tpg_enable.attr,
+	&lio_target_tpg_dynamic_sessions.attr,
 	NULL,
 };
 
@@ -1758,9 +1765,7 @@ static u32 lio_sess_get_initiator_sid(
 	/*
 	 * iSCSI Initiator Session Identifier from RFC-3720.
 	 */
-	return snprintf(buf, size, "%02x%02x%02x%02x%02x%02x",
-		sess->isid[0], sess->isid[1], sess->isid[2],
-		sess->isid[3], sess->isid[4], sess->isid[5]);
+	return snprintf(buf, size, "%6phN", sess->isid);
 }
 
 static int lio_queue_data_in(struct se_cmd *se_cmd)

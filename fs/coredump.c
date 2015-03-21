@@ -32,6 +32,7 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
 #include <linux/compat.h>
+#include <linux/timekeeping.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -225,9 +226,10 @@ static int format_corename(struct core_name *cn, struct coredump_params *cprm)
 				break;
 			/* UNIX time of coredump */
 			case 't': {
-				struct timeval tv;
-				do_gettimeofday(&tv);
-				err = cn_printf(cn, "%lu", tv.tv_sec);
+				time64_t time;
+
+				time = ktime_get_real_seconds();
+				err = cn_printf(cn, "%lld", time);
 				break;
 			}
 			/* hostname */
@@ -572,7 +574,7 @@ void do_coredump(const siginfo_t *siginfo)
 			 *
 			 * Normally core limits are irrelevant to pipes, since
 			 * we're not writing to the file system, but we use
-			 * cprm.limit of 1 here as a speacial value, this is a
+			 * cprm.limit of 1 here as a special value, this is a
 			 * consistent way to catch recursive crashes.
 			 * We can still crash if the core_pattern binary sets
 			 * RLIM_CORE = !1, but it runs as root, and can do

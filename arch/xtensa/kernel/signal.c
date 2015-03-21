@@ -245,7 +245,7 @@ asmlinkage long xtensa_rt_sigreturn(long a0, long a1, long a2, long a3,
 	int ret;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 	if (regs->depc > 64)
 		panic("rt_sigreturn in double exception!\n");
@@ -404,11 +404,6 @@ static int setup_frame(struct ksignal *ksig, sigset_t *set,
 	regs->areg[7] = (unsigned long) &frame->info;
 	regs->areg[8] = (unsigned long) &frame->uc;
 	regs->threadptr = tp;
-
-	/* Set access mode to USER_DS.  Nomenclature is outdated, but
-	 * functionality is used in uaccess.h
-	 */
-	set_fs(USER_DS);
 
 #if DEBUG_SIG
 	printk("SIG rt deliver (%s:%d): signal=%d sp=%p pc=%08x\n",

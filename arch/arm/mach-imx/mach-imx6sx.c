@@ -84,13 +84,12 @@ static void __init imx6sx_init_irq(void)
 	imx_init_revision_from_anatop();
 	imx_init_l2cache();
 	imx_src_init();
-	imx_gpc_init();
 	irqchip_init();
 }
 
 static void __init imx6sx_init_late(void)
 {
-	imx6q_cpuidle_init();
+	imx6sx_cpuidle_init();
 
 	if (IS_ENABLED(CONFIG_ARM_IMX6Q_CPUFREQ))
 		platform_device_register_simple("imx6q-cpufreq", -1, NULL, 0);

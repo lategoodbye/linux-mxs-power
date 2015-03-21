@@ -1,7 +1,7 @@
 /*
  * Resizable, Scalable, Concurrent Hash Table
  *
- * Copyright (c) 2014 Thomas Graf <tgraf@suug.ch>
+ * Copyright (c) 2014-2015 Thomas Graf <tgraf@suug.ch>
  * Copyright (c) 2008-2014 Patrick McHardy <kaber@trash.net>
  *
  * Based on the following paper:
@@ -17,262 +17,310 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/log2.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
 #include <linux/jhash.h>
 #include <linux/random.h>
 #include <linux/rhashtable.h>
+#include <linux/err.h>
 
 #define HASH_DEFAULT_SIZE	64UL
-#define HASH_MIN_SIZE		4UL
+#define HASH_MIN_SIZE		4U
+#define BUCKET_LOCKS_PER_CPU   128UL
 
-#define ASSERT_RHT_MUTEX(HT) BUG_ON(!lockdep_rht_mutex_is_held(HT))
+/* Base bits plus 1 bit for nulls marker */
+#define HASH_RESERVED_SPACE	(RHT_BASE_BITS + 1)
 
-#ifdef CONFIG_PROVE_LOCKING
-int lockdep_rht_mutex_is_held(const struct rhashtable *ht)
+/* The bucket lock is selected based on the hash and protects mutations
+ * on a group of hash buckets.
+ *
+ * A maximum of tbl->size/2 bucket locks is allocated. This ensures that
+ * a single lock always covers both buckets which may both contains
+ * entries which link to the same bucket of the old table during resizing.
+ * This allows to simplify the locking as locking the bucket in both
+ * tables during resize always guarantee protection.
+ *
+ * IMPORTANT: When holding the bucket lock of both the old and new table
+ * during expansions and shrinking, the old bucket lock must always be
+ * acquired first.
+ */
+static spinlock_t *bucket_lock(const struct bucket_table *tbl, u32 hash)
 {
-	return ht->p.mutex_is_held(ht->p.parent);
+	return &tbl->locks[hash & tbl->locks_mask];
 }
-EXPORT_SYMBOL_GPL(lockdep_rht_mutex_is_held);
-#endif
 
 static void *rht_obj(const struct rhashtable *ht, const struct rhash_head *he)
 {
 	return (void *) he - ht->p.head_offset;
 }
 
-static u32 __hashfn(const struct rhashtable *ht, const void *key,
-		      u32 len, u32 hsize)
+static u32 rht_bucket_index(const struct bucket_table *tbl, u32 hash)
 {
-	u32 h;
-
-	h = ht->p.hashfn(key, len, ht->p.hash_rnd);
-
-	return h & (hsize - 1);
+	return (hash >> HASH_RESERVED_SPACE) & (tbl->size - 1);
 }
 
-/**
- * rhashtable_hashfn - compute hash for key of given length
- * @ht:		hash table to compute for
- * @key:	pointer to key
- * @len:	length of key
- *
- * Computes the hash value using the hash function provided in the 'hashfn'
- * of struct rhashtable_params. The returned value is guaranteed to be
- * smaller than the number of buckets in the hash table.
- */
-u32 rhashtable_hashfn(const struct rhashtable *ht, const void *key, u32 len)
+static u32 key_hashfn(struct rhashtable *ht, const struct bucket_table *tbl,
+		      const void *key)
 {
-	struct bucket_table *tbl = rht_dereference_rcu(ht->tbl, ht);
-
-	return __hashfn(ht, key, len, tbl->size);
+	return rht_bucket_index(tbl, ht->p.hashfn(key, ht->p.key_len,
+						  tbl->hash_rnd));
 }
-EXPORT_SYMBOL_GPL(rhashtable_hashfn);
 
-static u32 obj_hashfn(const struct rhashtable *ht, const void *ptr, u32 hsize)
+static u32 head_hashfn(struct rhashtable *ht,
+		       const struct bucket_table *tbl,
+		       const struct rhash_head *he)
 {
-	if (unlikely(!ht->p.key_len)) {
-		u32 h;
+	const char *ptr = rht_obj(ht, he);
 
-		h = ht->p.obj_hashfn(ptr, ht->p.hash_rnd);
+	return likely(ht->p.key_len) ?
+	       key_hashfn(ht, tbl, ptr + ht->p.key_offset) :
+	       rht_bucket_index(tbl, ht->p.obj_hashfn(ptr, tbl->hash_rnd));
+}
 
-		return h & (hsize - 1);
+#ifdef CONFIG_PROVE_LOCKING
+#define ASSERT_RHT_MUTEX(HT) BUG_ON(!lockdep_rht_mutex_is_held(HT))
+
+int lockdep_rht_mutex_is_held(struct rhashtable *ht)
+{
+	return (debug_locks) ? lockdep_is_held(&ht->mutex) : 1;
+}
+EXPORT_SYMBOL_GPL(lockdep_rht_mutex_is_held);
+
+int lockdep_rht_bucket_is_held(const struct bucket_table *tbl, u32 hash)
+{
+	spinlock_t *lock = bucket_lock(tbl, hash);
+
+	return (debug_locks) ? lockdep_is_held(lock) : 1;
+}
+EXPORT_SYMBOL_GPL(lockdep_rht_bucket_is_held);
+#else
+#define ASSERT_RHT_MUTEX(HT)
+#endif
+
+
+static int alloc_bucket_locks(struct rhashtable *ht, struct bucket_table *tbl)
+{
+	unsigned int i, size;
+#if defined(CONFIG_PROVE_LOCKING)
+	unsigned int nr_pcpus = 2;
+#else
+	unsigned int nr_pcpus = num_possible_cpus();
+#endif
+
+	nr_pcpus = min_t(unsigned int, nr_pcpus, 32UL);
+	size = roundup_pow_of_two(nr_pcpus * ht->p.locks_mul);
+
+	/* Never allocate more than 0.5 locks per bucket */
+	size = min_t(unsigned int, size, tbl->size >> 1);
+
+	if (sizeof(spinlock_t) != 0) {
+#ifdef CONFIG_NUMA
+		if (size * sizeof(spinlock_t) > PAGE_SIZE)
+			tbl->locks = vmalloc(size * sizeof(spinlock_t));
+		else
+#endif
+		tbl->locks = kmalloc_array(size, sizeof(spinlock_t),
+					   GFP_KERNEL);
+		if (!tbl->locks)
+			return -ENOMEM;
+		for (i = 0; i < size; i++)
+			spin_lock_init(&tbl->locks[i]);
 	}
+	tbl->locks_mask = size - 1;
 
-	return __hashfn(ht, ptr + ht->p.key_offset, ht->p.key_len, hsize);
+	return 0;
 }
 
-/**
- * rhashtable_obj_hashfn - compute hash for hashed object
- * @ht:		hash table to compute for
- * @ptr:	pointer to hashed object
- *
- * Computes the hash value using the hash function `hashfn` respectively
- * 'obj_hashfn' depending on whether the hash table is set up to work with
- * a fixed length key. The returned value is guaranteed to be smaller than
- * the number of buckets in the hash table.
- */
-u32 rhashtable_obj_hashfn(const struct rhashtable *ht, void *ptr)
+static void bucket_table_free(const struct bucket_table *tbl)
 {
-	struct bucket_table *tbl = rht_dereference_rcu(ht->tbl, ht);
+	if (tbl)
+		kvfree(tbl->locks);
 
-	return obj_hashfn(ht, ptr, tbl->size);
-}
-EXPORT_SYMBOL_GPL(rhashtable_obj_hashfn);
-
-static u32 head_hashfn(const struct rhashtable *ht,
-		       const struct rhash_head *he, u32 hsize)
-{
-	return obj_hashfn(ht, rht_obj(ht, he), hsize);
+	kvfree(tbl);
 }
 
-static struct bucket_table *bucket_table_alloc(size_t nbuckets)
+static void bucket_table_free_rcu(struct rcu_head *head)
 {
-	struct bucket_table *tbl;
+	bucket_table_free(container_of(head, struct bucket_table, rcu));
+}
+
+static struct bucket_table *bucket_table_alloc(struct rhashtable *ht,
+					       size_t nbuckets)
+{
+	struct bucket_table *tbl = NULL;
 	size_t size;
+	int i;
 
 	size = sizeof(*tbl) + nbuckets * sizeof(tbl->buckets[0]);
-	tbl = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
+	if (size <= (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER))
+		tbl = kzalloc(size, GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY);
 	if (tbl == NULL)
 		tbl = vzalloc(size);
-
 	if (tbl == NULL)
 		return NULL;
 
 	tbl->size = nbuckets;
 
-	return tbl;
-}
+	if (alloc_bucket_locks(ht, tbl) < 0) {
+		bucket_table_free(tbl);
+		return NULL;
+	}
 
-static void bucket_table_free(const struct bucket_table *tbl)
-{
-	kvfree(tbl);
+	INIT_LIST_HEAD(&tbl->walkers);
+
+	get_random_bytes(&tbl->hash_rnd, sizeof(tbl->hash_rnd));
+
+	for (i = 0; i < nbuckets; i++)
+		INIT_RHT_NULLS_HEAD(tbl->buckets[i], ht, i);
+
+	return tbl;
 }
 
 /**
  * rht_grow_above_75 - returns true if nelems > 0.75 * table-size
  * @ht:		hash table
- * @new_size:	new table size
+ * @tbl:	current table
  */
-bool rht_grow_above_75(const struct rhashtable *ht, size_t new_size)
+static bool rht_grow_above_75(const struct rhashtable *ht,
+			      const struct bucket_table *tbl)
 {
 	/* Expand table when exceeding 75% load */
-	return ht->nelems > (new_size / 4 * 3);
+	return atomic_read(&ht->nelems) > (tbl->size / 4 * 3) &&
+	       (!ht->p.max_size || tbl->size < ht->p.max_size);
 }
-EXPORT_SYMBOL_GPL(rht_grow_above_75);
 
 /**
  * rht_shrink_below_30 - returns true if nelems < 0.3 * table-size
  * @ht:		hash table
- * @new_size:	new table size
+ * @tbl:	current table
  */
-bool rht_shrink_below_30(const struct rhashtable *ht, size_t new_size)
+static bool rht_shrink_below_30(const struct rhashtable *ht,
+				const struct bucket_table *tbl)
 {
 	/* Shrink table beneath 30% load */
-	return ht->nelems < (new_size * 3 / 10);
+	return atomic_read(&ht->nelems) < (tbl->size * 3 / 10) &&
+	       tbl->size > ht->p.min_size;
 }
-EXPORT_SYMBOL_GPL(rht_shrink_below_30);
 
-static void hashtable_chain_unzip(const struct rhashtable *ht,
-				  const struct bucket_table *new_tbl,
-				  struct bucket_table *old_tbl, size_t n)
+static int rhashtable_rehash_one(struct rhashtable *ht, unsigned old_hash)
 {
-	struct rhash_head *he, *p, *next;
-	unsigned int h;
+	struct bucket_table *old_tbl = rht_dereference(ht->tbl, ht);
+	struct bucket_table *new_tbl =
+		rht_dereference(old_tbl->future_tbl, ht) ?: old_tbl;
+	struct rhash_head __rcu **pprev = &old_tbl->buckets[old_hash];
+	int err = -ENOENT;
+	struct rhash_head *head, *next, *entry;
+	spinlock_t *new_bucket_lock;
+	unsigned new_hash;
 
-	/* Old bucket empty, no work needed. */
-	p = rht_dereference(old_tbl->buckets[n], ht);
-	if (!p)
-		return;
+	rht_for_each(entry, old_tbl, old_hash) {
+		err = 0;
+		next = rht_dereference_bucket(entry->next, old_tbl, old_hash);
 
-	/* Advance the old bucket pointer one or more times until it
-	 * reaches a node that doesn't hash to the same bucket as the
-	 * previous node p. Call the previous node p;
-	 */
-	h = head_hashfn(ht, p, new_tbl->size);
-	rht_for_each(he, p->next, ht) {
-		if (head_hashfn(ht, he, new_tbl->size) != h)
+		if (rht_is_a_nulls(next))
 			break;
-		p = he;
-	}
-	RCU_INIT_POINTER(old_tbl->buckets[n], p->next);
 
-	/* Find the subsequent node which does hash to the same
-	 * bucket as node P, or NULL if no such node exists.
-	 */
-	next = NULL;
-	if (he) {
-		rht_for_each(he, he->next, ht) {
-			if (head_hashfn(ht, he, new_tbl->size) == h) {
-				next = he;
-				break;
-			}
-		}
+		pprev = &entry->next;
 	}
 
-	/* Set p's next pointer to that subsequent node pointer,
-	 * bypassing the nodes which do not hash to p's bucket
+	if (err)
+		goto out;
+
+	new_hash = head_hashfn(ht, new_tbl, entry);
+
+	new_bucket_lock = bucket_lock(new_tbl, new_hash);
+
+	spin_lock_nested(new_bucket_lock, SINGLE_DEPTH_NESTING);
+	head = rht_dereference_bucket(new_tbl->buckets[new_hash],
+				      new_tbl, new_hash);
+
+	if (rht_is_a_nulls(head))
+		INIT_RHT_NULLS_HEAD(entry->next, ht, new_hash);
+	else
+		RCU_INIT_POINTER(entry->next, head);
+
+	rcu_assign_pointer(new_tbl->buckets[new_hash], entry);
+	spin_unlock(new_bucket_lock);
+
+	rcu_assign_pointer(*pprev, next);
+
+out:
+	return err;
+}
+
+static void rhashtable_rehash_chain(struct rhashtable *ht, unsigned old_hash)
+{
+	struct bucket_table *old_tbl = rht_dereference(ht->tbl, ht);
+	spinlock_t *old_bucket_lock;
+
+	old_bucket_lock = bucket_lock(old_tbl, old_hash);
+
+	spin_lock_bh(old_bucket_lock);
+	while (!rhashtable_rehash_one(ht, old_hash))
+		;
+	old_tbl->rehash++;
+	spin_unlock_bh(old_bucket_lock);
+}
+
+static void rhashtable_rehash(struct rhashtable *ht,
+			      struct bucket_table *new_tbl)
+{
+	struct bucket_table *old_tbl = rht_dereference(ht->tbl, ht);
+	struct rhashtable_walker *walker;
+	unsigned old_hash;
+
+	/* Make insertions go into the new, empty table right away. Deletions
+	 * and lookups will be attempted in both tables until we synchronize.
 	 */
-	RCU_INIT_POINTER(p->next, next);
+	rcu_assign_pointer(old_tbl->future_tbl, new_tbl);
+
+	/* Ensure the new table is visible to readers. */
+	smp_wmb();
+
+	for (old_hash = 0; old_hash < old_tbl->size; old_hash++)
+		rhashtable_rehash_chain(ht, old_hash);
+
+	/* Publish the new table pointer. */
+	rcu_assign_pointer(ht->tbl, new_tbl);
+
+	list_for_each_entry(walker, &old_tbl->walkers, list)
+		walker->tbl = NULL;
+
+	/* Wait for readers. All new readers will see the new
+	 * table, and thus no references to the old table will
+	 * remain.
+	 */
+	call_rcu(&old_tbl->rcu, bucket_table_free_rcu);
 }
 
 /**
  * rhashtable_expand - Expand hash table while allowing concurrent lookups
  * @ht:		the hash table to expand
  *
- * A secondary bucket array is allocated and the hash entries are migrated
- * while keeping them on both lists until the end of the RCU grace period.
+ * A secondary bucket array is allocated and the hash entries are migrated.
  *
  * This function may only be called in a context where it is safe to call
  * synchronize_rcu(), e.g. not within a rcu_read_lock() section.
  *
- * The caller must ensure that no concurrent table mutations take place.
- * It is however valid to have concurrent lookups if they are RCU protected.
+ * The caller must ensure that no concurrent resizing occurs by holding
+ * ht->mutex.
+ *
+ * It is valid to have concurrent insertions and deletions protected by per
+ * bucket locks or concurrent RCU protected lookups and traversals.
  */
 int rhashtable_expand(struct rhashtable *ht)
 {
 	struct bucket_table *new_tbl, *old_tbl = rht_dereference(ht->tbl, ht);
-	struct rhash_head *he;
-	unsigned int i, h;
-	bool complete;
 
 	ASSERT_RHT_MUTEX(ht);
 
-	if (ht->p.max_shift && ht->shift >= ht->p.max_shift)
-		return 0;
-
-	new_tbl = bucket_table_alloc(old_tbl->size * 2);
+	new_tbl = bucket_table_alloc(ht, old_tbl->size * 2);
 	if (new_tbl == NULL)
 		return -ENOMEM;
 
-	ht->shift++;
-
-	/* For each new bucket, search the corresponding old bucket
-	 * for the first entry that hashes to the new bucket, and
-	 * link the new bucket to that entry. Since all the entries
-	 * which will end up in the new bucket appear in the same
-	 * old bucket, this constructs an entirely valid new hash
-	 * table, but with multiple buckets "zipped" together into a
-	 * single imprecise chain.
-	 */
-	for (i = 0; i < new_tbl->size; i++) {
-		h = i & (old_tbl->size - 1);
-		rht_for_each(he, old_tbl->buckets[h], ht) {
-			if (head_hashfn(ht, he, new_tbl->size) == i) {
-				RCU_INIT_POINTER(new_tbl->buckets[i], he);
-				break;
-			}
-		}
-	}
-
-	/* Publish the new table pointer. Lookups may now traverse
-	 * the new table, but they will not benefit from any
-	 * additional efficiency until later steps unzip the buckets.
-	 */
-	rcu_assign_pointer(ht->tbl, new_tbl);
-
-	/* Unzip interleaved hash chains */
-	do {
-		/* Wait for readers. All new readers will see the new
-		 * table, and thus no references to the old table will
-		 * remain.
-		 */
-		synchronize_rcu();
-
-		/* For each bucket in the old table (each of which
-		 * contains items from multiple buckets of the new
-		 * table): ...
-		 */
-		complete = true;
-		for (i = 0; i < old_tbl->size; i++) {
-			hashtable_chain_unzip(ht, new_tbl, old_tbl, i);
-			if (old_tbl->buckets[i] != NULL)
-				complete = false;
-		}
-	} while (!complete);
-
-	bucket_table_free(old_tbl);
+	rhashtable_rehash(ht, new_tbl);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rhashtable_expand);
@@ -284,110 +332,165 @@ EXPORT_SYMBOL_GPL(rhashtable_expand);
  * This function may only be called in a context where it is safe to call
  * synchronize_rcu(), e.g. not within a rcu_read_lock() section.
  *
+ * The caller must ensure that no concurrent resizing occurs by holding
+ * ht->mutex.
+ *
  * The caller must ensure that no concurrent table mutations take place.
  * It is however valid to have concurrent lookups if they are RCU protected.
+ *
+ * It is valid to have concurrent insertions and deletions protected by per
+ * bucket locks or concurrent RCU protected lookups and traversals.
  */
 int rhashtable_shrink(struct rhashtable *ht)
 {
-	struct bucket_table *ntbl, *tbl = rht_dereference(ht->tbl, ht);
-	struct rhash_head __rcu **pprev;
-	unsigned int i;
+	struct bucket_table *new_tbl, *old_tbl = rht_dereference(ht->tbl, ht);
 
 	ASSERT_RHT_MUTEX(ht);
 
-	if (ht->shift <= ht->p.min_shift)
-		return 0;
-
-	ntbl = bucket_table_alloc(tbl->size / 2);
-	if (ntbl == NULL)
+	new_tbl = bucket_table_alloc(ht, old_tbl->size / 2);
+	if (new_tbl == NULL)
 		return -ENOMEM;
 
-	ht->shift--;
-
-	/* Link each bucket in the new table to the first bucket
-	 * in the old table that contains entries which will hash
-	 * to the new bucket.
-	 */
-	for (i = 0; i < ntbl->size; i++) {
-		ntbl->buckets[i] = tbl->buckets[i];
-
-		/* Link each bucket in the new table to the first bucket
-		 * in the old table that contains entries which will hash
-		 * to the new bucket.
-		 */
-		for (pprev = &ntbl->buckets[i]; *pprev != NULL;
-		     pprev = &rht_dereference(*pprev, ht)->next)
-			;
-		RCU_INIT_POINTER(*pprev, tbl->buckets[i + ntbl->size]);
-	}
-
-	/* Publish the new, valid hash table */
-	rcu_assign_pointer(ht->tbl, ntbl);
-
-	/* Wait for readers. No new readers will have references to the
-	 * old hash table.
-	 */
-	synchronize_rcu();
-
-	bucket_table_free(tbl);
-
+	rhashtable_rehash(ht, new_tbl);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rhashtable_shrink);
 
+static void rht_deferred_worker(struct work_struct *work)
+{
+	struct rhashtable *ht;
+	struct bucket_table *tbl;
+
+	ht = container_of(work, struct rhashtable, run_work);
+	mutex_lock(&ht->mutex);
+	if (ht->being_destroyed)
+		goto unlock;
+
+	tbl = rht_dereference(ht->tbl, ht);
+
+	if (rht_grow_above_75(ht, tbl))
+		rhashtable_expand(ht);
+	else if (rht_shrink_below_30(ht, tbl))
+		rhashtable_shrink(ht);
+unlock:
+	mutex_unlock(&ht->mutex);
+}
+
+static bool __rhashtable_insert(struct rhashtable *ht, struct rhash_head *obj,
+				bool (*compare)(void *, void *), void *arg)
+{
+	struct bucket_table *tbl, *old_tbl;
+	struct rhash_head *head;
+	bool no_resize_running;
+	unsigned hash;
+	spinlock_t *old_lock;
+	bool success = true;
+
+	rcu_read_lock();
+
+	old_tbl = rht_dereference_rcu(ht->tbl, ht);
+	hash = head_hashfn(ht, old_tbl, obj);
+	old_lock = bucket_lock(old_tbl, hash);
+
+	spin_lock_bh(old_lock);
+
+	/* Because we have already taken the bucket lock in old_tbl,
+	 * if we find that future_tbl is not yet visible then that
+	 * guarantees all other insertions of the same entry will
+	 * also grab the bucket lock in old_tbl because until the
+	 * rehash completes ht->tbl won't be changed.
+	 */
+	tbl = rht_dereference_rcu(old_tbl->future_tbl, ht) ?: old_tbl;
+	if (tbl != old_tbl) {
+		hash = head_hashfn(ht, tbl, obj);
+		spin_lock_nested(bucket_lock(tbl, hash), SINGLE_DEPTH_NESTING);
+	}
+
+	if (compare &&
+	    rhashtable_lookup_compare(ht, rht_obj(ht, obj) + ht->p.key_offset,
+				      compare, arg)) {
+		success = false;
+		goto exit;
+	}
+
+	no_resize_running = tbl == old_tbl;
+
+	head = rht_dereference_bucket(tbl->buckets[hash], tbl, hash);
+
+	if (rht_is_a_nulls(head))
+		INIT_RHT_NULLS_HEAD(obj->next, ht, hash);
+	else
+		RCU_INIT_POINTER(obj->next, head);
+
+	rcu_assign_pointer(tbl->buckets[hash], obj);
+
+	atomic_inc(&ht->nelems);
+	if (no_resize_running && rht_grow_above_75(ht, tbl))
+		schedule_work(&ht->run_work);
+
+exit:
+	if (tbl != old_tbl)
+		spin_unlock(bucket_lock(tbl, hash));
+
+	spin_unlock_bh(old_lock);
+
+	rcu_read_unlock();
+
+	return success;
+}
+
 /**
- * rhashtable_insert - insert object into hash hash table
+ * rhashtable_insert - insert object into hash table
  * @ht:		hash table
  * @obj:	pointer to hash head inside object
  *
- * Will automatically grow the table via rhashtable_expand() if the the
- * grow_decision function specified at rhashtable_init() returns true.
+ * Will take a per bucket spinlock to protect against mutual mutations
+ * on the same bucket. Multiple insertions may occur in parallel unless
+ * they map to the same bucket lock.
  *
- * The caller must ensure that no concurrent table mutations occur. It is
- * however valid to have concurrent lookups if they are RCU protected.
+ * It is safe to call this function from atomic context.
+ *
+ * Will trigger an automatic deferred table resizing if the size grows
+ * beyond the watermark indicated by grow_decision() which can be passed
+ * to rhashtable_init().
  */
 void rhashtable_insert(struct rhashtable *ht, struct rhash_head *obj)
 {
-	struct bucket_table *tbl = rht_dereference(ht->tbl, ht);
-	u32 hash;
-
-	ASSERT_RHT_MUTEX(ht);
-
-	hash = head_hashfn(ht, obj, tbl->size);
-	RCU_INIT_POINTER(obj->next, tbl->buckets[hash]);
-	rcu_assign_pointer(tbl->buckets[hash], obj);
-	ht->nelems++;
-
-	if (ht->p.grow_decision && ht->p.grow_decision(ht, tbl->size))
-		rhashtable_expand(ht);
+	__rhashtable_insert(ht, obj, NULL, NULL);
 }
 EXPORT_SYMBOL_GPL(rhashtable_insert);
 
-/**
- * rhashtable_remove_pprev - remove object from hash table given previous element
- * @ht:		hash table
- * @obj:	pointer to hash head inside object
- * @pprev:	pointer to previous element
- *
- * Identical to rhashtable_remove() but caller is alreayd aware of the element
- * in front of the element to be deleted. This is in particular useful for
- * deletion when combined with walking or lookup.
- */
-void rhashtable_remove_pprev(struct rhashtable *ht, struct rhash_head *obj,
-			     struct rhash_head __rcu **pprev)
+static bool __rhashtable_remove(struct rhashtable *ht,
+				struct bucket_table *tbl,
+				struct rhash_head *obj)
 {
-	struct bucket_table *tbl = rht_dereference(ht->tbl, ht);
+	struct rhash_head __rcu **pprev;
+	struct rhash_head *he;
+	spinlock_t * lock;
+	unsigned hash;
+	bool ret = false;
 
-	ASSERT_RHT_MUTEX(ht);
+	hash = head_hashfn(ht, tbl, obj);
+	lock = bucket_lock(tbl, hash);
 
-	RCU_INIT_POINTER(*pprev, obj->next);
-	ht->nelems--;
+	spin_lock_bh(lock);
 
-	if (ht->p.shrink_decision &&
-	    ht->p.shrink_decision(ht, tbl->size))
-		rhashtable_shrink(ht);
+	pprev = &tbl->buckets[hash];
+	rht_for_each(he, tbl, hash) {
+		if (he != obj) {
+			pprev = &he->next;
+			continue;
+		}
+
+		rcu_assign_pointer(*pprev, obj->next);
+		ret = true;
+		break;
+	}
+
+	spin_unlock_bh(lock);
+
+	return ret;
 }
-EXPORT_SYMBOL_GPL(rhashtable_remove_pprev);
 
 /**
  * rhashtable_remove - remove object from hash table
@@ -398,7 +501,7 @@ EXPORT_SYMBOL_GPL(rhashtable_remove_pprev);
  * walk the bucket chain upon removal. The removal operation is thus
  * considerable slow if the hash table is not correctly sized.
  *
- * Will automatically shrink the table via rhashtable_expand() if the the
+ * Will automatically shrink the table via rhashtable_expand() if the
  * shrink_decision function specified at rhashtable_init() returns true.
  *
  * The caller must ensure that no concurrent table mutations occur. It is
@@ -406,29 +509,46 @@ EXPORT_SYMBOL_GPL(rhashtable_remove_pprev);
  */
 bool rhashtable_remove(struct rhashtable *ht, struct rhash_head *obj)
 {
-	struct bucket_table *tbl = rht_dereference(ht->tbl, ht);
-	struct rhash_head __rcu **pprev;
-	struct rhash_head *he;
-	u32 h;
+	struct bucket_table *tbl;
+	bool ret;
 
-	ASSERT_RHT_MUTEX(ht);
+	rcu_read_lock();
 
-	h = head_hashfn(ht, obj, tbl->size);
+	tbl = rht_dereference_rcu(ht->tbl, ht);
 
-	pprev = &tbl->buckets[h];
-	rht_for_each(he, tbl->buckets[h], ht) {
-		if (he != obj) {
-			pprev = &he->next;
-			continue;
-		}
+	/* Because we have already taken (and released) the bucket
+	 * lock in old_tbl, if we find that future_tbl is not yet
+	 * visible then that guarantees the entry to still be in
+	 * the old tbl if it exists.
+	 */
+	while (!(ret = __rhashtable_remove(ht, tbl, obj)) &&
+	       (tbl = rht_dereference_rcu(tbl->future_tbl, ht)))
+		;
 
-		rhashtable_remove_pprev(ht, he, pprev);
-		return true;
+	if (ret) {
+		atomic_dec(&ht->nelems);
+		if (rht_shrink_below_30(ht, tbl))
+			schedule_work(&ht->run_work);
 	}
 
-	return false;
+	rcu_read_unlock();
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(rhashtable_remove);
+
+struct rhashtable_compare_arg {
+	struct rhashtable *ht;
+	const void *key;
+};
+
+static bool rhashtable_compare(void *ptr, void *arg)
+{
+	struct rhashtable_compare_arg *x = arg;
+	struct rhashtable *ht = x->ht;
+
+	return !memcmp(ptr + ht->p.key_offset, x->key, ht->p.key_len);
+}
 
 /**
  * rhashtable_lookup - lookup key in hash table
@@ -439,69 +559,321 @@ EXPORT_SYMBOL_GPL(rhashtable_remove);
  * for a entry with an identical key. The first matching entry is returned.
  *
  * This lookup function may only be used for fixed key hash table (key_len
- * paramter set). It will BUG() if used inappropriately.
+ * parameter set). It will BUG() if used inappropriately.
  *
- * Lookups may occur in parallel with hash mutations as long as the lookup is
- * guarded by rcu_read_lock(). The caller must take care of this.
+ * Lookups may occur in parallel with hashtable mutations and resizing.
  */
-void *rhashtable_lookup(const struct rhashtable *ht, const void *key)
+void *rhashtable_lookup(struct rhashtable *ht, const void *key)
 {
-	const struct bucket_table *tbl = rht_dereference_rcu(ht->tbl, ht);
-	struct rhash_head *he;
-	u32 h;
+	struct rhashtable_compare_arg arg = {
+		.ht = ht,
+		.key = key,
+	};
 
 	BUG_ON(!ht->p.key_len);
 
-	h = __hashfn(ht, key, ht->p.key_len, tbl->size);
-	rht_for_each_rcu(he, tbl->buckets[h], ht) {
-		if (memcmp(rht_obj(ht, he) + ht->p.key_offset, key,
-			   ht->p.key_len))
-			continue;
-		return (void *) he - ht->p.head_offset;
-	}
-
-	return NULL;
+	return rhashtable_lookup_compare(ht, key, &rhashtable_compare, &arg);
 }
 EXPORT_SYMBOL_GPL(rhashtable_lookup);
 
 /**
  * rhashtable_lookup_compare - search hash table with compare function
  * @ht:		hash table
- * @hash:	hash value of desired entry
+ * @key:	the pointer to the key
  * @compare:	compare function, must return true on match
  * @arg:	argument passed on to compare function
  *
  * Traverses the bucket chain behind the provided hash value and calls the
  * specified compare function for each entry.
  *
- * Lookups may occur in parallel with hash mutations as long as the lookup is
- * guarded by rcu_read_lock(). The caller must take care of this.
+ * Lookups may occur in parallel with hashtable mutations and resizing.
  *
  * Returns the first entry on which the compare function returned true.
  */
-void *rhashtable_lookup_compare(const struct rhashtable *ht, u32 hash,
+void *rhashtable_lookup_compare(struct rhashtable *ht, const void *key,
 				bool (*compare)(void *, void *), void *arg)
 {
-	const struct bucket_table *tbl = rht_dereference_rcu(ht->tbl, ht);
+	const struct bucket_table *tbl;
 	struct rhash_head *he;
+	u32 hash;
 
-	if (unlikely(hash >= tbl->size))
-		return NULL;
+	rcu_read_lock();
 
-	rht_for_each_rcu(he, tbl->buckets[hash], ht) {
+	tbl = rht_dereference_rcu(ht->tbl, ht);
+restart:
+	hash = key_hashfn(ht, tbl, key);
+	rht_for_each_rcu(he, tbl, hash) {
 		if (!compare(rht_obj(ht, he), arg))
 			continue;
-		return (void *) he - ht->p.head_offset;
+		rcu_read_unlock();
+		return rht_obj(ht, he);
 	}
+
+	/* Ensure we see any new tables. */
+	smp_rmb();
+
+	tbl = rht_dereference_rcu(tbl->future_tbl, ht);
+	if (unlikely(tbl))
+		goto restart;
+	rcu_read_unlock();
 
 	return NULL;
 }
 EXPORT_SYMBOL_GPL(rhashtable_lookup_compare);
 
+/**
+ * rhashtable_lookup_insert - lookup and insert object into hash table
+ * @ht:		hash table
+ * @obj:	pointer to hash head inside object
+ *
+ * Locks down the bucket chain in both the old and new table if a resize
+ * is in progress to ensure that writers can't remove from the old table
+ * and can't insert to the new table during the atomic operation of search
+ * and insertion. Searches for duplicates in both the old and new table if
+ * a resize is in progress.
+ *
+ * This lookup function may only be used for fixed key hash table (key_len
+ * parameter set). It will BUG() if used inappropriately.
+ *
+ * It is safe to call this function from atomic context.
+ *
+ * Will trigger an automatic deferred table resizing if the size grows
+ * beyond the watermark indicated by grow_decision() which can be passed
+ * to rhashtable_init().
+ */
+bool rhashtable_lookup_insert(struct rhashtable *ht, struct rhash_head *obj)
+{
+	struct rhashtable_compare_arg arg = {
+		.ht = ht,
+		.key = rht_obj(ht, obj) + ht->p.key_offset,
+	};
+
+	BUG_ON(!ht->p.key_len);
+
+	return rhashtable_lookup_compare_insert(ht, obj, &rhashtable_compare,
+						&arg);
+}
+EXPORT_SYMBOL_GPL(rhashtable_lookup_insert);
+
+/**
+ * rhashtable_lookup_compare_insert - search and insert object to hash table
+ *                                    with compare function
+ * @ht:		hash table
+ * @obj:	pointer to hash head inside object
+ * @compare:	compare function, must return true on match
+ * @arg:	argument passed on to compare function
+ *
+ * Locks down the bucket chain in both the old and new table if a resize
+ * is in progress to ensure that writers can't remove from the old table
+ * and can't insert to the new table during the atomic operation of search
+ * and insertion. Searches for duplicates in both the old and new table if
+ * a resize is in progress.
+ *
+ * Lookups may occur in parallel with hashtable mutations and resizing.
+ *
+ * Will trigger an automatic deferred table resizing if the size grows
+ * beyond the watermark indicated by grow_decision() which can be passed
+ * to rhashtable_init().
+ */
+bool rhashtable_lookup_compare_insert(struct rhashtable *ht,
+				      struct rhash_head *obj,
+				      bool (*compare)(void *, void *),
+				      void *arg)
+{
+	BUG_ON(!ht->p.key_len);
+
+	return __rhashtable_insert(ht, obj, compare, arg);
+}
+EXPORT_SYMBOL_GPL(rhashtable_lookup_compare_insert);
+
+/**
+ * rhashtable_walk_init - Initialise an iterator
+ * @ht:		Table to walk over
+ * @iter:	Hash table Iterator
+ *
+ * This function prepares a hash table walk.
+ *
+ * Note that if you restart a walk after rhashtable_walk_stop you
+ * may see the same object twice.  Also, you may miss objects if
+ * there are removals in between rhashtable_walk_stop and the next
+ * call to rhashtable_walk_start.
+ *
+ * For a completely stable walk you should construct your own data
+ * structure outside the hash table.
+ *
+ * This function may sleep so you must not call it from interrupt
+ * context or with spin locks held.
+ *
+ * You must call rhashtable_walk_exit if this function returns
+ * successfully.
+ */
+int rhashtable_walk_init(struct rhashtable *ht, struct rhashtable_iter *iter)
+{
+	iter->ht = ht;
+	iter->p = NULL;
+	iter->slot = 0;
+	iter->skip = 0;
+
+	iter->walker = kmalloc(sizeof(*iter->walker), GFP_KERNEL);
+	if (!iter->walker)
+		return -ENOMEM;
+
+	mutex_lock(&ht->mutex);
+	iter->walker->tbl = rht_dereference(ht->tbl, ht);
+	list_add(&iter->walker->list, &iter->walker->tbl->walkers);
+	mutex_unlock(&ht->mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rhashtable_walk_init);
+
+/**
+ * rhashtable_walk_exit - Free an iterator
+ * @iter:	Hash table Iterator
+ *
+ * This function frees resources allocated by rhashtable_walk_init.
+ */
+void rhashtable_walk_exit(struct rhashtable_iter *iter)
+{
+	mutex_lock(&iter->ht->mutex);
+	if (iter->walker->tbl)
+		list_del(&iter->walker->list);
+	mutex_unlock(&iter->ht->mutex);
+	kfree(iter->walker);
+}
+EXPORT_SYMBOL_GPL(rhashtable_walk_exit);
+
+/**
+ * rhashtable_walk_start - Start a hash table walk
+ * @iter:	Hash table iterator
+ *
+ * Start a hash table walk.  Note that we take the RCU lock in all
+ * cases including when we return an error.  So you must always call
+ * rhashtable_walk_stop to clean up.
+ *
+ * Returns zero if successful.
+ *
+ * Returns -EAGAIN if resize event occured.  Note that the iterator
+ * will rewind back to the beginning and you may use it immediately
+ * by calling rhashtable_walk_next.
+ */
+int rhashtable_walk_start(struct rhashtable_iter *iter)
+	__acquires(RCU)
+{
+	struct rhashtable *ht = iter->ht;
+
+	mutex_lock(&ht->mutex);
+
+	if (iter->walker->tbl)
+		list_del(&iter->walker->list);
+
+	rcu_read_lock();
+
+	mutex_unlock(&ht->mutex);
+
+	if (!iter->walker->tbl) {
+		iter->walker->tbl = rht_dereference_rcu(ht->tbl, ht);
+		return -EAGAIN;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(rhashtable_walk_start);
+
+/**
+ * rhashtable_walk_next - Return the next object and advance the iterator
+ * @iter:	Hash table iterator
+ *
+ * Note that you must call rhashtable_walk_stop when you are finished
+ * with the walk.
+ *
+ * Returns the next object or NULL when the end of the table is reached.
+ *
+ * Returns -EAGAIN if resize event occured.  Note that the iterator
+ * will rewind back to the beginning and you may continue to use it.
+ */
+void *rhashtable_walk_next(struct rhashtable_iter *iter)
+{
+	struct bucket_table *tbl = iter->walker->tbl;
+	struct rhashtable *ht = iter->ht;
+	struct rhash_head *p = iter->p;
+	void *obj = NULL;
+
+	if (p) {
+		p = rht_dereference_bucket_rcu(p->next, tbl, iter->slot);
+		goto next;
+	}
+
+	for (; iter->slot < tbl->size; iter->slot++) {
+		int skip = iter->skip;
+
+		rht_for_each_rcu(p, tbl, iter->slot) {
+			if (!skip)
+				break;
+			skip--;
+		}
+
+next:
+		if (!rht_is_a_nulls(p)) {
+			iter->skip++;
+			iter->p = p;
+			obj = rht_obj(ht, p);
+			goto out;
+		}
+
+		iter->skip = 0;
+	}
+
+	iter->walker->tbl = rht_dereference_rcu(tbl->future_tbl, ht);
+	if (iter->walker->tbl) {
+		iter->slot = 0;
+		iter->skip = 0;
+		return ERR_PTR(-EAGAIN);
+	}
+
+	iter->p = NULL;
+
+out:
+
+	return obj;
+}
+EXPORT_SYMBOL_GPL(rhashtable_walk_next);
+
+/**
+ * rhashtable_walk_stop - Finish a hash table walk
+ * @iter:	Hash table iterator
+ *
+ * Finish a hash table walk.
+ */
+void rhashtable_walk_stop(struct rhashtable_iter *iter)
+	__releases(RCU)
+{
+	struct rhashtable *ht;
+	struct bucket_table *tbl = iter->walker->tbl;
+
+	if (!tbl)
+		goto out;
+
+	ht = iter->ht;
+
+	mutex_lock(&ht->mutex);
+	if (tbl->rehash < tbl->size)
+		list_add(&iter->walker->list, &tbl->walkers);
+	else
+		iter->walker->tbl = NULL;
+	mutex_unlock(&ht->mutex);
+
+	iter->p = NULL;
+
+out:
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL_GPL(rhashtable_walk_stop);
+
 static size_t rounded_hashtable_size(struct rhashtable_params *params)
 {
 	return max(roundup_pow_of_two(params->nelem_hint * 4 / 3),
-		   1UL << params->min_shift);
+		   (unsigned long)params->min_size);
 }
 
 /**
@@ -525,9 +897,7 @@ static size_t rounded_hashtable_size(struct rhashtable_params *params)
  *	.key_offset = offsetof(struct test_obj, key),
  *	.key_len = sizeof(int),
  *	.hashfn = jhash,
- * #ifdef CONFIG_PROVE_LOCKING
- *	.mutex_is_held = &my_mutex_is_held,
- * #endif
+ *	.nulls_base = (1U << RHT_BASE_SHIFT),
  * };
  *
  * Configuration Example 2: Variable length keys
@@ -547,9 +917,6 @@ static size_t rounded_hashtable_size(struct rhashtable_params *params)
  *	.head_offset = offsetof(struct test_obj, node),
  *	.hashfn = jhash,
  *	.obj_hashfn = my_hash_fn,
- * #ifdef CONFIG_PROVE_LOCKING
- *	.mutex_is_held = &my_mutex_is_held,
- * #endif
  * };
  */
 int rhashtable_init(struct rhashtable *ht, struct rhashtable_params *params)
@@ -563,23 +930,32 @@ int rhashtable_init(struct rhashtable *ht, struct rhashtable_params *params)
 	    (!params->key_len && !params->obj_hashfn))
 		return -EINVAL;
 
-	params->min_shift = max_t(size_t, params->min_shift,
-				  ilog2(HASH_MIN_SIZE));
+	if (params->nulls_base && params->nulls_base < (1U << RHT_BASE_SHIFT))
+		return -EINVAL;
+
+	params->min_size = max(params->min_size, HASH_MIN_SIZE);
 
 	if (params->nelem_hint)
 		size = rounded_hashtable_size(params);
 
-	tbl = bucket_table_alloc(size);
+	memset(ht, 0, sizeof(*ht));
+	mutex_init(&ht->mutex);
+	memcpy(&ht->p, params, sizeof(*params));
+
+	if (params->locks_mul)
+		ht->p.locks_mul = roundup_pow_of_two(params->locks_mul);
+	else
+		ht->p.locks_mul = BUCKET_LOCKS_PER_CPU;
+
+	tbl = bucket_table_alloc(ht, size);
 	if (tbl == NULL)
 		return -ENOMEM;
 
-	memset(ht, 0, sizeof(*ht));
-	ht->shift = ilog2(tbl->size);
-	memcpy(&ht->p, params, sizeof(*params));
+	atomic_set(&ht->nelems, 0);
+
 	RCU_INIT_POINTER(ht->tbl, tbl);
 
-	if (!ht->p.hash_rnd)
-		get_random_bytes(&ht->p.hash_rnd, sizeof(ht->p.hash_rnd));
+	INIT_WORK(&ht->run_work, rht_deferred_worker);
 
 	return 0;
 }
@@ -593,216 +969,14 @@ EXPORT_SYMBOL_GPL(rhashtable_init);
  * has to make sure that no resizing may happen by unpublishing the hashtable
  * and waiting for the quiescent cycle before releasing the bucket array.
  */
-void rhashtable_destroy(const struct rhashtable *ht)
+void rhashtable_destroy(struct rhashtable *ht)
 {
-	bucket_table_free(ht->tbl);
+	ht->being_destroyed = true;
+
+	cancel_work_sync(&ht->run_work);
+
+	mutex_lock(&ht->mutex);
+	bucket_table_free(rht_dereference(ht->tbl, ht));
+	mutex_unlock(&ht->mutex);
 }
 EXPORT_SYMBOL_GPL(rhashtable_destroy);
-
-/**************************************************************************
- * Self Test
- **************************************************************************/
-
-#ifdef CONFIG_TEST_RHASHTABLE
-
-#define TEST_HT_SIZE	8
-#define TEST_ENTRIES	2048
-#define TEST_PTR	((void *) 0xdeadbeef)
-#define TEST_NEXPANDS	4
-
-#ifdef CONFIG_PROVE_LOCKING
-static int test_mutex_is_held(void *parent)
-{
-	return 1;
-}
-#endif
-
-struct test_obj {
-	void			*ptr;
-	int			value;
-	struct rhash_head	node;
-};
-
-static int __init test_rht_lookup(struct rhashtable *ht)
-{
-	unsigned int i;
-
-	for (i = 0; i < TEST_ENTRIES * 2; i++) {
-		struct test_obj *obj;
-		bool expected = !(i % 2);
-		u32 key = i;
-
-		obj = rhashtable_lookup(ht, &key);
-
-		if (expected && !obj) {
-			pr_warn("Test failed: Could not find key %u\n", key);
-			return -ENOENT;
-		} else if (!expected && obj) {
-			pr_warn("Test failed: Unexpected entry found for key %u\n",
-				key);
-			return -EEXIST;
-		} else if (expected && obj) {
-			if (obj->ptr != TEST_PTR || obj->value != i) {
-				pr_warn("Test failed: Lookup value mismatch %p!=%p, %u!=%u\n",
-					obj->ptr, TEST_PTR, obj->value, i);
-				return -EINVAL;
-			}
-		}
-	}
-
-	return 0;
-}
-
-static void test_bucket_stats(struct rhashtable *ht, bool quiet)
-{
-	unsigned int cnt, rcu_cnt, i, total = 0;
-	struct test_obj *obj;
-	struct bucket_table *tbl;
-
-	tbl = rht_dereference_rcu(ht->tbl, ht);
-	for (i = 0; i < tbl->size; i++) {
-		rcu_cnt = cnt = 0;
-
-		if (!quiet)
-			pr_info(" [%#4x/%zu]", i, tbl->size);
-
-		rht_for_each_entry_rcu(obj, tbl->buckets[i], node) {
-			cnt++;
-			total++;
-			if (!quiet)
-				pr_cont(" [%p],", obj);
-		}
-
-		rht_for_each_entry_rcu(obj, tbl->buckets[i], node)
-			rcu_cnt++;
-
-		if (rcu_cnt != cnt)
-			pr_warn("Test failed: Chain count mismach %d != %d",
-				cnt, rcu_cnt);
-
-		if (!quiet)
-			pr_cont("\n  [%#x] first element: %p, chain length: %u\n",
-				i, tbl->buckets[i], cnt);
-	}
-
-	pr_info("  Traversal complete: counted=%u, nelems=%zu, entries=%d\n",
-		total, ht->nelems, TEST_ENTRIES);
-
-	if (total != ht->nelems || total != TEST_ENTRIES)
-		pr_warn("Test failed: Total count mismatch ^^^");
-}
-
-static int __init test_rhashtable(struct rhashtable *ht)
-{
-	struct bucket_table *tbl;
-	struct test_obj *obj, *next;
-	int err;
-	unsigned int i;
-
-	/*
-	 * Insertion Test:
-	 * Insert TEST_ENTRIES into table with all keys even numbers
-	 */
-	pr_info("  Adding %d keys\n", TEST_ENTRIES);
-	for (i = 0; i < TEST_ENTRIES; i++) {
-		struct test_obj *obj;
-
-		obj = kzalloc(sizeof(*obj), GFP_KERNEL);
-		if (!obj) {
-			err = -ENOMEM;
-			goto error;
-		}
-
-		obj->ptr = TEST_PTR;
-		obj->value = i * 2;
-
-		rhashtable_insert(ht, &obj->node);
-	}
-
-	rcu_read_lock();
-	test_bucket_stats(ht, true);
-	test_rht_lookup(ht);
-	rcu_read_unlock();
-
-	for (i = 0; i < TEST_NEXPANDS; i++) {
-		pr_info("  Table expansion iteration %u...\n", i);
-		rhashtable_expand(ht);
-
-		rcu_read_lock();
-		pr_info("  Verifying lookups...\n");
-		test_rht_lookup(ht);
-		rcu_read_unlock();
-	}
-
-	for (i = 0; i < TEST_NEXPANDS; i++) {
-		pr_info("  Table shrinkage iteration %u...\n", i);
-		rhashtable_shrink(ht);
-
-		rcu_read_lock();
-		pr_info("  Verifying lookups...\n");
-		test_rht_lookup(ht);
-		rcu_read_unlock();
-	}
-
-	rcu_read_lock();
-	test_bucket_stats(ht, true);
-	rcu_read_unlock();
-
-	pr_info("  Deleting %d keys\n", TEST_ENTRIES);
-	for (i = 0; i < TEST_ENTRIES; i++) {
-		u32 key = i * 2;
-
-		obj = rhashtable_lookup(ht, &key);
-		BUG_ON(!obj);
-
-		rhashtable_remove(ht, &obj->node);
-		kfree(obj);
-	}
-
-	return 0;
-
-error:
-	tbl = rht_dereference_rcu(ht->tbl, ht);
-	for (i = 0; i < tbl->size; i++)
-		rht_for_each_entry_safe(obj, next, tbl->buckets[i], ht, node)
-			kfree(obj);
-
-	return err;
-}
-
-static int __init test_rht_init(void)
-{
-	struct rhashtable ht;
-	struct rhashtable_params params = {
-		.nelem_hint = TEST_HT_SIZE,
-		.head_offset = offsetof(struct test_obj, node),
-		.key_offset = offsetof(struct test_obj, value),
-		.key_len = sizeof(int),
-		.hashfn = jhash,
-#ifdef CONFIG_PROVE_LOCKING
-		.mutex_is_held = &test_mutex_is_held,
-#endif
-		.grow_decision = rht_grow_above_75,
-		.shrink_decision = rht_shrink_below_30,
-	};
-	int err;
-
-	pr_info("Running resizable hashtable tests...\n");
-
-	err = rhashtable_init(&ht, &params);
-	if (err < 0) {
-		pr_warn("Test failed: Unable to initialize hashtable: %d\n",
-			err);
-		return err;
-	}
-
-	err = test_rhashtable(&ht);
-
-	rhashtable_destroy(&ht);
-
-	return err;
-}
-
-subsys_initcall(test_rht_init);
-
-#endif /* CONFIG_TEST_RHASHTABLE */

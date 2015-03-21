@@ -739,39 +739,6 @@ static int patch_ad1981(struct hda_codec *codec)
  *      E/F quad mic array
  */
 
-#ifdef ENABLE_AD_STATIC_QUIRKS
-static int ad198x_ch_mode_info(struct snd_kcontrol *kcontrol,
-			       struct snd_ctl_elem_info *uinfo)
-{
-	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct ad198x_spec *spec = codec->spec;
-	return snd_hda_ch_mode_info(codec, uinfo, spec->channel_mode,
-				    spec->num_channel_mode);
-}
-
-static int ad198x_ch_mode_get(struct snd_kcontrol *kcontrol,
-			      struct snd_ctl_elem_value *ucontrol)
-{
-	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct ad198x_spec *spec = codec->spec;
-	return snd_hda_ch_mode_get(codec, ucontrol, spec->channel_mode,
-				   spec->num_channel_mode, spec->multiout.max_channels);
-}
-
-static int ad198x_ch_mode_put(struct snd_kcontrol *kcontrol,
-			      struct snd_ctl_elem_value *ucontrol)
-{
-	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
-	struct ad198x_spec *spec = codec->spec;
-	int err = snd_hda_ch_mode_put(codec, ucontrol, spec->channel_mode,
-				      spec->num_channel_mode,
-				      &spec->multiout.max_channels);
-	if (err >= 0 && spec->need_dac_fix)
-		spec->multiout.num_dacs = spec->multiout.max_channels / 2;
-	return err;
-}
-#endif /* ENABLE_AD_STATIC_QUIRKS */
-
 static int ad1988_auto_smux_enum_info(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_info *uinfo)
 {
@@ -1227,20 +1194,8 @@ MODULE_ALIAS("snd-hda-codec-id:11d4*");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Analog Devices HD-audio codec");
 
-static struct hda_codec_preset_list analog_list = {
+static struct hda_codec_driver analog_driver = {
 	.preset = snd_hda_preset_analog,
-	.owner = THIS_MODULE,
 };
 
-static int __init patch_analog_init(void)
-{
-	return snd_hda_add_codec_preset(&analog_list);
-}
-
-static void __exit patch_analog_exit(void)
-{
-	snd_hda_delete_codec_preset(&analog_list);
-}
-
-module_init(patch_analog_init)
-module_exit(patch_analog_exit)
+module_hda_codec_driver(analog_driver);

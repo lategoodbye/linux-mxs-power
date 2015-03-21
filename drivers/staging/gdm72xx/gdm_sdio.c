@@ -36,7 +36,7 @@
 #define RX_BUF_SIZE	(25*1024)
 
 #define TX_HZ		2000
-#define TX_INTERVAL	(1000000/TX_HZ)
+#define TX_INTERVAL	(NSEC_PER_SEC/TX_HZ)
 
 static struct sdio_tx *alloc_tx_struct(struct tx_cxt *tx)
 {
@@ -223,8 +223,7 @@ static void send_sdio_pkt(struct sdio_func *func, u8 *data, int len)
 		if (ret < 0) {
 			if (ret != -ENOMEDIUM)
 				dev_err(&func->dev,
-					"gdmwms: %s error: ret = %d\n",
-					__func__, ret);
+					"gdmwms:  error: ret = %d\n", ret);
 			goto end_io;
 		}
 	}
@@ -237,8 +236,7 @@ static void send_sdio_pkt(struct sdio_func *func, u8 *data, int len)
 		if (ret < 0) {
 			if (ret != -ENOMEDIUM)
 				dev_err(&func->dev,
-					"gdmwms: %s error: ret = %d\n",
-					__func__, ret);
+					"gdmwms:  error: ret = %d\n", ret);
 			goto end_io;
 		}
 	}
@@ -305,7 +303,7 @@ static void send_sdu(struct sdio_func *func, struct tx_cxt *tx)
 		put_tx_struct(t->tx_cxt, t);
 	}
 
-	do_gettimeofday(&tx->sdu_stamp);
+	tx->sdu_stamp = ktime_get();
 	spin_unlock_irqrestore(&tx->lock, flags);
 }
 
@@ -332,7 +330,7 @@ static void do_tx(struct work_struct *work)
 	struct sdio_func *func = sdev->func;
 	struct tx_cxt *tx = &sdev->tx;
 	struct sdio_tx *t = NULL;
-	struct timeval now, *before;
+	ktime_t now, before;
 	int is_sdu = 0;
 	long diff;
 	unsigned long flags;
@@ -348,11 +346,10 @@ static void do_tx(struct work_struct *work)
 		list_del(&t->list);
 		is_sdu = 0;
 	} else if (!tx->stop_sdu_tx && !list_empty(&tx->sdu_list)) {
-		do_gettimeofday(&now);
-		before = &tx->sdu_stamp;
+		now = ktime_get();
+		before = tx->sdu_stamp;
 
-		diff = (now.tv_sec - before->tv_sec) * 1000000 +
-			(now.tv_usec - before->tv_usec);
+		diff = ktime_to_ns(ktime_sub(now, before));
 		if (diff >= 0 && diff < TX_INTERVAL) {
 			schedule_work(&sdev->ws);
 			spin_unlock_irqrestore(&tx->lock, flags);

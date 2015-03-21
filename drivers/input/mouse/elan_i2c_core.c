@@ -4,7 +4,7 @@
  * Copyright (c) 2013 ELAN Microelectronics Corp.
  *
  * Author: 林政維 (Duson Lin) <dusonlin@emc.com.tw>
- * Version: 1.5.5
+ * Version: 1.5.6
  *
  * Based on cyapa driver:
  * copyright (c) 2011-2012 Cypress Semiconductor, Inc.
@@ -40,7 +40,7 @@
 #include "elan_i2c.h"
 
 #define DRIVER_NAME		"elan_i2c"
-#define ELAN_DRIVER_VERSION	"1.5.5"
+#define ELAN_DRIVER_VERSION	"1.5.6"
 #define ETP_PRESSURE_OFFSET	25
 #define ETP_MAX_PRESSURE	255
 #define ETP_FWIDTH_REDUCE	90
@@ -99,7 +99,7 @@ static int elan_enable_power(struct elan_tp_data *data)
 	error = regulator_enable(data->vcc);
 	if (error) {
 		dev_err(&data->client->dev,
-			"Failed to enable regulator: %d\n", error);
+			"failed to enable regulator: %d\n", error);
 		return error;
 	}
 
@@ -111,6 +111,7 @@ static int elan_enable_power(struct elan_tp_data *data)
 		msleep(30);
 	} while (--repeat > 0);
 
+	dev_err(&data->client->dev, "failed to enable power: %d\n", error);
 	return error;
 }
 
@@ -125,7 +126,7 @@ static int elan_disable_power(struct elan_tp_data *data)
 			error = regulator_disable(data->vcc);
 			if (error) {
 				dev_err(&data->client->dev,
-					"Failed to disable regulator: %d\n",
+					"failed to disable regulator: %d\n",
 					error);
 				/* Attempt to power the chip back up */
 				data->ops->power_control(data->client, true);
@@ -138,6 +139,7 @@ static int elan_disable_power(struct elan_tp_data *data)
 		msleep(30);
 	} while (--repeat > 0);
 
+	dev_err(&data->client->dev, "failed to disable power: %d\n", error);
 	return error;
 }
 
@@ -196,7 +198,6 @@ static int elan_initialize(struct elan_tp_data *data)
 		if (!error)
 			return 0;
 
-		repeat--;
 		msleep(30);
 	} while (--repeat > 0);
 
@@ -312,7 +313,7 @@ static int __elan_update_firmware(struct elan_tp_data *data,
 	iap_start_addr = get_unaligned_le16(&fw->data[ETP_IAP_START_ADDR * 2]);
 
 	boot_page_count = (iap_start_addr * 2) / ETP_FW_PAGE_SIZE;
-	for (i = boot_page_count; i < ETP_FW_PAGE_COUNT; i++) {
+	for (i = boot_page_count; i < ETP_FW_VAILDPAGE_COUNT; i++) {
 		u16 checksum = 0;
 		const u8 *page = &fw->data[i * ETP_FW_PAGE_SIZE];
 
@@ -434,10 +435,11 @@ static ssize_t elan_sysfs_update_fw(struct device *dev,
 				    struct device_attribute *attr,
 				    const char *buf, size_t count)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct elan_tp_data *data = i2c_get_clientdata(client);
+	struct elan_tp_data *data = dev_get_drvdata(dev);
 	const struct firmware *fw;
 	int error;
+	const u8 *fw_signature;
+	static const u8 signature[] = {0xAA, 0x55, 0xCC, 0x33, 0xFF, 0xFF};
 
 	error = request_firmware(&fw, ETP_FW_NAME, dev);
 	if (error) {
@@ -446,10 +448,12 @@ static ssize_t elan_sysfs_update_fw(struct device *dev,
 		return error;
 	}
 
-	/* Firmware must be exactly PAGE_NUM * PAGE_SIZE bytes */
-	if (fw->size != ETP_FW_SIZE) {
-		dev_err(dev, "invalid firmware size = %zu, expected %d.\n",
-			fw->size, ETP_FW_SIZE);
+	/* Firmware file must match signature data */
+	fw_signature = &fw->data[ETP_FW_SIGNATURE_ADDRESS];
+	if (memcmp(fw_signature, signature, sizeof(signature)) != 0) {
+		dev_err(dev, "signature mismatch (expected %*ph, got %*ph)\n",
+			(int)sizeof(signature), signature,
+			(int)sizeof(signature), fw_signature);
 		error = -EBADF;
 		goto out_release_fw;
 	}
@@ -1081,16 +1085,18 @@ static int __maybe_unused elan_resume(struct device *dev)
 	}
 
 	error = elan_enable_power(data);
-	if (error)
+	if (error) {
 		dev_err(dev, "power up when resuming failed: %d\n", error);
+		goto err;
+	}
 
 	error = elan_initialize(data);
 	if (error)
 		dev_err(dev, "initialize when resuming failed: %d\n", error);
 
+err:
 	enable_irq(data->client->irq);
-
-	return 0;
+	return error;
 }
 
 static SIMPLE_DEV_PM_OPS(elan_pm_ops, elan_suspend, elan_resume);

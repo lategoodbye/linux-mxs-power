@@ -547,50 +547,48 @@ posix_acl_create(struct inode *dir, umode_t *mode,
 		struct posix_acl **default_acl, struct posix_acl **acl)
 {
 	struct posix_acl *p;
+	struct posix_acl *clone;
 	int ret;
 
+	*acl = NULL;
+	*default_acl = NULL;
+
 	if (S_ISLNK(*mode) || !IS_POSIXACL(dir))
-		goto no_acl;
+		return 0;
 
 	p = get_acl(dir, ACL_TYPE_DEFAULT);
-	if (IS_ERR(p)) {
-		if (p == ERR_PTR(-EOPNOTSUPP))
-			goto apply_umask;
+	if (!p || p == ERR_PTR(-EOPNOTSUPP)) {
+		*mode &= ~current_umask();
+		return 0;
+	}
+	if (IS_ERR(p))
 		return PTR_ERR(p);
-	}
 
-	if (!p)
-		goto apply_umask;
+	clone = posix_acl_clone(p, GFP_NOFS);
+	if (!clone)
+		goto no_mem;
 
-	*acl = posix_acl_clone(p, GFP_NOFS);
-	if (!*acl)
-		return -ENOMEM;
+	ret = posix_acl_create_masq(clone, mode);
+	if (ret < 0)
+		goto no_mem_clone;
 
-	ret = posix_acl_create_masq(*acl, mode);
-	if (ret < 0) {
-		posix_acl_release(*acl);
-		return -ENOMEM;
-	}
+	if (ret == 0)
+		posix_acl_release(clone);
+	else
+		*acl = clone;
 
-	if (ret == 0) {
-		posix_acl_release(*acl);
-		*acl = NULL;
-	}
-
-	if (!S_ISDIR(*mode)) {
+	if (!S_ISDIR(*mode))
 		posix_acl_release(p);
-		*default_acl = NULL;
-	} else {
+	else
 		*default_acl = p;
-	}
+
 	return 0;
 
-apply_umask:
-	*mode &= ~current_umask();
-no_acl:
-	*default_acl = NULL;
-	*acl = NULL;
-	return 0;
+no_mem_clone:
+	posix_acl_release(clone);
+no_mem:
+	posix_acl_release(p);
+	return -ENOMEM;
 }
 EXPORT_SYMBOL_GPL(posix_acl_create);
 
@@ -772,7 +770,7 @@ posix_acl_xattr_get(struct dentry *dentry, const char *name,
 
 	if (!IS_POSIXACL(dentry->d_inode))
 		return -EOPNOTSUPP;
-	if (S_ISLNK(dentry->d_inode->i_mode))
+	if (d_is_symlink(dentry))
 		return -EOPNOTSUPP;
 
 	acl = get_acl(dentry->d_inode, type);
@@ -832,7 +830,7 @@ posix_acl_xattr_list(struct dentry *dentry, char *list, size_t list_size,
 
 	if (!IS_POSIXACL(dentry->d_inode))
 		return -EOPNOTSUPP;
-	if (S_ISLNK(dentry->d_inode->i_mode))
+	if (d_is_symlink(dentry))
 		return -EOPNOTSUPP;
 
 	if (type == ACL_TYPE_ACCESS)

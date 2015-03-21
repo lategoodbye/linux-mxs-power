@@ -47,6 +47,8 @@ my $ignore_perl_version = 0;
 my $minimum_perl_version = 5.10.0;
 my $min_conf_desc_length = 4;
 my $spelling_file = "$D/spelling.txt";
+my $codespell = 0;
+my $codespellfile = "/usr/local/share/codespell/dictionary.txt";
 
 sub help {
 	my ($exitcode) = @_;
@@ -88,6 +90,9 @@ Options:
                              file.  It's your fault if there's no backup or git
   --ignore-perl-version      override checking of perl version.  expect
                              runtime errors.
+  --codespell                Use the codespell dictionary for spelling/typos
+                             (default:/usr/local/share/codespell/dictionary.txt)
+  --codespellfile            Use this codespell dictionary
   -h, --help, --version      display this help and exit
 
 When FILE is - read standard input.
@@ -146,6 +151,8 @@ GetOptions(
 	'ignore-perl-version!' => \$ignore_perl_version,
 	'debug=s'	=> \%debug,
 	'test-only=s'	=> \$tst_only,
+	'codespell!'	=> \$codespell,
+	'codespellfile=s'	=> \$codespellfile,
 	'h|help'	=> \$help,
 	'version'	=> \$help
 ) or help(1);
@@ -278,6 +285,7 @@ our $Attribute	= qr{
 			__noreturn|
 			__used|
 			__cold|
+			__pure|
 			__noclone|
 			__deprecated|
 			__read_mostly|
@@ -298,6 +306,7 @@ our $Binary	= qr{(?i)0b[01]+$Int_type?};
 our $Hex	= qr{(?i)0x[0-9a-f]+$Int_type?};
 our $Int	= qr{[0-9]+$Int_type?};
 our $Octal	= qr{0[0-7]+$Int_type?};
+our $String	= qr{"[X\t]*"};
 our $Float_hex	= qr{(?i)0x[0-9a-f]+p-?[0-9]+[fl]?};
 our $Float_dec	= qr{(?i)(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)(?:e-?[0-9]+)?[fl]?};
 our $Float_int	= qr{(?i)[0-9]+e-?[0-9]+[fl]?};
@@ -336,6 +345,11 @@ our $UTF8	= qr{
 	[\x09\x0A\x0D\x20-\x7E]              # ASCII
 	| $NON_ASCII_UTF8
 }x;
+
+our $typeOtherOSTypedefs = qr{(?x:
+	u_(?:char|short|int|long) |          # bsd
+	u(?:nchar|short|int|long)            # sysv
+)};
 
 our $typeTypedefs = qr{(?x:
 	(?:__)?(?:u|s|be|le)(?:8|16|32|64)|
@@ -429,6 +443,14 @@ foreach my $entry (@mode_permission_funcs) {
 	$mode_perms_search .= $entry->[0];
 }
 
+our $mode_perms_world_writable = qr{
+	S_IWUGO		|
+	S_IWOTH		|
+	S_IRWXUGO	|
+	S_IALLUGO	|
+	0[0-7][0-7][2367]
+}x;
+
 our $allowed_asm_includes = qr{(?x:
 	irq|
 	memory|
@@ -442,7 +464,6 @@ my $misspellings;
 my %spelling_fix;
 
 if (open(my $spelling, '<', $spelling_file)) {
-	my @spelling_list;
 	while (<$spelling>) {
 		my $line = $_;
 
@@ -454,14 +475,38 @@ if (open(my $spelling, '<', $spelling_file)) {
 
 		my ($suspect, $fix) = split(/\|\|/, $line);
 
-		push(@spelling_list, $suspect);
 		$spelling_fix{$suspect} = $fix;
 	}
 	close($spelling);
-	$misspellings = join("|", @spelling_list);
 } else {
 	warn "No typos will be found - file '$spelling_file': $!\n";
 }
+
+if ($codespell) {
+	if (open(my $spelling, '<', $codespellfile)) {
+		while (<$spelling>) {
+			my $line = $_;
+
+			$line =~ s/\s*\n?$//g;
+			$line =~ s/^\s*//g;
+
+			next if ($line =~ m/^\s*#/);
+			next if ($line =~ m/^\s*$/);
+			next if ($line =~ m/, disabled/i);
+
+			$line =~ s/,.*$//;
+
+			my ($suspect, $fix) = split(/->/, $line);
+
+			$spelling_fix{$suspect} = $fix;
+		}
+		close($spelling);
+	} else {
+		warn "No codespell typos will be found - file '$codespellfile': $!\n";
+	}
+}
+
+$misspellings = join("|", sort keys %spelling_fix) if keys %spelling_fix;
 
 sub build_types {
 	my $mods = "(?x:  \n" . join("|\n  ", @modifierList) . "\n)";
@@ -473,6 +518,7 @@ sub build_types {
 			(?:$Modifier\s+|const\s+)*
 			(?:
 				(?:typeof|__typeof__)\s*\([^\)]*\)|
+				(?:$typeOtherOSTypedefs\b)|
 				(?:$typeTypedefs\b)|
 				(?:${all}\b)
 			)
@@ -490,6 +536,7 @@ sub build_types {
 			(?:
 				(?:typeof|__typeof__)\s*\([^\)]*\)|
 				(?:$typeTypedefs\b)|
+				(?:$typeOtherOSTypedefs\b)|
 				(?:${allWithAttr}\b)
 			)
 			(?:\s+$Modifier|\s+const)*
@@ -517,7 +564,7 @@ our $Typecast	= qr{\s*(\(\s*$NonptrType\s*\)){0,1}\s*};
 
 our $balanced_parens = qr/(\((?:[^\(\)]++|(?-1))*\))/;
 our $LvalOrFunc	= qr{((?:[\&\*]\s*)?$Lval)\s*($balanced_parens{0,1})\s*};
-our $FuncArg = qr{$Typecast{0,1}($LvalOrFunc|$Constant)};
+our $FuncArg = qr{$Typecast{0,1}($LvalOrFunc|$Constant|$String)};
 
 our $declaration_macros = qr{(?x:
 	(?:$Storage\s+)?(?:[A-Z_][A-Z0-9]*_){0,2}(?:DEFINE|DECLARE)(?:_[A-Z0-9]+){1,2}\s*\(|
@@ -631,6 +678,8 @@ sub git_commit_info {
 	my $output = `git log --no-color --format='%H %s' -1 $commit 2>&1`;
 	$output =~ s/^\s*//gm;
 	my @lines = split("\n", $output);
+
+	return ($id, $desc) if ($#lines < 0);
 
 	if ($lines[0] =~ /^error: short SHA1 $commit is ambiguous\./) {
 # Maybe one day convert this block of bash into something that returns
@@ -2159,6 +2208,13 @@ sub process {
 			}
 		}
 
+# Check email subject for common tools that don't need to be mentioned
+		if ($in_header_lines &&
+		    $line =~ /^Subject:.*\b(?:checkpatch|sparse|smatch)\b[^:]/i) {
+			WARN("EMAIL_SUBJECT",
+			     "A patch subject line should describe the change not the tool that found it\n" . $herecurr);
+		}
+
 # Check for old stable address
 		if ($line =~ /^\s*cc:\s*.*<?\bstable\@kernel\.org\b>?.*$/i) {
 			ERROR("STABLE_ADDRESS",
@@ -2171,21 +2227,49 @@ sub process {
 			      "Remove Gerrit Change-Id's before submitting upstream.\n" . $herecurr);
 		}
 
-# Check for improperly formed commit descriptions
-		if ($in_commit_log &&
-		    $line =~ /\bcommit\s+[0-9a-f]{5,}/i &&
-		    !($line =~ /\b[Cc]ommit [0-9a-f]{12,40} \("/ ||
-		      ($line =~ /\b[Cc]ommit [0-9a-f]{12,40}\s*$/ &&
-		       defined $rawlines[$linenr] &&
-		       $rawlines[$linenr] =~ /^\s*\("/))) {
-			$line =~ /\b(c)ommit\s+([0-9a-f]{5,})/i;
+# Check for git id commit length and improperly formed commit descriptions
+		if ($in_commit_log && $line =~ /\b(c)ommit\s+([0-9a-f]{5,})/i) {
 			my $init_char = $1;
 			my $orig_commit = lc($2);
-			my $id = '01234567890ab';
-			my $desc = 'commit description';
-		        ($id, $desc) = git_commit_info($orig_commit, $id, $desc);
-			ERROR("GIT_COMMIT_ID",
-			      "Please use 12 or more chars for the git commit ID like: '${init_char}ommit $id (\"$desc\")'\n" . $herecurr);
+			my $short = 1;
+			my $long = 0;
+			my $case = 1;
+			my $space = 1;
+			my $hasdesc = 0;
+			my $hasparens = 0;
+			my $id = '0123456789ab';
+			my $orig_desc = "commit description";
+			my $description = "";
+
+			$short = 0 if ($line =~ /\bcommit\s+[0-9a-f]{12,40}/i);
+			$long = 1 if ($line =~ /\bcommit\s+[0-9a-f]{41,}/i);
+			$space = 0 if ($line =~ /\bcommit [0-9a-f]/i);
+			$case = 0 if ($line =~ /\b[Cc]ommit\s+[0-9a-f]{5,40}[^A-F]/);
+			if ($line =~ /\bcommit\s+[0-9a-f]{5,}\s+\("([^"]+)"\)/i) {
+				$orig_desc = $1;
+				$hasparens = 1;
+			} elsif ($line =~ /\bcommit\s+[0-9a-f]{5,}\s*$/i &&
+				 defined $rawlines[$linenr] &&
+				 $rawlines[$linenr] =~ /^\s*\("([^"]+)"\)/) {
+				$orig_desc = $1;
+				$hasparens = 1;
+			} elsif ($line =~ /\bcommit\s+[0-9a-f]{5,}\s+\("[^"]+$/i &&
+				 defined $rawlines[$linenr] &&
+				 $rawlines[$linenr] =~ /^\s*[^"]+"\)/) {
+				$line =~ /\bcommit\s+[0-9a-f]{5,}\s+\("([^"]+)$/i;
+				$orig_desc = $1;
+				$rawlines[$linenr] =~ /^\s*([^"]+)"\)/;
+				$orig_desc .= " " . $1;
+				$hasparens = 1;
+			}
+
+			($id, $description) = git_commit_info($orig_commit,
+							      $id, $orig_desc);
+
+			if ($short || $long || $space || $case || ($orig_desc ne $description) || !$hasparens) {
+				ERROR("GIT_COMMIT_ID",
+				      "Please use git commit description style 'commit <12+ chars of sha1> (\"<title line>\")' - ie: '${init_char}ommit $id (\"$description\")'\n" . $herecurr);
+			}
 		}
 
 # Check for added, moved or deleted files
@@ -2257,8 +2341,9 @@ sub process {
 		}
 
 # Check for various typo / spelling mistakes
-		if (defined($misspellings) && ($in_commit_log || $line =~ /^\+/)) {
-			while ($rawline =~ /(?:^|[^a-z@])($misspellings)(?:$|[^a-z@])/gi) {
+		if (defined($misspellings) &&
+		    ($in_commit_log || $line =~ /^(?:\+|Subject:)/i)) {
+			while ($rawline =~ /(?:^|[^a-z@])($misspellings)(?:\b|$|[^a-z@])/gi) {
 				my $typo = $1;
 				my $typo_fix = $spelling_fix{lc($typo)};
 				$typo_fix = ucfirst($typo_fix) if ($typo =~ /^[A-Z]/);
@@ -2353,6 +2438,13 @@ sub process {
 		    $line =~ /.\s*depends on\s+.*\bEXPERIMENTAL\b/) {
 			WARN("CONFIG_EXPERIMENTAL",
 			     "Use of CONFIG_EXPERIMENTAL is deprecated. For alternatives, see https://lkml.org/lkml/2012/10/23/580\n");
+		}
+
+# discourage the use of boolean for type definition attributes of Kconfig options
+		if ($realfile =~ /Kconfig/ &&
+		    $line =~ /^\+\s*\bboolean\b/) {
+			WARN("CONFIG_TYPE_BOOLEAN",
+			     "Use of boolean is deprecated, please use bool instead.\n" . $herecurr);
 		}
 
 		if (($realfile =~ /Makefile.*/ || $realfile =~ /Kbuild.*/) &&
@@ -2499,8 +2591,15 @@ sub process {
 			}
 		}
 
-		if ($line =~ /^\+.*(\w+\s*)?\(\s*$Type\s*\)[ \t]+(?!$Assignment|$Arithmetic|[,;\({\[\<\>])/ &&
-		    (!defined($1) || $1 !~ /sizeof\s*/)) {
+# check for space after cast like "(int) foo" or "(struct foo) bar"
+# avoid checking a few false positives:
+#   "sizeof(<type>)" or "__alignof__(<type>)"
+#   function pointer declarations like "(*foo)(int) = bar;"
+#   structure definitions like "(struct foo) { 0 };"
+#   multiline macros that define functions
+#   known attributes or the __attribute__ keyword
+		if ($line =~ /^\+(.*)\(\s*$Type\s*\)([ \t]++)((?![={]|\\$|$Attribute|__attribute__))/ &&
+		    (!defined($1) || $1 !~ /\b(?:sizeof|__alignof__)\s*$/)) {
 			if (CHK("SPACING",
 				"No space is necessary after a cast\n" . $herecurr) &&
 			    $fix) {
@@ -3124,6 +3223,7 @@ sub process {
 		    $line !~ /\btypedef\s+$Type\s*\(\s*\*?$Ident\s*\)\s*\(/ &&
 		    $line !~ /\btypedef\s+$Type\s+$Ident\s*\(/ &&
 		    $line !~ /\b$typeTypedefs\b/ &&
+		    $line !~ /\b$typeOtherOSTypedefs\b/ &&
 		    $line !~ /\b__bitwise(?:__|)\b/) {
 			WARN("NEW_TYPEDEFS",
 			     "do not add new typedefs\n" . $herecurr);
@@ -3200,7 +3300,7 @@ sub process {
 # check for uses of printk_ratelimit
 		if ($line =~ /\bprintk_ratelimit\s*\(/) {
 			WARN("PRINTK_RATELIMITED",
-"Prefer printk_ratelimited or pr_<level>_ratelimited to printk_ratelimit\n" . $herecurr);
+			     "Prefer printk_ratelimited or pr_<level>_ratelimited to printk_ratelimit\n" . $herecurr);
 		}
 
 # printk should use KERN_* levels.  Note that follow on printk's on the
@@ -3646,7 +3746,22 @@ sub process {
 					 $op eq '*' or $op eq '/' or
 					 $op eq '%')
 				{
-					if ($ctx =~ /Wx[^WCE]|[^WCE]xW/) {
+					if ($check) {
+						if (defined $fix_elements[$n + 2] && $ctx !~ /[EW]x[EW]/) {
+							if (CHK("SPACING",
+								"spaces preferred around that '$op' $at\n" . $hereptr)) {
+								$good = rtrim($fix_elements[$n]) . " " . trim($fix_elements[$n + 1]) . " ";
+								$fix_elements[$n + 2] =~ s/^\s+//;
+								$line_fixed = 1;
+							}
+						} elsif (!defined $fix_elements[$n + 2] && $ctx !~ /Wx[OE]/) {
+							if (CHK("SPACING",
+								"space preferred before that '$op' $at\n" . $hereptr)) {
+								$good = rtrim($fix_elements[$n]) . " " . trim($fix_elements[$n + 1]);
+								$line_fixed = 1;
+							}
+						}
+					} elsif ($ctx =~ /Wx[^WCE]|[^WCE]xW/) {
 						if (ERROR("SPACING",
 							  "need consistent spacing around '$op' $at\n" . $hereptr)) {
 							$good = rtrim($fix_elements[$n]) . " " . trim($fix_elements[$n + 1]) . " ";
@@ -4251,6 +4366,7 @@ sub process {
 			$ctx = $dstat;
 
 			$dstat =~ s/\\\n.//g;
+			$dstat =~ s/$;/ /g;
 
 			if ($dstat =~ /^\+\s*#\s*define\s+$Ident\s*${balanced_parens}\s*do\s*{(.*)\s*}\s*while\s*\(\s*0\s*\)\s*([;\s]*)\s*$/) {
 				my $stmts = $2;
@@ -4417,12 +4533,18 @@ sub process {
 
 # check for unnecessary blank lines around braces
 		if (($line =~ /^.\s*}\s*$/ && $prevrawline =~ /^.\s*$/)) {
-			CHK("BRACES",
-			    "Blank lines aren't necessary before a close brace '}'\n" . $hereprev);
+			if (CHK("BRACES",
+				"Blank lines aren't necessary before a close brace '}'\n" . $hereprev) &&
+			    $fix && $prevrawline =~ /^\+/) {
+				fix_delete_line($fixlinenr - 1, $prevrawline);
+			}
 		}
 		if (($rawline =~ /^.\s*$/ && $prevline =~ /^..*{\s*$/)) {
-			CHK("BRACES",
-			    "Blank lines aren't necessary after an open brace '{'\n" . $hereprev);
+			if (CHK("BRACES",
+				"Blank lines aren't necessary after an open brace '{'\n" . $hereprev) &&
+			    $fix) {
+				fix_delete_line($fixlinenr, $rawline);
+			}
 		}
 
 # no volatiles please
@@ -4545,7 +4667,7 @@ sub process {
 		}
 
 # check for logging functions with KERN_<LEVEL>
-		if ($line !~ /printk\s*\(/ &&
+		if ($line !~ /printk(?:_ratelimited|_once)?\s*\(/ &&
 		    $line =~ /\b$logFunctions\s*\(.*\b(KERN_[A-Z]+)\b/) {
 			my $level = $1;
 			if (WARN("UNNECESSARY_KERN_LEVEL",
@@ -4804,7 +4926,8 @@ sub process {
 # check for seq_printf uses that could be seq_puts
 		if ($sline =~ /\bseq_printf\s*\(.*"\s*\)\s*;\s*$/) {
 			my $fmt = get_quoted_string($line, $rawline);
-			if ($fmt ne "" && $fmt !~ /[^\\]\%/) {
+			$fmt =~ s/%%//g;
+			if ($fmt !~ /%/) {
 				if (WARN("PREFER_SEQ_PUTS",
 					 "Prefer seq_puts to seq_printf\n" . $herecurr) &&
 				    $fix) {
@@ -5089,6 +5212,12 @@ sub process {
 			}
 		}
 
+# check for uses of __DATE__, __TIME__, __TIMESTAMP__
+		while ($line =~ /\b(__(?:DATE|TIME|TIMESTAMP)__)\b/g) {
+			ERROR("DATE_TIME",
+			      "Use of the '$1' macro makes the build non-deterministic\n" . $herecurr);
+		}
+
 # check for use of yield()
 		if ($line =~ /\byield\s*\(\s*\)/) {
 			WARN("YIELD",
@@ -5140,8 +5269,9 @@ sub process {
 			     "please use device_initcall() or more appropriate function instead of __initcall() (see include/linux/init.h)\n" . $herecurr);
 		}
 
-# check for various ops structs, ensure they are const.
-		my $struct_ops = qr{acpi_dock_ops|
+# check for various structs that are normally const (ops, kgdb, device_tree)
+		my $const_structs = qr{
+				acpi_dock_ops|
 				address_space_operations|
 				backlight_ops|
 				block_device_operations|
@@ -5164,6 +5294,7 @@ sub process {
 				mtrr_ops|
 				neigh_ops|
 				nlmsvc_binding|
+				of_device_id|
 				pci_raw_ops|
 				pipe_buf_operations|
 				platform_hibernation_ops|
@@ -5179,7 +5310,7 @@ sub process {
 				usb_mon_operations|
 				wd_ops}x;
 		if ($line !~ /\bconst\b/ &&
-		    $line =~ /\bstruct\s+($struct_ops)\b/) {
+		    $line =~ /\bstruct\s+($const_structs)\b/) {
 			WARN("CONST_STRUCT",
 			     "struct $1 should normally be const\n" .
 				$herecurr);
@@ -5204,6 +5335,13 @@ sub process {
 			      "#define of '$1' is wrong - use Kconfig variables or standard guards instead\n" . $herecurr);
 		}
 
+# likely/unlikely comparisons similar to "(likely(foo) > 0)"
+		if ($^V && $^V ge 5.10.0 &&
+		    $line =~ /\b((?:un)?likely)\s*\(\s*$FuncArg\s*\)\s*$Compare/) {
+			WARN("LIKELY_MISUSE",
+			     "Using $1 should generally have parentheses around the comparison\n" . $herecurr);
+		}
+
 # whine mightly about in_atomic
 		if ($line =~ /\bin_atomic\s*\(/) {
 			if ($realfile =~ m@^drivers/@) {
@@ -5226,8 +5364,8 @@ sub process {
 			}
 		}
 
-		if ($line =~ /debugfs_create_file.*S_IWUGO/ ||
-		    $line =~ /DEVICE_ATTR.*S_IWUGO/ ) {
+		if ($line =~ /debugfs_create_\w+.*\b$mode_perms_world_writable\b/ ||
+		    $line =~ /DEVICE_ATTR.*\b$mode_perms_world_writable\b/) {
 			WARN("EXPORTED_WORLD_WRITABLE",
 			     "Exporting world writable files is usually an error. Consider more restrictive permissions.\n" . $herecurr);
 		}
@@ -5255,6 +5393,9 @@ sub process {
 					     length($val) ne 4)) {
 						ERROR("NON_OCTAL_PERMISSIONS",
 						      "Use 4 digit octal (0777) not decimal permissions\n" . $herecurr);
+					} elsif ($val =~ /^$Octal$/ && (oct($val) & 02)) {
+						ERROR("EXPORTED_WORLD_WRITABLE",
+						      "Exporting writable files is usually an error. Consider more restrictive permissions.\n" . $herecurr);
 					}
 				}
 			}

@@ -62,7 +62,7 @@ static int restore_sigcontext(struct sigcontext __user *sc, int *_gr8)
 	unsigned long tbr, psr;
 
 	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
+	current->restart_block.fn = do_no_restart_syscall;
 
 	tbr = user->i.tbr;
 	psr = user->i.psr;
@@ -176,8 +176,6 @@ static int setup_frame(struct ksignal *ksig, sigset_t *set)
 	struct sigframe __user *frame;
 	int rsig, sig = ksig->sig;
 
-	set_fs(USER_DS);
-
 	frame = get_sigframe(ksig, sizeof(*frame));
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
@@ -256,8 +254,6 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set)
 {
 	struct rt_sigframe __user *frame;
 	int rsig, sig = ksig->sig;
-
-	set_fs(USER_DS);
 
 	frame = get_sigframe(ksig, sizeof(*frame));
 

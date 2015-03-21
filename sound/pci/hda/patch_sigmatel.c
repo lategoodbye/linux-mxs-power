@@ -79,6 +79,7 @@ enum {
 	STAC_ALIENWARE_M17X,
 	STAC_92HD89XX_HP_FRONT_JACK,
 	STAC_92HD89XX_HP_Z1_G2_RIGHT_MIC_JACK,
+	STAC_92HD73XX_ASUS_MOBO,
 	STAC_92HD73XX_MODELS
 };
 
@@ -99,6 +100,7 @@ enum {
 	STAC_HP_ENVY_BASS,
 	STAC_HP_BNB13_EQ,
 	STAC_HP_ENVY_TS_BASS,
+	STAC_92HD83XXX_GPIO10_EAPD,
 	STAC_92HD83XXX_MODELS
 };
 
@@ -1910,7 +1912,18 @@ static const struct hda_fixup stac92hd73xx_fixups[] = {
 	[STAC_92HD89XX_HP_Z1_G2_RIGHT_MIC_JACK] = {
 		.type = HDA_FIXUP_PINS,
 		.v.pins = stac92hd89xx_hp_z1_g2_right_mic_jack_pin_configs,
-	}
+	},
+	[STAC_92HD73XX_ASUS_MOBO] = {
+		.type = HDA_FIXUP_PINS,
+		.v.pins = (const struct hda_pintbl[]) {
+			/* enable 5.1 and SPDIF out */
+			{ 0x0c, 0x01014411 },
+			{ 0x0d, 0x01014410 },
+			{ 0x0e, 0x01014412 },
+			{ 0x22, 0x014b1180 },
+			{ }
+		}
+	},
 };
 
 static const struct hda_model_fixup stac92hd73xx_models[] = {
@@ -1922,6 +1935,7 @@ static const struct hda_model_fixup stac92hd73xx_models[] = {
 	{ .id = STAC_DELL_M6_BOTH, .name = "dell-m6" },
 	{ .id = STAC_DELL_EQ, .name = "dell-eq" },
 	{ .id = STAC_ALIENWARE_M17X, .name = "alienware" },
+	{ .id = STAC_92HD73XX_ASUS_MOBO, .name = "asus-mobo" },
 	{}
 };
 
@@ -1974,6 +1988,8 @@ static const struct snd_pci_quirk stac92hd73xx_fixup_tbl[] = {
 				"HP Z1 G2", STAC_92HD89XX_HP_Z1_G2_RIGHT_MIC_JACK),
 	SND_PCI_QUIRK(PCI_VENDOR_ID_HP, 0x2b17,
 				"unknown HP", STAC_92HD89XX_HP_FRONT_JACK),
+	SND_PCI_QUIRK(PCI_VENDOR_ID_ASUSTEK, 0x83f8, "ASUS AT4NM10",
+		      STAC_92HD73XX_ASUS_MOBO),
 	{} /* terminator */
 };
 
@@ -2116,8 +2132,10 @@ static void stac92hd83xxx_fixup_hp_mic_led(struct hda_codec *codec,
 
 	if (action == HDA_FIXUP_ACT_PRE_PROBE) {
 		spec->mic_mute_led_gpio = 0x08; /* GPIO3 */
+#ifdef CONFIG_PM
 		/* resetting controller clears GPIO, so we need to keep on */
-		codec->bus->power_keep_link_on = 1;
+		codec->d3_stop_clk = 0;
+#endif
 	}
 }
 
@@ -2139,6 +2157,19 @@ static void stac92hd83xxx_fixup_headset_jack(struct hda_codec *codec,
 
 	if (action == HDA_FIXUP_ACT_PRE_PROBE)
 		spec->headset_jack = 1;
+}
+
+static void stac92hd83xxx_fixup_gpio10_eapd(struct hda_codec *codec,
+					    const struct hda_fixup *fix,
+					    int action)
+{
+	struct sigmatel_spec *spec = codec->spec;
+
+	if (action != HDA_FIXUP_ACT_PRE_PROBE)
+		return;
+	spec->eapd_mask = spec->gpio_mask = spec->gpio_dir =
+		spec->gpio_data = 0x10;
+	spec->eapd_switch = 0;
 }
 
 static const struct hda_verb hp_bnb13_eq_verbs[] = {
@@ -2656,6 +2687,10 @@ static const struct hda_fixup stac92hd83xxx_fixups[] = {
 			{}
 		},
 	},
+	[STAC_92HD83XXX_GPIO10_EAPD] = {
+		.type = HDA_FIXUP_FUNC,
+		.v.func = stac92hd83xxx_fixup_gpio10_eapd,
+	},
 };
 
 static const struct hda_model_fixup stac92hd83xxx_models[] = {
@@ -2861,6 +2896,8 @@ static const struct snd_pci_quirk stac92hd83xxx_fixup_tbl[] = {
 	SND_PCI_QUIRK(PCI_VENDOR_ID_HP, 0x148a,
 		      "HP Mini", STAC_92HD83XXX_HP_LED),
 	SND_PCI_QUIRK_VENDOR(PCI_VENDOR_ID_HP, "HP", STAC_92HD83XXX_HP),
+	SND_PCI_QUIRK(PCI_VENDOR_ID_TOSHIBA, 0xfa91,
+		      "Toshiba Satellite S50D", STAC_92HD83XXX_GPIO10_EAPD),
 	{} /* terminator */
 };
 
@@ -5056,20 +5093,8 @@ MODULE_ALIAS("snd-hda-codec-id:111d*");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("IDT/Sigmatel HD-audio codec");
 
-static struct hda_codec_preset_list sigmatel_list = {
+static struct hda_codec_driver sigmatel_driver = {
 	.preset = snd_hda_preset_sigmatel,
-	.owner = THIS_MODULE,
 };
 
-static int __init patch_sigmatel_init(void)
-{
-	return snd_hda_add_codec_preset(&sigmatel_list);
-}
-
-static void __exit patch_sigmatel_exit(void)
-{
-	snd_hda_delete_codec_preset(&sigmatel_list);
-}
-
-module_init(patch_sigmatel_init)
-module_exit(patch_sigmatel_exit)
+module_hda_codec_driver(sigmatel_driver);

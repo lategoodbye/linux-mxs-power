@@ -794,8 +794,14 @@ exit:
 
 struct file *open_exec(const char *name)
 {
-	struct filename tmp = { .name = name };
-	return do_open_execat(AT_FDCWD, &tmp, 0);
+	struct filename *filename = getname_kernel(name);
+	struct file *f = ERR_CAST(filename);
+
+	if (!IS_ERR(filename)) {
+		f = do_open_execat(AT_FDCWD, filename, 0);
+		putname(filename);
+	}
+	return f;
 }
 EXPORT_SYMBOL(open_exec);
 
@@ -920,10 +926,14 @@ static int de_thread(struct task_struct *tsk)
 	if (!thread_group_leader(tsk)) {
 		struct task_struct *leader = tsk->group_leader;
 
-		sig->notify_count = -1;	/* for exit_notify() */
 		for (;;) {
 			threadgroup_change_begin(tsk);
 			write_lock_irq(&tasklist_lock);
+			/*
+			 * Do this under tasklist_lock to ensure that
+			 * exit_notify() can't miss ->group_exit_task
+			 */
+			sig->notify_count = -1;
 			if (likely(leader->exit_state))
 				break;
 			__set_current_state(TASK_KILLABLE);

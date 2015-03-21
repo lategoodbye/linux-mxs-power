@@ -101,9 +101,6 @@ static int __ixgbe_enable_sriov(struct ixgbe_adapter *adapter)
 			adapter->dcb_cfg.num_tcs.pfc_tcs = 1;
 		}
 
-		/* We do not support RSS w/ SR-IOV */
-		adapter->ring_feature[RING_F_RSS].limit = 1;
-
 		/* Disable RSC when in SR-IOV mode */
 		adapter->flags2 &= ~(IXGBE_FLAG2_RSC_CAPABLE |
 				     IXGBE_FLAG2_RSC_ENABLED);
@@ -144,7 +141,7 @@ void ixgbe_enable_sriov(struct ixgbe_adapter *adapter)
 		 * The 82599 supports up to 64 VFs per physical function
 		 * but this implementation limits allocation to 63 so that
 		 * basic networking resources are still available to the
-		 * physical function.  If the user requests greater thn
+		 * physical function.  If the user requests greater than
 		 * 63 VFs then it is an error - reset to default of zero.
 		 */
 		adapter->num_vfs = min_t(unsigned int, adapter->num_vfs, IXGBE_MAX_VFS_DRV_LIMIT);
@@ -1097,14 +1094,12 @@ static int ixgbe_enable_port_vlan(struct ixgbe_adapter *adapter, int vf,
 				  u16 vlan, u8 qos)
 {
 	struct ixgbe_hw *hw = &adapter->hw;
-	int err = 0;
+	int err;
 
-	if (adapter->vfinfo[vf].pf_vlan)
-		err = ixgbe_set_vf_vlan(adapter, false,
-					adapter->vfinfo[vf].pf_vlan,
-					vf);
+	err = ixgbe_set_vf_vlan(adapter, true, vlan, vf);
 	if (err)
 		goto out;
+
 	ixgbe_set_vmvir(adapter, vlan, qos, vf);
 	ixgbe_set_vmolr(hw, vf, false);
 	if (adapter->vfinfo[vf].spoofchk_enabled)
@@ -1143,6 +1138,11 @@ static int ixgbe_disable_port_vlan(struct ixgbe_adapter *adapter, int vf)
 	hw->mac.ops.set_vlan_anti_spoofing(hw, false, vf);
 	if (adapter->vfinfo[vf].vlan_count)
 		adapter->vfinfo[vf].vlan_count--;
+
+	/* disable hide VLAN on X550 */
+	if (hw->mac.type >= ixgbe_mac_X550)
+		ixgbe_write_qde(adapter, vf, IXGBE_QDE_ENABLE);
+
 	adapter->vfinfo[vf].pf_vlan = 0;
 	adapter->vfinfo[vf].pf_qos = 0;
 

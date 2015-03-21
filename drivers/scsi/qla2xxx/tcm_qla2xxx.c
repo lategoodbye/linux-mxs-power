@@ -1082,8 +1082,18 @@ static ssize_t tcm_qla2xxx_tpg_store_enable(
 
 TF_TPG_BASE_ATTR(tcm_qla2xxx, enable, S_IRUGO | S_IWUSR);
 
+static ssize_t tcm_qla2xxx_tpg_show_dynamic_sessions(
+	struct se_portal_group *se_tpg,
+	char *page)
+{
+	return target_show_dynamic_sessions(se_tpg, page);
+}
+
+TF_TPG_BASE_ATTR_RO(tcm_qla2xxx, dynamic_sessions);
+
 static struct configfs_attribute *tcm_qla2xxx_tpg_attrs[] = {
 	&tcm_qla2xxx_tpg_enable.attr,
+	&tcm_qla2xxx_tpg_dynamic_sessions.attr,
 	NULL,
 };
 
@@ -1570,9 +1580,7 @@ static int tcm_qla2xxx_check_initiator_node_acl(
 	 * match the format by tcm_qla2xxx explict ConfigFS NodeACLs.
 	 */
 	memset(&port_name, 0, 36);
-	snprintf(port_name, 36, "%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
-		fc_wwpn[0], fc_wwpn[1], fc_wwpn[2], fc_wwpn[3], fc_wwpn[4],
-		fc_wwpn[5], fc_wwpn[6], fc_wwpn[7]);
+	snprintf(port_name, sizeof(port_name), "%8phC", fc_wwpn);
 	/*
 	 * Locate our struct se_node_acl either from an explict NodeACL created
 	 * via ConfigFS, or via running in TPG demo mode.

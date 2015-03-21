@@ -78,10 +78,9 @@ static int sdhci_st_probe(struct platform_device *pdev)
 	}
 
 	ret = mmc_of_parse(host->mmc);
-
 	if (ret) {
 		dev_err(&pdev->dev, "Failed mmc_of_parse\n");
-		return ret;
+		goto err_of;
 	}
 
 	clk_prepare_enable(clk);
@@ -108,19 +107,10 @@ static int sdhci_st_probe(struct platform_device *pdev)
 
 err_out:
 	clk_disable_unprepare(clk);
+err_of:
 	sdhci_pltfm_free(pdev);
 
 	return ret;
-}
-
-static int sdhci_st_remove(struct platform_device *pdev)
-{
-	struct sdhci_host *host = platform_get_drvdata(pdev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-
-	clk_disable_unprepare(pltfm_host->clk);
-
-	return sdhci_pltfm_unregister(pdev);
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -160,7 +150,7 @@ MODULE_DEVICE_TABLE(of, st_sdhci_match);
 
 static struct platform_driver sdhci_st_driver = {
 	.probe = sdhci_st_probe,
-	.remove = sdhci_st_remove,
+	.remove = sdhci_pltfm_unregister,
 	.driver = {
 		   .name = "sdhci-st",
 		   .pm = &sdhci_st_pmops,
