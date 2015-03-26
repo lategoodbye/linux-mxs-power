@@ -114,88 +114,6 @@ struct mxs_ldo {
 	void __iomem *v5ctrl_addr;
 };
 
-void _decode_hw_power_5vctrl(u32 value)
-{
-	pr_info("HW_POWER_5VCTRL\n");
-	pr_info("VBUSDROOP_TRSH: %x\n", (value >> 28) & 3);
-	pr_info("HEADROOM_ADJ: %x\n", (value >> 24) & 7);
-	pr_info("PWD_CHARGE_4P2: %x\n", (value >> 20) & 3);
-	pr_info("CHARGE_4P2_ILIMIT: %x\n", (value >> 12) & 0x3F);
-	pr_info("VBUSVALID_TRSH: %x\n", (value >> 8) & 7);
-	pr_info("PWDN_5VBRNOUT: %x\n", (value >> 7) & 1);
-	pr_info("ENABLE_LINREG_ILIMIT: %x\n", (value >> 6) & 1);
-	pr_info("DCDC_XFER: %x\n", (value >> 5) & 1);
-	pr_info("VBUSVALID_5VDETECT: %x\n", (value >> 4) & 1);
-	pr_info("VBUSVALID_TO_B: %x\n", (value >> 3) & 1);
-	pr_info("ILIMIT_EQ_ZERO: %x\n", (value >> 2) & 1);
-	pr_info("PWRUP_VBUS_CMPS: %x\n", (value >> 1) & 1);
-	pr_info("ENABLE_DCDC: %x\n", value & 1);
-}
-
-void _decode_hw_power_vddactrl(u32 value)
-{
-	pr_info("HW_POWER_VDDACTRL\n");
-	pr_info("PWDN_BRNOUT: %x\n", (value >> 19) & 1);
-	pr_info("DISABLE_STEPPING: %x\n", (value >> 18) & 1);
-	pr_info("ENABLE_LINREG: %x\n", (value >> 17) & 1);
-	pr_info("DISABLE_FET: %x\n", (value >> 16) & 1);
-	pr_info("LINREG_OFFSET: %x\n", (value >> 12) & 3);
-	pr_info("BO_OFFSET: %x\n", (value >> 8) & 7);
-	pr_info("TRG: %x\n", value & 0x1f);
-}
-
-void _decode_hw_power_vdddctrl(u32 value)
-{
-	pr_info("HW_POWER_VDDDCTRL\n");
-	pr_info("ADJTN: %x\n", (value >> 28) & 0xf);
-	pr_info("PWDN_BRNOUT: %x\n", (value >> 23) & 1);
-	pr_info("DISABLE_STEPPING: %x\n", (value >> 22) & 1);
-	pr_info("ENABLE_LINREG: %x\n", (value >> 21) & 1);
-	pr_info("DISABLE_FET: %x\n", (value >> 20) & 1);
-	pr_info("LINREG_OFFSET: %x\n", (value >> 16) & 3);
-	pr_info("BO_OFFSET: %x\n", (value >> 8) & 7);
-	pr_info("TRG: %x\n", value & 0x1f);
-}
-
-void _decode_hw_power_vddioctrl(u32 value)
-{
-	pr_info("HW_POWER_VDDIOCTRL\n");
-	pr_info("ADJTN: %x\n", (value >> 20) & 0xf);
-	pr_info("PWDN_BRNOUT: %x\n", (value >> 18) & 1);
-	pr_info("DISABLE_STEPPING: %x\n", (value >> 17) & 1);
-	pr_info("DISABLE_FET: %x\n", (value >> 16) & 1);
-	pr_info("LINREG_OFFSET: %x\n", (value >> 12) & 3);
-	pr_info("BO_OFFSET: %x\n", (value >> 8) & 7);
-	pr_info("TRG: %x\n", value & 0x1f);
-}
-
-void _decode_hw_power_sts(u32 value)
-{
-	pr_info("HW_POWER_STS\n");
-	pr_info("PWRUP_SOURCE %x\n", (value >> 24) & 0x1F);
-	pr_info("PSWITCH %x\n", (value >> 20) & 3);
-	pr_info("THERMAL_WARNING %x\n", (value >> 19) & 1);
-	pr_info("VDDMEM_BO %x\n", (value >> 18) & 1);
-	pr_info("AVALID0_STATUS %x\n", (value >> 17) & 1);
-	pr_info("BVALID0_STATUS %x\n", (value >> 16) & 1);
-	pr_info("SESSEND0_STATUS %x\n", (value >> 15) & 1);
-	pr_info("VBUSVALID0_STATUS %x\n", (value >> 14) & 1);
-	pr_info("BATT_BO %x\n", (value >> 13) & 1);
-	pr_info("VDD5V_FAULT %x\n", (value >> 12) & 1);
-	pr_info("CHRGSTS %x\n", (value >> 11) & 1);
-	pr_info("DCDC_4P2_BO %x\n", (value >> 10) & 1);
-	pr_info("DC_OK %x\n", (value >> 9) & 1);
-	pr_info("VDDIO_BO %x\n", (value >> 8) & 1);
-	pr_info("VDDA_BO %x\n", (value >> 7) & 1);
-	pr_info("VDDD_BO %x\n", (value >> 6) & 1);
-	pr_info("VDD5V_GT_VDDIO %x\n", (value >> 5) & 1);
-	pr_info("VDD5V_DROOP %x\n", (value >> 4) & 1);
-	pr_info("AVALID0 %x\n", (value >> 3) & 1);
-	pr_info("BVALID0 %x\n", (value >> 2) & 1);
-	pr_info("VBUSVALID0 %x\n", (value >> 1) & 1);
-	pr_info("SESSEND0 %x\n", value & 1);
-}
-
 static inline u8 get_linreg_offset(struct mxs_ldo *ldo, u32 regs)
 {
 	return (regs & ldo->linreg_offset_mask) >> ldo->linreg_offset_shift;
@@ -204,7 +122,6 @@ static inline u8 get_linreg_offset(struct mxs_ldo *ldo, u32 regs)
 static u8 get_vddio_power_source(struct regulator_dev *reg)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
-	static int dump_regs = 1;
 	u32 v5ctrl, status, base;
 	u8 offset;
 
@@ -212,13 +129,6 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 	status = readl(ldo->status_addr);
 	base = readl(ldo->base_addr);
 	offset = get_linreg_offset(ldo, base);
-
-	if (dump_regs) {
-		_decode_hw_power_5vctrl(v5ctrl);
-		_decode_hw_power_sts(status);
-		_decode_hw_power_vddioctrl(base);
-		dump_regs = 0;
-	}
 
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
 		if ((base & ldo->disable_fet_mask) &&
@@ -245,7 +155,6 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
-	static int dump_regs = 1;
 	u32 v5ctrl, status, base;
 	u8 offset;
 
@@ -253,19 +162,6 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	status = readl(ldo->status_addr);
 	base = readl(ldo->base_addr);
 	offset = get_linreg_offset(ldo, base);
-
-	if (dump_regs) {
-		_decode_hw_power_5vctrl(v5ctrl);
-		switch (desc->id) {
-		case MXS_VDDA:
-			_decode_hw_power_vddactrl(base);
-			break;
-		case MXS_VDDD:
-			_decode_hw_power_vdddctrl(base);
-			break;
-		}
-		dump_regs = 0;
-	}
 
 	if (base & ldo->disable_fet_mask) {
 		if (status & BM_POWER_STS_VBUSVALID0_STATUS)
@@ -356,56 +252,13 @@ int set_dcdc_clk_freq(struct mxs_dcdc *dcdc, int khz)
 	return 0;
 }
 
-void print_power_source(struct regulator_dev *reg)
-{
-	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &ldo->desc;
-	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
-
-	if (ldo->get_power_source)
-		power_source = ldo->get_power_source(reg);
-
-	switch (power_source) {
-	case HW_POWER_LINREG_DCDC_OFF:
-		pr_info("%s: POWER SOURCE: LINREG (DCDC OFF)\n", desc->name);
-		break;
-	case HW_POWER_LINREG_DCDC_READY:
-		pr_info("%s: POWER SOURCE: LINREG (DCDC READY)\n", desc->name);
-		break;
-	case HW_POWER_DCDC_LINREG_ON:
-		pr_info("%s: POWER SOURCE: DCDC (LINREG ON)\n", desc->name);
-		break;
-	case HW_POWER_DCDC_LINREG_OFF:
-		pr_info("%s: POWER SOURCE: DCDC (LINREG OFF)\n", desc->name);
-		break;
-	case HW_POWER_DCDC_LINREG_READY:
-		pr_info("%s: POWER SOURCE: DCDC (LINREG READY)\n", desc->name);
-		break;
-	case HW_POWER_EXTERNAL_SOURCE_5V:
-		pr_info("%s: POWER SOURCE: EXT SOURCE 5V\n", desc->name);
-		break;
-	case HW_POWER_EXTERNAL_SOURCE_BATTERY:
-		pr_info("%s: POWER SOURCE: BATTERY\n", desc->name);
-		break;
-	default:
-		pr_info("%s: POWER SOURCE: UNKNOWN\n", desc->name);
-		break;
-	}
-}
-
 static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
 	unsigned long start;
 	u32 regs;
-	int uV;
 	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
-
-	uV = regulator_list_voltage_linear(reg, sel);
-
-	if (uV >= 0)
-		pr_debug("%s: %s: %d mV\n", __func__, desc->name, uV / 1000);
 
 	regs = (readl(ldo->base_addr) & ~desc->vsel_mask);
 	writel(sel | regs, ldo->base_addr);
@@ -442,13 +295,8 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 static int mxs_ldo_get_voltage_sel(struct regulator_dev *reg)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
-	struct regulator_desc *desc = &ldo->desc;
-	int ret, uV;
 
-	ret = readl(ldo->base_addr) & desc->vsel_mask;
-	uV = regulator_list_voltage_linear(reg, ret);
-
-	return ret;
+	return readl(ldo->base_addr) & ldo->desc.vsel_mask;
 }
 
 static int mxs_dcdc_is_enabled(struct regulator_dev *reg)
