@@ -188,8 +188,9 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
-int get_dcdc_clk_freq(struct mxs_dcdc *dcdc)
+int get_dcdc_clk_freq(struct regulator_dev *reg)
 {
+	struct mxs_dcdc *dcdc = rdev_get_drvdata(reg);
 	int ret = -EINVAL;
 	u32 val;
 
@@ -214,10 +215,10 @@ int get_dcdc_clk_freq(struct mxs_dcdc *dcdc)
 	return ret;
 }
 
-int set_dcdc_clk_freq(struct mxs_dcdc *dcdc, int khz)
+int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 {
+	struct mxs_dcdc *dcdc = rdev_get_drvdata(reg);
 	u32 val;
-	int ret = 0;
 
 	val = readl(dcdc->misc_addr);
 
@@ -236,12 +237,10 @@ int set_dcdc_clk_freq(struct mxs_dcdc *dcdc, int khz)
 		val |= HW_POWER_MISC_FREQSEL_24000_KHZ << SHIFT_FREQSEL;
 		break;
 	default:
-		ret = -EINVAL;
-		break;
+		dev_warn(&reg->dev, "DCDC clock freq: %d kHz not supported\n",
+			 khz);
+		return -EINVAL;
 	}
-
-	if (ret)
-		return ret;
 
 	/* First program FREQSEL */
 	writel(val, dcdc->misc_addr);
@@ -447,6 +446,7 @@ struct regulator_dev *mxs_dcdc_register(struct platform_device *pdev, const void
 	struct mxs_dcdc *dcdc;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
+	struct regulator_dev *reg;
 	struct resource *res;
 	char *pname;
 	u32 dcdc_clk_freq;
@@ -498,14 +498,18 @@ struct regulator_dev *mxs_dcdc_register(struct platform_device *pdev, const void
 	config.init_data = initdata;
 	config.of_node = dev->of_node;
 
+	reg = devm_regulator_register(dev, &dcdc->desc, &config);
+	if (!reg)
+		return NULL;
+
 	pname = "switching-frequency";
 	if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
-		set_dcdc_clk_freq(dcdc, dcdc_clk_freq / 1000);
+		set_dcdc_clk_freq(reg, dcdc_clk_freq / 1000);
 
-	dcdc_clk_freq = get_dcdc_clk_freq(dcdc);
+	dcdc_clk_freq = get_dcdc_clk_freq(reg);
 	dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
 
-	return devm_regulator_register(dev, &dcdc->desc, &config);
+	return reg;
 }
 
 struct regulator_dev *mxs_ldo_register(struct platform_device *pdev, const void *data)
