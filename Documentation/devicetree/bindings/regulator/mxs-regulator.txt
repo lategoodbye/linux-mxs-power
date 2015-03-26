@@ -3,13 +3,13 @@ Regulators for Freescale i.MX23/i.MX28
 Required properties:
 For imx23 regulators
 - compatible:
-  - "fsl,imx23-dcdc" for DC-DC convertor
+  - "fsl,imx23-dcdc" for DC-DC converter
   - "fsl,imx23-vddd" for VDDD linear regulator
   - "fsl,imx23-vdda" for VDDA linear regulator
   - "fsl,imx23-vddio" for VDDIO linear regulator
 For imx28 regulators
 - compatible:
-  - "fsl,imx28-dcdc" for DC-DC convertor
+  - "fsl,imx28-dcdc" for DC-DC converter
   - "fsl,imx28-vddd" for VDDD linear regulator
   - "fsl,imx28-vdda" for VDDA linear regulator
   - "fsl,imx28-vddio" for VDDIO linear regulator
@@ -18,13 +18,13 @@ For imx28 regulators
 - reg-names: Should contain the reg names
   - "base-address"	- contains base address of regulator
   - "status-address"	- contains status address of regulator
-  - "v5ctrl-address"	- contains 5V control address of DC-DC converter 
+  - "v5ctrl-address"	- contains 5V control address of DC-DC converter
 			  (required only for linear regulators)
   - "misc-address"      - contains misc control address of DC-DC converter
-			  (required only for DC-DC convertor)
+			  (required only for DC-DC converter)
 
 Optional properties:
-- switching-frequency: switching frequency of the DC-DC convertor in Hz.
+- switching-frequency: switching frequency of the DC-DC converter in Hz.
   Possible values are <19200000>, <22000000> or <24000000> (default).
 
 Any regulator property defined as part of the core regulator
