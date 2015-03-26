@@ -36,8 +36,8 @@ static struct platform_suspend_ops mxs_suspend_ops = {
 	.valid = suspend_valid_only_mem,
 };
 
-static struct platform_device mxs_cpufreq_pdev = { 
-	.name = "cpufreq-dt", 
+static struct platform_device mxs_cpufreq_pdev = {
+	.name = "cpufreq-dt",
 };
 
 void __init mxs_pm_init(void)
