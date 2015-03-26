@@ -106,7 +106,7 @@ static int mxs_power_probe(struct platform_device *pdev)
 
 	psy_cfg.drv_data = data;
 
-	data->ac = power_supply_register(dev, &ac_desc, &psy_cfg);
+	data->ac = devm_power_supply_register(dev, &ac_desc, &psy_cfg);
 	if (IS_ERR(data->ac))
 		return PTR_ERR(data->ac);
 
@@ -121,22 +121,12 @@ static int mxs_power_probe(struct platform_device *pdev)
 	return of_platform_populate(np, NULL, NULL, dev);
 }
 
-static int mxs_power_remove(struct platform_device *pdev)
-{
-	struct mxs_power_data *data = platform_get_drvdata(pdev);
-
-	power_supply_unregister(data->ac);
-
-	return 0;
-}
-
 static struct platform_driver mxs_power_driver = {
 	.driver = {
 		.name	= "mxs_power",
 		.of_match_table = of_mxs_power_match,
 	},
 	.probe	= mxs_power_probe,
-	.remove = mxs_power_remove,
 };
 
 module_platform_driver(mxs_power_driver);
