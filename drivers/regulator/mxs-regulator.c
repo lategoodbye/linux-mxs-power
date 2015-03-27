@@ -255,38 +255,36 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 {
 	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
-	unsigned long start;
 	u32 regs;
-	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
+	int timeout;
 
 	regs = (readl(ldo->base_addr) & ~desc->vsel_mask);
 	writel(sel | regs, ldo->base_addr);
 
-	if (ldo->get_power_source)
-		power_source = ldo->get_power_source(reg);
-
-	switch (power_source) {
-	case HW_POWER_LINREG_DCDC_OFF:
-	case HW_POWER_LINREG_DCDC_READY:
-	case HW_POWER_EXTERNAL_SOURCE_5V:
-		usleep_range(1000, 2000);
-		return 0;
+	if (ldo->get_power_source) {
+		switch (ldo->get_power_source(reg)) {
+		case HW_POWER_LINREG_DCDC_OFF:
+		case HW_POWER_LINREG_DCDC_READY:
+		case HW_POWER_EXTERNAL_SOURCE_5V:
+			usleep_range(1000, 2000);
+			return 0;
+		}
 	}
 
+	/* Make sure DC_OK has changed */
 	usleep_range(15, 20);
-	start = jiffies;
-	while (1) {
+
+	for (timeout = 0; timeout < 20; timeout++) {
 		if (readl(ldo->status_addr) & BM_POWER_STS_DC_OK)
 			return 0;
 
-		if (time_after(jiffies, start +	msecs_to_jiffies(20)))
-			break;
-
-		schedule();
+		udelay(1);
 	}
 
 	dev_warn_ratelimited(&reg->dev, "%s: timeout status=0x%08x\n",
 			     __func__, readl(ldo->status_addr));
+
+	msleep(20);
 
 	return -ETIMEDOUT;
 }
