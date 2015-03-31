@@ -452,7 +452,7 @@ config REGULATOR_MT6397
 
 config REGULATOR_MXS
 	tristate "Freescale MXS on-chip regulators"
-	depends on MXS_POWER
+	depends on (MXS_POWER || COMPILE_TEST) && MFD_SYSCON
 	help
 	  Say y here to support Freescale MXS on-chip regulators.
 	  It is recommended that this option be enabled on i.MX23,

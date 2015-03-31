@@ -21,14 +21,13 @@
 
 #include <linux/delay.h>
 #include <linux/err.h>
-#include <linux/init.h>
-#include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
@@ -73,6 +72,13 @@
 /* Unknown configuration.  This is an error. */
 #define HW_POWER_UNKNOWN_SOURCE			8
 
+#define HW_POWER_5VCTRL		0x00000010
+#define HW_POWER_VDDDCTRL	0x00000040
+#define HW_POWER_VDDACTRL	0x00000050
+#define HW_POWER_VDDIOCTRL	0x00000060
+#define HW_POWER_MISC		0x00000090
+#define HW_POWER_STS		0x000000c0
+
 #define BM_POWER_STS_VBUSVALID0_STATUS	BIT(15)
 #define BM_POWER_STS_DC_OK		BIT(9)
 
@@ -94,40 +100,38 @@
 #define MXS_VDDA	3
 #define MXS_VDDD	4
 
-struct mxs_dcdc {
+struct mxs_reg_info {
 	struct regulator_desc desc;
+	struct regmap *syscon;
+	struct regulator_dev *dev;
 
-	void __iomem *base_addr;
-	void __iomem *status_addr;
-	void __iomem *misc_addr;
-};
-
-struct mxs_ldo {
-	struct regulator_desc desc;
+	int ctrl_reg;
 	unsigned int disable_fet_mask;
 	unsigned int linreg_offset_mask;
 	u8 linreg_offset_shift;
 	u8 (*get_power_source)(struct regulator_dev *);
-
-	void __iomem *base_addr;
-	void __iomem *status_addr;
-	void __iomem *v5ctrl_addr;
 };
 
-static inline u8 get_linreg_offset(struct mxs_ldo *ldo, u32 regs)
+static inline u8 get_linreg_offset(struct mxs_reg_info *ldo, u32 regs)
 {
 	return (regs & ldo->linreg_offset_mask) >> ldo->linreg_offset_shift;
 }
 
 static u8 get_vddio_power_source(struct regulator_dev *reg)
 {
-	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
 	u32 v5ctrl, status, base;
 	u8 offset;
 
-	v5ctrl = readl(ldo->v5ctrl_addr);
-	status = readl(ldo->status_addr);
-	base = readl(ldo->base_addr);
+	if (regmap_read(ldo->syscon, HW_POWER_5VCTRL, &v5ctrl))
+		return HW_POWER_UNKNOWN_SOURCE;
+
+	if (regmap_read(ldo->syscon, HW_POWER_STS, &status))
+		return HW_POWER_UNKNOWN_SOURCE;
+
+	if (regmap_read(ldo->syscon, ldo->ctrl_reg, &base))
+		return HW_POWER_UNKNOWN_SOURCE;
+
 	offset = get_linreg_offset(ldo, base);
 
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
@@ -153,14 +157,20 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 
 static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 {
-	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
 	u32 v5ctrl, status, base;
 	u8 offset;
 
-	v5ctrl = readl(ldo->v5ctrl_addr);
-	status = readl(ldo->status_addr);
-	base = readl(ldo->base_addr);
+	if (regmap_read(ldo->syscon, HW_POWER_5VCTRL, &v5ctrl))
+		return HW_POWER_UNKNOWN_SOURCE;
+
+	if (regmap_read(ldo->syscon, HW_POWER_STS, &status))
+		return HW_POWER_UNKNOWN_SOURCE;
+
+	if (regmap_read(ldo->syscon, ldo->ctrl_reg, &base))
+		return HW_POWER_UNKNOWN_SOURCE;
+
 	offset = get_linreg_offset(ldo, base);
 
 	if (base & ldo->disable_fet_mask) {
@@ -190,11 +200,13 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 int get_dcdc_clk_freq(struct regulator_dev *reg)
 {
-	struct mxs_dcdc *dcdc = rdev_get_drvdata(reg);
-	int ret = -EINVAL;
+	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
+	int ret;
 	u32 val;
 
-	val = readl(dcdc->misc_addr);
+	ret = regmap_read(dcdc->syscon, HW_POWER_MISC, &val);
+	if (ret)
+		return ret;
 
 	/* XTAL source */
 	if ((val & HW_POWER_MISC_SEL_PLLCLK) == 0)
@@ -210,6 +222,9 @@ int get_dcdc_clk_freq(struct regulator_dev *reg)
 	case HW_POWER_MISC_FREQSEL_19200_KHZ:
 		ret = 19200;
 		break;
+	default:
+		ret = -EINVAL;
+		break;
 	}
 
 	return ret;
@@ -217,10 +232,13 @@ int get_dcdc_clk_freq(struct regulator_dev *reg)
 
 int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 {
-	struct mxs_dcdc *dcdc = rdev_get_drvdata(reg);
+	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
 	u32 val;
+	int ret;
 
-	val = readl(dcdc->misc_addr);
+	ret = regmap_read(dcdc->syscon, HW_POWER_MISC, &val);
+	if (ret)
+		return ret;
 
 	val &= ~BM_POWER_MISC_FREQSEL;
 	val &= ~HW_POWER_MISC_SEL_PLLCLK;
@@ -243,23 +261,28 @@ int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 	}
 
 	/* First program FREQSEL */
-	writel(val, dcdc->misc_addr);
+	ret = regmap_write(dcdc->syscon, HW_POWER_MISC, val);
+	if (ret)
+		return ret;
 
 	/* then set PLL as clk for DC-DC converter */
-	writel(val | HW_POWER_MISC_SEL_PLLCLK, dcdc->misc_addr);
+	val |= HW_POWER_MISC_SEL_PLLCLK;
 
-	return 0;
+	return regmap_write(dcdc->syscon, HW_POWER_MISC, val);
 }
 
 static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 {
-	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
+	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
-	u32 regs;
+	u32 status = 0;
 	int timeout;
-
-	regs = (readl(ldo->base_addr) & ~desc->vsel_mask);
-	writel(sel | regs, ldo->base_addr);
+	int ret;
+	
+	ret = regmap_update_bits(ldo->syscon, desc->vsel_reg, desc->vsel_mask,
+				 sel);
+	if (ret)
+		return ret;
 
 	if (ldo->get_power_source) {
 		switch (ldo->get_power_source(reg)) {
@@ -275,79 +298,67 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	usleep_range(15, 20);
 
 	for (timeout = 0; timeout < 20; timeout++) {
-		if (readl(ldo->status_addr) & BM_POWER_STS_DC_OK)
+		ret = regmap_read(ldo->syscon, HW_POWER_STS, &status);
+
+		if (ret)
+			break;
+
+		if (status & BM_POWER_STS_DC_OK)
 			return 0;
 
 		udelay(1);
 	}
 
-	dev_warn_ratelimited(&reg->dev, "%s: timeout status=0x%08x\n",
-			     __func__, readl(ldo->status_addr));
+	if (!ret)
+		dev_warn_ratelimited(&reg->dev, "%s: timeout status=0x%08x\n",
+				     __func__, status);
 
 	msleep(20);
 
 	return -ETIMEDOUT;
 }
 
-static int mxs_ldo_get_voltage_sel(struct regulator_dev *reg)
-{
-	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
-
-	return readl(ldo->base_addr) & ldo->desc.vsel_mask;
-}
-
-static int mxs_dcdc_is_enabled(struct regulator_dev *reg)
-{
-	struct mxs_dcdc *dcdc = rdev_get_drvdata(reg);
-
-	if (readl(dcdc->base_addr) & BM_POWER_5VCTRL_ENABLE_DCDC)
-		return 1;
-
-	return 0;
-}
-
 static int mxs_ldo_is_enabled(struct regulator_dev *reg)
 {
-	struct mxs_ldo *ldo = rdev_get_drvdata(reg);
-	u8 power_source = HW_POWER_UNKNOWN_SOURCE;
+	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
 
-	if (ldo->get_power_source)
-		power_source = ldo->get_power_source(reg);
-
-	switch (power_source) {
-	case HW_POWER_LINREG_DCDC_OFF:
-	case HW_POWER_LINREG_DCDC_READY:
-	case HW_POWER_DCDC_LINREG_ON:
-		return 1;
+	if (ldo->get_power_source) {
+		switch (ldo->get_power_source(reg)) {
+		case HW_POWER_LINREG_DCDC_OFF:
+		case HW_POWER_LINREG_DCDC_READY:
+		case HW_POWER_DCDC_LINREG_ON:
+			return 1;
+		}
 	}
 
 	return 0;
 }
 
 static struct regulator_ops mxs_dcdc_ops = {
-	.is_enabled		= mxs_dcdc_is_enabled,
+	.is_enabled		= regulator_is_enabled_regmap,
 };
 
 static struct regulator_ops mxs_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
-	.get_voltage_sel	= mxs_ldo_get_voltage_sel,
+	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.is_enabled		= mxs_ldo_is_enabled,
 };
 
-static const struct mxs_dcdc mxs_info_dcdc = {
+static const struct mxs_reg_info mxs_info_dcdc = {
 	.desc = {
 		.name = "dcdc",
 		.id = MXS_DCDC,
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.ops = &mxs_dcdc_ops,
+		.enable_reg = HW_POWER_STS,
 		.enable_mask = (1 << 0),
 	},
 };
 
-static const struct mxs_ldo imx23_info_vddio = {
+static const struct mxs_reg_info imx23_info_vddio = {
 	.desc = {
 		.name = "vddio",
 		.id = MXS_VDDIO,
@@ -357,16 +368,18 @@ static const struct mxs_ldo imx23_info_vddio = {
 		.uV_step = 25000,
 		.linear_min_sel = 0,
 		.min_uV = 2800000,
+		.vsel_reg = HW_POWER_VDDIOCTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
 	},
+	.ctrl_reg = HW_POWER_VDDIOCTRL,
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
 	.get_power_source = get_vddio_power_source,
 };
 
-static const struct mxs_ldo imx28_info_vddio = {
+static const struct mxs_reg_info imx28_info_vddio = {
 	.desc = {
 		.name = "vddio",
 		.id = MXS_VDDIO,
@@ -376,16 +389,18 @@ static const struct mxs_ldo imx28_info_vddio = {
 		.uV_step = 50000,
 		.linear_min_sel = 0,
 		.min_uV = 2800000,
+		.vsel_reg = HW_POWER_VDDIOCTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
 	},
+	.ctrl_reg = HW_POWER_VDDIOCTRL,
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
 	.get_power_source = get_vddio_power_source,
 };
 
-static const struct mxs_ldo mxs_info_vdda = {
+static const struct mxs_reg_info mxs_info_vdda = {
 	.desc = {
 		.name = "vdda",
 		.id = MXS_VDDA,
@@ -395,17 +410,19 @@ static const struct mxs_ldo mxs_info_vdda = {
 		.uV_step = 25000,
 		.linear_min_sel = 0,
 		.min_uV = 1500000,
+		.vsel_reg = HW_POWER_VDDACTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
 		.enable_mask = (1 << 17),
 	},
+	.ctrl_reg = HW_POWER_VDDACTRL,
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
 	.get_power_source = get_vdda_vddd_power_source,
 };
 
-static const struct mxs_ldo mxs_info_vddd = {
+static const struct mxs_reg_info mxs_info_vddd = {
 	.desc = {
 		.name = "vddd",
 		.id = MXS_VDDD,
@@ -415,10 +432,12 @@ static const struct mxs_ldo mxs_info_vddd = {
 		.uV_step = 25000,
 		.linear_min_sel = 0,
 		.min_uV = 800000,
+		.vsel_reg = HW_POWER_VDDDCTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
 		.enable_mask = (1 << 21),
 	},
+	.ctrl_reg = HW_POWER_VDDDCTRL,
 	.disable_fet_mask = 1 << 20,
 	.linreg_offset_mask = 3 << 16,
 	.linreg_offset_shift = 16,
@@ -438,143 +457,18 @@ static const struct of_device_id of_mxs_regulator_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_mxs_regulator_match);
 
-struct regulator_dev *mxs_dcdc_register(struct platform_device *pdev, const void *data)
-{
-	struct device *dev = &pdev->dev;
-	struct mxs_dcdc *dcdc;
-	struct regulator_init_data *initdata;
-	struct regulator_config config = { };
-	struct regulator_dev *reg;
-	struct resource *res;
-	char *pname;
-	u32 dcdc_clk_freq;
-
-	dcdc = devm_kmemdup(dev, data, sizeof(*dcdc), GFP_KERNEL);
-	if (!dcdc)
-		return NULL;
-
-	pname = "base-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return NULL;
-	}
-	dcdc->base_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(dcdc->base_addr))
-		return NULL;
-
-	/* status register is shared between the regulators */
-	pname = "status-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return NULL;
-	}
-	dcdc->status_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(dcdc->status_addr))
-		return NULL;
-
-	pname = "misc-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return NULL;
-	}
-	dcdc->misc_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(dcdc->misc_addr))
-		return NULL;
-
-	initdata = of_get_regulator_init_data(dev, dev->of_node, &dcdc->desc);
-	if (!initdata)
-		return NULL;
-
-	config.driver_data = dcdc;
-	config.dev = dev;
-	config.init_data = initdata;
-	config.of_node = dev->of_node;
-
-	reg = devm_regulator_register(dev, &dcdc->desc, &config);
-	if (!reg)
-		return NULL;
-
-	pname = "switching-frequency";
-	if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
-		set_dcdc_clk_freq(reg, dcdc_clk_freq / 1000);
-
-	dcdc_clk_freq = get_dcdc_clk_freq(reg);
-	dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
-
-	return reg;
-}
-
-struct regulator_dev *mxs_ldo_register(struct platform_device *pdev, const void *data)
-{
-	struct device *dev = &pdev->dev;
-	struct mxs_ldo *ldo;
-	struct regulator_init_data *initdata;
-	struct regulator_config config = { };
-	struct resource *res;
-	char *pname;
-
-	ldo = devm_kmemdup(dev, data, sizeof(*ldo), GFP_KERNEL);
-	if (!ldo)
-		return NULL;
-
-	pname = "base-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return NULL;
-	}
-	ldo->base_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(ldo->base_addr))
-		return NULL;
-
-	/* status register is shared between the regulators */
-	pname = "status-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return NULL;
-	}
-	ldo->status_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(ldo->status_addr))
-		return NULL;
-
-	pname = "v5ctrl-address";
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, pname);
-	if (!res) {
-		dev_err(dev, "Missing '%s' IO resource\n", pname);
-		return NULL;
-	}
-	ldo->v5ctrl_addr = devm_ioremap_nocache(dev, res->start,
-						 resource_size(res));
-	if (IS_ERR(ldo->v5ctrl_addr))
-		return NULL;
-
-	initdata = of_get_regulator_init_data(dev, dev->of_node, &ldo->desc);
-	if (!initdata)
-		return NULL;
-
-	config.dev = dev;
-	config.init_data = initdata;
-	config.driver_data = ldo;
-	config.of_node = dev->of_node;
-
-	return devm_regulator_register(dev, &ldo->desc, &config);
-}
-
 static int mxs_regulator_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *match;
+	struct device_node *parent_np;
 	struct regulator_dev *rdev = NULL;
+	struct mxs_reg_info *info;
+	struct regulator_init_data *initdata;
+	struct regulator_config config = { };
 	int ret = 0;
+	char *pname;
+	u32 dcdc_clk_freq;
 
 	match = of_match_device(of_mxs_regulator_match, dev);
 	if (!match) {
@@ -583,18 +477,46 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	if ((strcmp(match->compatible, "fsl,imx23-dcdc") == 0) ||
-	    (strcmp(match->compatible, "fsl,imx28-dcdc") == 0)) {
-		rdev = mxs_dcdc_register(pdev, match->data);
-	} else {
-		rdev = mxs_ldo_register(pdev, match->data);
+	info = devm_kmemdup(dev, match->data, sizeof(struct mxs_reg_info),
+			   GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	initdata = of_get_regulator_init_data(dev, dev->of_node, &info->desc);
+	if (!initdata) {
+		dev_err(dev, "missing regulator init data\n");
+		return -EINVAL;
 	}
 
+	parent_np = of_get_parent(dev->of_node);
+	if (!parent_np)
+		return -ENODEV;
+	info->syscon = syscon_node_to_regmap(parent_np);
+	of_node_put(parent_np);
+	if (IS_ERR(info->syscon))
+		return PTR_ERR(info->syscon);
+
+	config.regmap = info->syscon;	
+	config.dev = dev;
+	config.init_data = initdata;
+	config.driver_data = info;
+	config.of_node = dev->of_node;
+
+	rdev = devm_regulator_register(dev, &info->desc, &config);
 	if (IS_ERR(rdev)) {
 		ret = PTR_ERR(rdev);
 		dev_err(dev, "%s: failed to register regulator(%d)\n",
 			__func__, ret);
 		return ret;
+	}
+
+	if (info->desc.id == MXS_DCDC) {
+		pname = "switching-frequency";
+		if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
+			set_dcdc_clk_freq(rdev, dcdc_clk_freq / 1000);
+
+		dcdc_clk_freq = get_dcdc_clk_freq(rdev);
+		dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
 	}
 
 	platform_set_drvdata(pdev, rdev);
