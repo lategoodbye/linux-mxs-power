@@ -1043,33 +1043,21 @@
 			};
 
 			power: power@80044000 {
-				compatible = "fsl,imx28-power";
+				compatible = "fsl,imx28-power", "syscon";
 				#address-cells = <1>;
 				#size-cells = <1>;
 				reg = <0x80044000 0x2000>;
 				interrupts = <6>;
 				ranges;
 
-				dcdc: regulator@80044010 {
-					reg = <0x80044010 0x10>,
-					      <0x80044090 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "misc-address",
-						    "status-address";
+				dcdc: regulator@1 {
 					compatible = "fsl,imx28-dcdc";
 					regulator-name = "dcdc";
 					regulator-boot-on;
 					regulator-always-on;
 				};
 
-				reg_vddd: regulator@80044040 {
-					reg = <0x80044040 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
+				reg_vddd: regulator@2 {
 					compatible = "fsl,imx28-vddd";
 					regulator-name = "vddd";
 					regulator-min-microvolt = <1350000>;
@@ -1079,13 +1067,7 @@
 					regulator-always-on;
 				};
 
-				reg_vdda: regulator@80044050 {
-					reg = <0x80044050 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
+				reg_vdda: regulator@3 {
 					compatible = "fsl,imx28-vdda";
 					regulator-name = "vdda";
 					regulator-min-microvolt = <1725000>;
@@ -1095,13 +1077,7 @@
 					regulator-always-on;
 				};
 
-				reg_vddio: regulator@80044060 {
-					reg = <0x80044060 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
+				reg_vddio: regulator@4 {
 					compatible = "fsl,imx28-vddio";
 					regulator-name = "vddio";
 					regulator-min-microvolt = <3000000>;
