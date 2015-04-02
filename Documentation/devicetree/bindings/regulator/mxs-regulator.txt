@@ -1,5 +1,31 @@
 Regulators for Freescale i.MX23/i.MX28
 
+Linear regulator daisy chain:
+
++------------+     VDD5V  +---------+  VDDIO
+| DC-DC      |   +--------> LINREG  +--------->+
+|            |            | VDDIO   |          |
+|            |            +---------+          |
+| DCDC_VDDIO +->-+-----------------------------+
+|            |   |
+|            |   | VDDIO  +---------+  VDDA
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDA    |          |
+|            |            +---------+          |
+| DCDC_VDDA  +->-+-----------------------------+
+|            |   |
+|            |   | VDDA   +---------+  VDD1P5
+|            |   +--------> LINREG  +--------->
+|            |   |        | VDD1P5  |
+|            |   |        +---------+
+|            |   | VDDA   +---------+  VDDD
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDD    |          |
+|            |            +---------+          |
+| DCDC_VDDD  +->-------------------------------+
++------------+                                 |
+                                               v
+
 Required properties:
 For imx23 regulators
 - compatible:
