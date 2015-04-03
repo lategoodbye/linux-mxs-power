@@ -102,7 +102,6 @@
 
 struct mxs_reg_info {
 	struct regulator_desc desc;
-	struct regmap *syscon;
 	struct regulator_dev *dev;
 
 	int ctrl_reg;
@@ -123,13 +122,13 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 	u32 v5ctrl, status, base;
 	u8 offset;
 
-	if (regmap_read(ldo->syscon, HW_POWER_5VCTRL, &v5ctrl))
+	if (regmap_read(reg->regmap, HW_POWER_5VCTRL, &v5ctrl))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(ldo->syscon, HW_POWER_STS, &status))
+	if (regmap_read(reg->regmap, HW_POWER_STS, &status))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(ldo->syscon, ldo->ctrl_reg, &base))
+	if (regmap_read(reg->regmap, ldo->ctrl_reg, &base))
 		return HW_POWER_UNKNOWN_SOURCE;
 
 	offset = get_linreg_offset(ldo, base);
@@ -162,13 +161,13 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	u32 v5ctrl, status, base;
 	u8 offset;
 
-	if (regmap_read(ldo->syscon, HW_POWER_5VCTRL, &v5ctrl))
+	if (regmap_read(reg->regmap, HW_POWER_5VCTRL, &v5ctrl))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(ldo->syscon, HW_POWER_STS, &status))
+	if (regmap_read(reg->regmap, HW_POWER_STS, &status))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(ldo->syscon, ldo->ctrl_reg, &base))
+	if (regmap_read(reg->regmap, ldo->ctrl_reg, &base))
 		return HW_POWER_UNKNOWN_SOURCE;
 
 	offset = get_linreg_offset(ldo, base);
@@ -200,11 +199,10 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 int get_dcdc_clk_freq(struct regulator_dev *reg)
 {
-	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
 	int ret;
 	u32 val;
 
-	ret = regmap_read(dcdc->syscon, HW_POWER_MISC, &val);
+	ret = regmap_read(reg->regmap, HW_POWER_MISC, &val);
 	if (ret)
 		return ret;
 
@@ -232,11 +230,10 @@ int get_dcdc_clk_freq(struct regulator_dev *reg)
 
 int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 {
-	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
 	u32 val;
 	int ret;
 
-	ret = regmap_read(dcdc->syscon, HW_POWER_MISC, &val);
+	ret = regmap_read(reg->regmap, HW_POWER_MISC, &val);
 	if (ret)
 		return ret;
 
@@ -261,14 +258,14 @@ int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 	}
 
 	/* First program FREQSEL */
-	ret = regmap_write(dcdc->syscon, HW_POWER_MISC, val);
+	ret = regmap_write(reg->regmap, HW_POWER_MISC, val);
 	if (ret)
 		return ret;
 
 	/* then set PLL as clk for DC-DC converter */
 	val |= HW_POWER_MISC_SEL_PLLCLK;
 
-	return regmap_write(dcdc->syscon, HW_POWER_MISC, val);
+	return regmap_write(reg->regmap, HW_POWER_MISC, val);
 }
 
 static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
@@ -279,7 +276,7 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	int timeout;
 	int ret;
 	
-	ret = regmap_update_bits(ldo->syscon, desc->vsel_reg, desc->vsel_mask,
+	ret = regmap_update_bits(reg->regmap, desc->vsel_reg, desc->vsel_mask,
 				 sel);
 	if (ret)
 		return ret;
@@ -298,7 +295,7 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	usleep_range(15, 20);
 
 	for (timeout = 0; timeout < 20; timeout++) {
-		ret = regmap_read(ldo->syscon, HW_POWER_STS, &status);
+		ret = regmap_read(reg->regmap, HW_POWER_STS, &status);
 
 		if (ret)
 			break;
@@ -491,12 +488,11 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	parent_np = of_get_parent(dev->of_node);
 	if (!parent_np)
 		return -ENODEV;
-	info->syscon = syscon_node_to_regmap(parent_np);
+	config.regmap = syscon_node_to_regmap(parent_np);
 	of_node_put(parent_np);
-	if (IS_ERR(info->syscon))
-		return PTR_ERR(info->syscon);
+	if (IS_ERR(config.regmap))
+		return PTR_ERR(config.regmap);
 
-	config.regmap = info->syscon;	
 	config.dev = dev;
 	config.init_data = initdata;
 	config.driver_data = info;
