@@ -39,15 +39,6 @@ For imx28 regulators
   - "fsl,imx28-vddd" for VDDD linear regulator
   - "fsl,imx28-vdda" for VDDA linear regulator
   - "fsl,imx28-vddio" for VDDIO linear regulator
-- reg: Address and length of the register set for the device. It contains
-  the information of registers in the same order as described by reg-names
-- reg-names: Should contain the reg names
-  - "base-address"	- contains base address of regulator
-  - "status-address"	- contains status address of regulator
-  - "v5ctrl-address"	- contains 5V control address of DC-DC converter
-			  (required only for linear regulators)
-  - "misc-address"      - contains misc control address of DC-DC converter
-			  (required only for DC-DC converter)
 
 Optional properties:
 - switching-frequency: switching frequency of the DC-DC converter in Hz.
@@ -59,20 +50,11 @@ binding, defined in regulator.txt, can also be used.
 Example for i.MX28:
 
 	power: power@80044000 {
-		compatible = "fsl,imx28-power";
-		#address-cells = <1>;
-		#size-cells = <1>;
+		compatible = "fsl,imx28-power", "syscon";
 		reg = <0x80044000 0x2000>;
 		interrupts = <6>;
-		ranges;
 
-		dcdc: regulator@80044010 {
-			reg = <0x80044010 0x10>,
-			      <0x80044090 0x10>,
-			      <0x800440c0 0x10>;
-			reg-names = "base-address",
-				    "misc-address",
-				    "status-address";
+		dcdc: regulator@1 {
 			compatible = "fsl,imx28-dcdc";
 			regulator-name = "dcdc";
 			regulator-boot-on;
@@ -80,13 +62,7 @@ Example for i.MX28:
 			switching-frequency = <24000000>;
 		};
 
-		reg_vddd: regulator@80044040 {
-			reg = <0x80044040 0x10>,
-			      <0x80044010 0x10>,
-			      <0x800440c0 0x10>;
-			reg-names = "base-address",
-				    "v5ctrl-address",
-				    "status-address";
+		reg_vddd: regulator@2 {
 			compatible = "fsl,imx28-vddd";
 			regulator-name = "vddd";
 			regulator-min-microvolt = <1350000>;
