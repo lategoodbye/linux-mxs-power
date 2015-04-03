@@ -1044,11 +1044,8 @@
 
 			power: power@80044000 {
 				compatible = "fsl,imx28-power", "syscon";
-				#address-cells = <1>;
-				#size-cells = <1>;
 				reg = <0x80044000 0x2000>;
 				interrupts = <6>;
-				ranges;
 
 				dcdc: regulator@1 {
 					compatible = "fsl,imx28-dcdc";
