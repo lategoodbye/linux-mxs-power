@@ -52,7 +52,6 @@ Example for i.MX28:
 	power: power@80044000 {
 		compatible = "fsl,imx28-power", "syscon";
 		reg = <0x80044000 0x2000>;
-		interrupts = <6>;
 
 		dcdc: regulator@1 {
 			compatible = "fsl,imx28-dcdc";
