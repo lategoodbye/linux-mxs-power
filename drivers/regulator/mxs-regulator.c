@@ -1,5 +1,5 @@
 /*
- * Freescale MXS regulators
+ * Freescale MXS on-chip regulators
  *
  * Embedded Alley Solutions, Inc <source@embeddedalley.com>
  *
@@ -72,6 +72,7 @@
 /* Unknown configuration.  This is an error. */
 #define HW_POWER_UNKNOWN_SOURCE			8
 
+/* TODO: Move power register offsets into header file */
 #define HW_POWER_5VCTRL		0x00000010
 #define HW_POWER_VDDDCTRL	0x00000040
 #define HW_POWER_VDDACTRL	0x00000050
@@ -89,25 +90,35 @@
 
 #define BM_POWER_MISC_FREQSEL		(7 << SHIFT_FREQSEL)
 
+/* Recommended DC-DC clock source values */
 #define HW_POWER_MISC_FREQSEL_20000_KHZ	1
 #define HW_POWER_MISC_FREQSEL_24000_KHZ	2
 #define HW_POWER_MISC_FREQSEL_19200_KHZ	3
 
 #define HW_POWER_MISC_SEL_PLLCLK	BIT(0)
 
+/* Regulator IDs */
 #define MXS_DCDC	1
 #define MXS_VDDIO	2
 #define MXS_VDDA	3
 #define MXS_VDDD	4
 
 struct mxs_reg_info {
+	/* regulator descriptor */
 	struct regulator_desc desc;
 	struct regulator_dev *dev;
 
+	/* regulator control register */
 	int ctrl_reg;
+
+	/* disable DC-DC output */
 	unsigned int disable_fet_mask;
+
+	/* steps between linreg output and DC-DC target */
 	unsigned int linreg_offset_mask;
 	u8 linreg_offset_shift;
+
+	/* function which determine power source */
 	u8 (*get_power_source)(struct regulator_dev *);
 };
 
@@ -133,20 +144,25 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 
 	offset = get_linreg_offset(ldo, base);
 
+	/* If VBUS valid then 5 V power supply present */
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
+		/* Powered by Linreg, DC-DC is off */
 		if ((base & ldo->disable_fet_mask) &&
 		    !(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)) {
 			return HW_POWER_LINREG_DCDC_OFF;
 		}
 
 		if (v5ctrl & BM_POWER_5VCTRL_ENABLE_DCDC) {
+			/* Powered by DC-DC, Linreg is on */
 			if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 				return HW_POWER_DCDC_LINREG_ON;
 		} else {
+			/* Powered by Linreg, DC-DC is off */
 			if (!(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 				return HW_POWER_LINREG_DCDC_OFF;
 		}
 	} else {
+		/* Powered by DC-DC, Linreg is on */
 		if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 			return HW_POWER_DCDC_LINREG_ON;
 	}
@@ -172,25 +188,34 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 	offset = get_linreg_offset(ldo, base);
 
+	/* DC-DC output is disabled */
 	if (base & ldo->disable_fet_mask) {
+		/* Powered by 5 V supply */
 		if (status & BM_POWER_STS_VBUSVALID0_STATUS)
 			return HW_POWER_EXTERNAL_SOURCE_5V;
 
+		/* Powered by Linreg, DC-DC is off */
 		if (!(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 			return HW_POWER_LINREG_DCDC_OFF;
 	}
 
+	/* If VBUS valid then 5 V power supply present */
 	if (status & BM_POWER_STS_VBUSVALID0_STATUS) {
+		/* Powered by DC-DC, Linreg is on */
 		if (v5ctrl & BM_POWER_5VCTRL_ENABLE_DCDC)
 			return HW_POWER_DCDC_LINREG_ON;
 
+		/* Powered by Linreg, DC-DC is off */
 		return HW_POWER_LINREG_DCDC_OFF;
 	}
 
+	/* DC-DC is on */
 	if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE) {
+		/* Powered by DC-DC, Linreg is on */
 		if (base & desc->enable_mask)
 			return HW_POWER_DCDC_LINREG_ON;
 
+		/* Powered by DC-DC, Linreg is off */
 		return HW_POWER_DCDC_LINREG_OFF;
 	}
 
@@ -210,6 +235,7 @@ int get_dcdc_clk_freq(struct regulator_dev *reg)
 	if ((val & HW_POWER_MISC_SEL_PLLCLK) == 0)
 		return 24000;
 
+	/* PLL source */
 	switch ((val & BM_POWER_MISC_FREQSEL) >> SHIFT_FREQSEL) {
 	case HW_POWER_MISC_FREQSEL_20000_KHZ:
 		ret = 20000;
@@ -275,7 +301,7 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	u32 status = 0;
 	int timeout;
 	int ret;
-	
+
 	ret = regmap_update_bits(reg->regmap, desc->vsel_reg, desc->vsel_mask,
 				 sel);
 	if (ret)
@@ -286,6 +312,11 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 		case HW_POWER_LINREG_DCDC_OFF:
 		case HW_POWER_LINREG_DCDC_READY:
 		case HW_POWER_EXTERNAL_SOURCE_5V:
+			/*
+			 * Since the DC-DC converter is off we can't
+			 * trigger on DC_OK. So wait at least 1 ms
+			 * for stabilization.
+			 */
 			usleep_range(1000, 2000);
 			return 0;
 		}
@@ -300,6 +331,7 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 		if (ret)
 			break;
 
+		/* DC-DC converter control loop has stabilized */
 		if (status & BM_POWER_STS_DC_OK)
 			return 0;
 
