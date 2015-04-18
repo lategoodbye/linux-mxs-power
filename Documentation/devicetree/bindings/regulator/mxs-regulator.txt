@@ -41,7 +41,7 @@ For imx28 regulators
   - "fsl,imx28-vddio" for VDDIO linear regulator
 
 Optional properties:
-- switching-frequency: switching frequency of the DC-DC converter in Hz.
+- clock-frequency: base clock frequency for the DC-DC converter in Hz.
   Possible values are <19200000>, <22000000> or <24000000> (default).
 
 Any regulator property defined as part of the core regulator
@@ -58,7 +58,7 @@ Example for i.MX28:
 			regulator-name = "dcdc";
 			regulator-boot-on;
 			regulator-always-on;
-			switching-frequency = <24000000>;
+			clock-frequency = <24000000>;
 		};
 
 		reg_vddd: regulator@2 {

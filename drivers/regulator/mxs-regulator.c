@@ -539,7 +539,7 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	}
 
 	if (info->desc.id == MXS_DCDC) {
-		pname = "switching-frequency";
+		pname = "clock-frequency";
 		if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
 			set_dcdc_clk_freq(rdev, dcdc_clk_freq / 1000);
 
