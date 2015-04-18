@@ -6,13 +6,9 @@ Required properties:
   - "fsl,imx28-power" for i.MX28
 - reg: Address and length of the register set for the power subsystem.
 
-Optional properties;
-- interrupts: Interrupts used by the power subsystem
-
 Example for i.MX28:
 
 	power: power@80044000 {
-				compatible = "fsl,imx28-power", "syscon";
-				reg = <0x80044000 0x2000>;
-				interrupts = <6>;
+		compatible = "fsl,imx28-power", "syscon";
+		reg = <0x80044000 0x2000>;
 	}
