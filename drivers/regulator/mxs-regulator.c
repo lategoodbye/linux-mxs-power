@@ -106,7 +106,6 @@
 struct mxs_reg_info {
 	/* regulator descriptor */
 	struct regulator_desc desc;
-	struct regulator_dev *dev;
 
 	/* regulator control register */
 	int ctrl_reg;
