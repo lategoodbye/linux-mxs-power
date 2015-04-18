@@ -23,9 +23,8 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
+#include <linux/stmp_device.h>
 #include <linux/types.h>
-
-#define HW_POWER_CTRL_CLR	0x08
 
 #define BM_POWER_CTRL_POLARITY_VBUSVALID	BIT(5)
 #define BM_POWER_CTRL_VBUSVALID_IRQ		BIT(4)
@@ -116,7 +115,7 @@ static int mxs_power_probe(struct platform_device *pdev)
 
 	/* Make sure the current limit of the linregs are disabled. */
 	writel(BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT,
-	       v5ctrl_addr + HW_POWER_CTRL_CLR);
+	       v5ctrl_addr + STMP_OFFSET_REG_CLR);
 
 	return of_platform_populate(np, NULL, NULL, dev);
 }
