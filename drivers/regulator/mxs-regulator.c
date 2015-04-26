@@ -494,7 +494,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	struct mxs_reg_info *info;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
-	int ret = 0;
 	char *pname;
 	u32 dcdc_clk_freq;
 
@@ -506,7 +505,7 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	}
 
 	info = devm_kmemdup(dev, match->data, sizeof(struct mxs_reg_info),
-			   GFP_KERNEL);
+			    GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
@@ -531,7 +530,8 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 
 	rdev = devm_regulator_register(dev, &info->desc, &config);
 	if (IS_ERR(rdev)) {
-		ret = PTR_ERR(rdev);
+		int ret = PTR_ERR(rdev);
+
 		dev_err(dev, "%s: failed to register regulator(%d)\n",
 			__func__, ret);
 		return ret;
