@@ -33,8 +33,6 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/slab.h>
 
-#define BM_POWER_LINREG_OFFSET_DCDC_MODE	BIT(1)
-
 /* Powered by linear regulator.  DCDC output is gated off and
    the linreg output is equal to the target. */
 #define HW_POWER_LINREG_DCDC_OFF		1
@@ -85,6 +83,8 @@
 
 #define BM_POWER_5VCTRL_ILIMIT_EQ_ZERO	BIT(2)
 #define BM_POWER_5VCTRL_ENABLE_DCDC	BIT(0)
+
+#define BM_POWER_LINREG_OFFSET_DCDC_MODE	BIT(1)
 
 #define SHIFT_FREQSEL			4
 
