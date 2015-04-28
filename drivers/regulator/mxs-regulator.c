@@ -223,8 +223,14 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 {
+	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
 	u32 val;
 	int ret;
+ 
+	if (dcdc->desc.id != MXS_DCDC) {
+		dev_warn(&reg->dev, "Setting switching freq is not supported\n");
+		return -EINVAL;
+	}
 
 	ret = regmap_read(reg->regmap, HW_POWER_MISC, &val);
 	if (ret)
@@ -505,11 +511,9 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	if (info->desc.id == MXS_DCDC) {
-		pname = "clock-frequency";
-		if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
-			set_dcdc_clk_freq(rdev, dcdc_clk_freq / 1000);
-	}
+	if (!of_property_read_u32(dev->of_node, "clock-frequency",
+				  &dcdc_clk_freq))
+		set_dcdc_clk_freq(rdev, dcdc_clk_freq / 1000);
 
 	platform_set_drvdata(pdev, rdev);
 
