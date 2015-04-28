@@ -221,38 +221,6 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
-int get_dcdc_clk_freq(struct regulator_dev *reg)
-{
-	int ret;
-	u32 val;
-
-	ret = regmap_read(reg->regmap, HW_POWER_MISC, &val);
-	if (ret)
-		return ret;
-
-	/* XTAL source */
-	if ((val & HW_POWER_MISC_SEL_PLLCLK) == 0)
-		return 24000;
-
-	/* PLL source */
-	switch ((val & BM_POWER_MISC_FREQSEL) >> SHIFT_FREQSEL) {
-	case HW_POWER_MISC_FREQSEL_20000_KHZ:
-		ret = 20000;
-		break;
-	case HW_POWER_MISC_FREQSEL_24000_KHZ:
-		ret = 24000;
-		break;
-	case HW_POWER_MISC_FREQSEL_19200_KHZ:
-		ret = 19200;
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-
-	return ret;
-}
-
 int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 {
 	u32 val;
@@ -541,9 +509,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		pname = "clock-frequency";
 		if (!of_property_read_u32(dev->of_node, pname, &dcdc_clk_freq))
 			set_dcdc_clk_freq(rdev, dcdc_clk_freq / 1000);
-
-		dcdc_clk_freq = get_dcdc_clk_freq(rdev);
-		dev_info(dev, "DCDC clock freq: %d kHz\n", dcdc_clk_freq);
 	}
 
 	platform_set_drvdata(pdev, rdev);
