@@ -221,12 +221,12 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
-int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
+int mxs_set_dcdc_freq(struct regulator_dev *reg, u32 hz)
 {
 	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
 	u32 val;
 	int ret;
- 
+
 	if (dcdc->desc.id != MXS_DCDC) {
 		dev_warn(&reg->dev, "Setting switching freq is not supported\n");
 		return -EINVAL;
@@ -239,20 +239,24 @@ int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 	val &= ~BM_POWER_MISC_FREQSEL;
 	val &= ~HW_POWER_MISC_SEL_PLLCLK;
 
-	/* Accept only values recommend by Freescale */
-	switch (khz) {
-	case 19200:
+	/*
+	 * Select the PLL/PFD based frequency that the DC-DC converter uses.
+	 * The actual switching frequency driving the power inductor is
+	 * DCDC_CLK/16. Accept only values recommend by Freescale.
+	 */
+	switch (hz) {
+	case 1200000:
 		val |= HW_POWER_MISC_FREQSEL_19200_KHZ << SHIFT_FREQSEL;
 		break;
-	case 20000:
+	case 1250000:
 		val |= HW_POWER_MISC_FREQSEL_20000_KHZ << SHIFT_FREQSEL;
 		break;
-	case 24000:
+	case 1500000:
 		val |= HW_POWER_MISC_FREQSEL_24000_KHZ << SHIFT_FREQSEL;
 		break;
 	default:
-		dev_warn(&reg->dev, "DCDC clock freq: %d kHz not supported\n",
-			 khz);
+		dev_warn(&reg->dev, "Switching freq: %u Hz not supported\n",
+			 hz);
 		return -EINVAL;
 	}
 
@@ -261,7 +265,7 @@ int set_dcdc_clk_freq(struct regulator_dev *reg, int khz)
 	if (ret)
 		return ret;
 
-	/* then set PLL as clk for DC-DC converter */
+	/* then set PLL as clock for DC-DC converter */
 	val |= HW_POWER_MISC_SEL_PLLCLK;
 
 	return regmap_write(reg->regmap, HW_POWER_MISC, val);
@@ -468,8 +472,7 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	struct mxs_reg_info *info;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
-	char *pname;
-	u32 dcdc_clk_freq;
+	u32 switch_freq;
 
 	match = of_match_device(of_mxs_regulator_match, dev);
 	if (!match) {
@@ -511,9 +514,9 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	if (!of_property_read_u32(dev->of_node, "clock-frequency",
-				  &dcdc_clk_freq))
-		set_dcdc_clk_freq(rdev, dcdc_clk_freq / 1000);
+	if (!of_property_read_u32(dev->of_node, "switching-frequency",
+				  &switch_freq))
+		mxs_set_dcdc_freq(rdev, switch_freq);
 
 	platform_set_drvdata(pdev, rdev);
 
