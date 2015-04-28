@@ -221,7 +221,7 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
-int mxs_set_dcdc_freq(struct regulator_dev *reg, u32 hz)
+static int mxs_set_dcdc_freq(struct regulator_dev *reg, u32 hz)
 {
 	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
 	u32 val;
