@@ -110,8 +110,6 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (IS_ERR(data->ac))
 		return PTR_ERR(data->ac);
 
-	platform_set_drvdata(pdev, data);
-
 	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL_OFFSET;
 
 	/* Make sure the current limit of the linregs are disabled. */

@@ -519,8 +519,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 				  &switch_freq))
 		mxs_set_dcdc_freq(rdev, switch_freq);
 
-	platform_set_drvdata(pdev, rdev);
-
 	return 0;
 }
 
