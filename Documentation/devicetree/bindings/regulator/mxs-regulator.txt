@@ -1,6 +1,6 @@
-Regulators for Freescale i.MX23/i.MX28
+Regulators on Freescale i.MX23/i.MX28
 
-Linear regulator daisy chain:
+On-chip linear regulator daisy chain:
 
 +------------+     VDD5V  +---------+  VDDIO
 | DC-DC      |   +--------> LINREG  +--------->+
