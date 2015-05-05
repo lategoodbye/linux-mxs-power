@@ -104,17 +104,17 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (IS_ERR(data->base_addr))
 		return PTR_ERR(data->base_addr);
 
-	psy_cfg.drv_data = data;
-
-	data->ac = devm_power_supply_register(dev, &ac_desc, &psy_cfg);
-	if (IS_ERR(data->ac))
-		return PTR_ERR(data->ac);
-
 	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL_OFFSET;
 
 	/* Make sure the current limit of the linregs are disabled. */
 	writel(BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT,
 	       v5ctrl_addr + STMP_OFFSET_REG_CLR);
+
+	psy_cfg.drv_data = data;
+
+	data->ac = devm_power_supply_register(dev, &ac_desc, &psy_cfg);
+	if (IS_ERR(data->ac))
+		return PTR_ERR(data->ac);
 
 	return of_platform_populate(np, NULL, NULL, dev);
 }
