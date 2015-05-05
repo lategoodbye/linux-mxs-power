@@ -1,9 +1,8 @@
 Power subsystem for Freescale i.MX23/i.MX28
 
 Required properties:
-- compatible:
-  - "fsl,imx23-power" for i.MX23
-  - "fsl,imx28-power" for i.MX28
+- compatible: Should be "fsl,<soc>-power". The supported SoCs include
+  imx23 and imx28.
 - reg: Address and length of the register set for the power subsystem.
 
 Example for i.MX28:
