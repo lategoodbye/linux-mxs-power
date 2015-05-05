@@ -27,18 +27,11 @@ On-chip linear regulator daisy chain:
                                                v
 
 Required properties:
-For imx23 regulators
-- compatible:
-  - "fsl,imx23-dcdc" for DC-DC converter
-  - "fsl,imx23-vddd" for VDDD linear regulator
-  - "fsl,imx23-vdda" for VDDA linear regulator
-  - "fsl,imx23-vddio" for VDDIO linear regulator
-For imx28 regulators
-- compatible:
-  - "fsl,imx28-dcdc" for DC-DC converter
-  - "fsl,imx28-vddd" for VDDD linear regulator
-  - "fsl,imx28-vdda" for VDDA linear regulator
-  - "fsl,imx28-vddio" for VDDIO linear regulator
+- compatible (imx23 and imx28 supported):
+  - "fsl,<soc>-dcdc" for DC-DC converter
+  - "fsl,<soc>-vddd" for VDDD linear regulator
+  - "fsl,<soc>-vdda" for VDDA linear regulator
+  - "fsl,<soc>-vddio" for VDDIO linear regulator
 
 Optional properties:
 - switching-frequency: switching frequency for the DC-DC converter in Hz.
