@@ -502,6 +502,10 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	config.driver_data = info;
 	config.of_node = dev->of_node;
 
+	if (!of_property_read_u32(dev->of_node, "switching-frequency",
+				  &switch_freq))
+		mxs_set_dcdc_freq(rdev, switch_freq);
+
 	rdev = devm_regulator_register(dev, &info->desc, &config);
 	if (IS_ERR(rdev)) {
 		int ret = PTR_ERR(rdev);
@@ -510,10 +514,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 			__func__, ret);
 		return ret;
 	}
-
-	if (!of_property_read_u32(dev->of_node, "switching-frequency",
-				  &switch_freq))
-		mxs_set_dcdc_freq(rdev, switch_freq);
 
 	return 0;
 }
