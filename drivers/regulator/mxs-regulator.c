@@ -488,10 +488,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	initdata = of_get_regulator_init_data(dev, dev->of_node, &info->desc);
-	if (!initdata) {
-		dev_err(dev, "missing regulator init data\n");
-		return -EINVAL;
-	}
 
 	parent_np = of_get_parent(dev->of_node);
 	if (!parent_np)
