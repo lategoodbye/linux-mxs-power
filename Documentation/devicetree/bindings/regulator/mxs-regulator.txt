@@ -1,6 +1,31 @@
 Regulators on Freescale i.MX23/i.MX28
 
-On-chip linear regulator daisy chain:
+i.MX23 linear regulator daisy chain:
+
++------------+     VDD5V  +---------+  VDDIO
+| DC-DC      |   +--------> LINREG  +--------->+
+|            |            | VDDIO   |          |
+|            |            +---------+          |
+| DCDC_VDDIO +->-+-----------------------------+
+|            |   |
+|            |   | VDDIO  +---------+  VDDMEM
+|            |   +--------> LINREG  +--------->
+|            |   |        | VDDMEM  |
+|            |   |        +---------+
+|            |   | VDDIO  +---------+  VDDA
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDA    |          |
+|            |            +---------+          |
+| DCDC_VDDA  +->-+-----------------------------+
+|            |   | VDDA   +---------+  VDDD
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDD    |          |
+|            |            +---------+          |
+| DCDC_VDDD  +->-------------------------------+
++------------+                                 |
+                                               v
+
+i.MX28 linear regulator daisy chain:
 
 +------------+     VDD5V  +---------+  VDDIO
 | DC-DC      |   +--------> LINREG  +--------->+
@@ -14,9 +39,9 @@ On-chip linear regulator daisy chain:
 |            |            +---------+          |
 | DCDC_VDDA  +->-+-----------------------------+
 |            |   |
-|            |   | VDDA   +---------+  VDD1P5
+|            |   | VDDA   +---------+  VDDMEM
 |            |   +--------> LINREG  +--------->
-|            |   |        | VDD1P5  |
+|            |   |        | VDDMEM  |
 |            |   |        +---------+
 |            |   | VDDA   +---------+  VDDD
 |            |   +--------> LINREG  +--------->+
