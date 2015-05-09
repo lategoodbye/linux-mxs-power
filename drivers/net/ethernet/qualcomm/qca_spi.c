@@ -913,6 +913,8 @@ qca_spi_probe(struct spi_device *spi_device)
 	qca->spi_dev = spi_device;
 	qca->legacy_mode = legacy_mode;
 
+	spi_set_drvdata(spi_device, qcaspi_devs);
+
 	mac = of_get_mac_address(spi_device->dev.of_node);
 
 	if (mac)
@@ -944,8 +946,6 @@ qca_spi_probe(struct spi_device *spi_device)
 		free_netdev(qcaspi_devs);
 		return -EFAULT;
 	}
-
-	spi_set_drvdata(spi_device, qcaspi_devs);
 
 	qcaspi_init_device_debugfs(qca);
 
