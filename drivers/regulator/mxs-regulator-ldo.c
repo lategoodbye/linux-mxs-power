@@ -1,5 +1,5 @@
 /*
- * Freescale MXS on-chip regulators
+ * Freescale MXS on-chip LDO driver
  *
  * Embedded Alley Solutions, Inc <source@embeddedalley.com>
  *
@@ -86,17 +86,6 @@
 #define BM_POWER_5VCTRL_ENABLE_DCDC	BIT(0)
 
 #define BM_POWER_LINREG_OFFSET_DCDC_MODE	BIT(1)
-
-#define SHIFT_FREQSEL			4
-
-#define BM_POWER_MISC_FREQSEL		(7 << SHIFT_FREQSEL)
-
-/* Recommended DC-DC clock source values */
-#define HW_POWER_MISC_FREQSEL_20000_KHZ	1
-#define HW_POWER_MISC_FREQSEL_24000_KHZ	2
-#define HW_POWER_MISC_FREQSEL_19200_KHZ	3
-
-#define HW_POWER_MISC_SEL_PLLCLK	BIT(0)
 
 /* Regulator IDs */
 #define MXS_DCDC	1
@@ -222,56 +211,6 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
-static int mxs_set_dcdc_freq(struct regulator_dev *reg, u32 hz)
-{
-	struct mxs_reg_info *dcdc = rdev_get_drvdata(reg);
-	u32 val;
-	int ret;
-
-	if (dcdc->desc.id != MXS_DCDC) {
-		dev_warn(&reg->dev, "Setting switching freq is not supported\n");
-		return -EINVAL;
-	}
-
-	ret = regmap_read(reg->regmap, HW_POWER_MISC, &val);
-	if (ret)
-		return ret;
-
-	val &= ~BM_POWER_MISC_FREQSEL;
-	val &= ~HW_POWER_MISC_SEL_PLLCLK;
-
-	/*
-	 * Select the PLL/PFD based frequency that the DC-DC converter uses.
-	 * The actual switching frequency driving the power inductor is
-	 * DCDC_CLK/16. Accept only values recommend by Freescale.
-	 */
-	switch (hz) {
-	case 1200000:
-		val |= HW_POWER_MISC_FREQSEL_19200_KHZ << SHIFT_FREQSEL;
-		break;
-	case 1250000:
-		val |= HW_POWER_MISC_FREQSEL_20000_KHZ << SHIFT_FREQSEL;
-		break;
-	case 1500000:
-		val |= HW_POWER_MISC_FREQSEL_24000_KHZ << SHIFT_FREQSEL;
-		break;
-	default:
-		dev_warn(&reg->dev, "Switching freq: %u Hz not supported\n",
-			 hz);
-		return -EINVAL;
-	}
-
-	/* First program FREQSEL */
-	ret = regmap_write(reg->regmap, HW_POWER_MISC, val);
-	if (ret)
-		return ret;
-
-	/* then set PLL as clock for DC-DC converter */
-	val |= HW_POWER_MISC_SEL_PLLCLK;
-
-	return regmap_write(reg->regmap, HW_POWER_MISC, val);
-}
-
 static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 {
 	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
@@ -341,28 +280,12 @@ static int mxs_ldo_is_enabled(struct regulator_dev *reg)
 	return 0;
 }
 
-static struct regulator_ops mxs_dcdc_ops = {
-	.is_enabled		= regulator_is_enabled_regmap,
-};
-
 static struct regulator_ops mxs_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.is_enabled		= mxs_ldo_is_enabled,
-};
-
-static const struct mxs_reg_info mxs_info_dcdc = {
-	.desc = {
-		.name = "dcdc",
-		.id = MXS_DCDC,
-		.type = REGULATOR_VOLTAGE,
-		.owner = THIS_MODULE,
-		.ops = &mxs_dcdc_ops,
-		.enable_reg = HW_POWER_STS,
-		.enable_mask = (1 << 0),
-	},
 };
 
 static const struct mxs_reg_info imx23_info_vddio = {
@@ -451,9 +374,7 @@ static const struct mxs_reg_info mxs_info_vddd = {
 	.get_power_source = get_vdda_vddd_power_source,
 };
 
-static const struct of_device_id of_mxs_regulator_match[] = {
-	{ .compatible = "fsl,imx23-dcdc",  .data = &mxs_info_dcdc },
-	{ .compatible = "fsl,imx28-dcdc",  .data = &mxs_info_dcdc },
+static const struct of_device_id of_mxs_regulator_ldo_match[] = {
 	{ .compatible = "fsl,imx23-vddio", .data = &imx23_info_vddio },
 	{ .compatible = "fsl,imx23-vdda",  .data = &mxs_info_vdda },
 	{ .compatible = "fsl,imx23-vddd",  .data = &mxs_info_vddd },
@@ -462,9 +383,9 @@ static const struct of_device_id of_mxs_regulator_match[] = {
 	{ .compatible = "fsl,imx28-vddd",  .data = &mxs_info_vddd },
 	{ /* end */ }
 };
-MODULE_DEVICE_TABLE(of, of_mxs_regulator_match);
+MODULE_DEVICE_TABLE(of, of_mxs_regulator_ldo_match);
 
-static int mxs_regulator_probe(struct platform_device *pdev)
+static int mxs_regulator_ldo_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *match;
@@ -473,9 +394,8 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	struct mxs_reg_info *info;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
-	u32 switch_freq;
 
-	match = of_match_device(of_mxs_regulator_match, dev);
+	match = of_match_device(of_mxs_regulator_ldo_match, dev);
 	if (!match) {
 		/* We do not expect this to happen */
 		dev_err(dev, "%s: Unable to match device\n", __func__);
@@ -502,10 +422,6 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	config.driver_data = info;
 	config.of_node = dev->of_node;
 
-	if (!of_property_read_u32(dev->of_node, "switching-frequency",
-				  &switch_freq))
-		mxs_set_dcdc_freq(rdev, switch_freq);
-
 	rdev = devm_regulator_register(dev, &info->desc, &config);
 	if (IS_ERR(rdev)) {
 		int ret = PTR_ERR(rdev);
@@ -518,17 +434,17 @@ static int mxs_regulator_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver mxs_regulator_driver = {
+static struct platform_driver mxs_regulator_ldo_driver = {
 	.driver = {
-		.name	= "mxs_regulator",
-		.of_match_table = of_mxs_regulator_match,
+		.name	= "mxs_regulator_ldo",
+		.of_match_table = of_mxs_regulator_ldo_match,
 	},
-	.probe	= mxs_regulator_probe,
+	.probe	= mxs_regulator_ldo_probe,
 };
 
-module_platform_driver(mxs_regulator_driver);
+module_platform_driver(mxs_regulator_ldo_driver);
 
 MODULE_AUTHOR("Stefan Wahren <stefan.wahren@i2se.com>");
-MODULE_DESCRIPTION("Freescale MXS regulators");
+MODULE_DESCRIPTION("Freescale MXS on-chip LDO driver");
 MODULE_LICENSE("GPL v2");
-MODULE_ALIAS("platform:mxs_regulator");
+MODULE_ALIAS("platform:mxs_regulator_ldo");
