@@ -24,14 +24,13 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
+#include <linux/power/mxs_power.h>
 #include <linux/stmp_device.h>
 #include <linux/types.h>
 
 #define BM_POWER_CTRL_POLARITY_VBUSVALID	BIT(5)
 #define BM_POWER_CTRL_VBUSVALID_IRQ		BIT(4)
 #define BM_POWER_CTRL_ENIRQ_VBUS_VALID		BIT(3)
-
-#define HW_POWER_5VCTRL_OFFSET	0x10
 
 #define BM_POWER_5VCTRL_VBUSVALID_THRESH	(7 << 8)
 #define BM_POWER_5VCTRL_PWDN_5VBRNOUT		BIT(7)
@@ -104,7 +103,7 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (IS_ERR(data->base_addr))
 		return PTR_ERR(data->base_addr);
 
-	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL_OFFSET;
+	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL;
 
 	/* Make sure the current limit of the linregs are disabled. */
 	writel(BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT,

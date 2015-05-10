@@ -28,6 +28,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/power/mxs_power.h>
 #include <linux/regmap.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
@@ -70,14 +71,6 @@
 
 /* Unknown configuration.  This is an error. */
 #define HW_POWER_UNKNOWN_SOURCE			8
-
-/* TODO: Move power register offsets into header file */
-#define HW_POWER_5VCTRL		0x00000010
-#define HW_POWER_VDDDCTRL	0x00000040
-#define HW_POWER_VDDACTRL	0x00000050
-#define HW_POWER_VDDIOCTRL	0x00000060
-#define HW_POWER_MISC		0x00000090
-#define HW_POWER_STS		0x000000c0
 
 #define BM_POWER_STS_VBUSVALID0_STATUS	BIT(15)
 #define BM_POWER_STS_DC_OK		BIT(9)
