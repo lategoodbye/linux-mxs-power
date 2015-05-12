@@ -16,6 +16,9 @@
 #include <linux/suspend.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/machine.h>
+#include <linux/regulator/consumer.h>
+#include <linux/regulator/userspace-consumer.h>
 #include "pm.h"
 
 static int mxs_suspend_enter(suspend_state_t state)
@@ -40,8 +43,27 @@ static struct platform_device mxs_cpufreq_pdev = {
 	.name = "cpufreq-dt",
 };
 
+static struct regulator_bulk_data dcdc_bulk_data = {
+	.supply = "dcdc",
+};
+
+static struct regulator_userspace_consumer_data userspace_consumer_data = {
+	.name = "user",
+	.num_supplies = 1,
+	.supplies = &dcdc_bulk_data,
+};
+
+static struct platform_device userspace_consumer_device = {
+	.name = "reg-userspace-consumer",
+	.id = 0,
+	.dev = {
+		.platform_data = &userspace_consumer_data,
+	},
+};
+
 void __init mxs_pm_init(void)
 {
 	suspend_set_ops(&mxs_suspend_ops);
 	platform_device_register(&mxs_cpufreq_pdev);
+	platform_device_register(&userspace_consumer_device);
 }
