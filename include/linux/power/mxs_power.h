@@ -15,11 +15,13 @@
 #define __POWER_MXS_POWER_H
 
 /* MXS power register address offset */
-#define HW_POWER_5VCTRL		0x10
-#define HW_POWER_VDDDCTRL	0x40
-#define HW_POWER_VDDACTRL	0x50
-#define HW_POWER_VDDIOCTRL	0x60
-#define HW_POWER_MISC		0x90
-#define HW_POWER_STS		0xc0
+#define HW_POWER_CTRL		0x0000
+#define HW_POWER_5VCTRL		0x0010
+#define HW_POWER_VDDDCTRL	0x0040
+#define HW_POWER_VDDACTRL	0x0050
+#define HW_POWER_VDDIOCTRL	0x0060
+#define HW_POWER_MISC		0x0090
+#define HW_POWER_STS		0x00c0
+#define HW_POWER_RESET		0x0100
 
 #endif
