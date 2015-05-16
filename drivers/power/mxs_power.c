@@ -19,6 +19,7 @@
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
@@ -40,7 +41,7 @@
 #define HW_POWER_5VCTRL_VBUSVALID_THRESH_4_40V	(5 << 8)
 
 struct mxs_power_data {
-	void __iomem *base_addr;
+	struct regmap *regmap;
 	struct power_supply *ac;
 };
 
@@ -84,10 +85,8 @@ static int mxs_power_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	struct resource *res;
 	struct mxs_power_data *data;
 	struct power_supply_config psy_cfg = {};
-	void __iomem *v5ctrl_addr;
 
 	if (!np) {
 		dev_err(dev, "missing device tree\n");
@@ -98,16 +97,13 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (!data)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	data->base_addr = devm_ioremap_resource(dev, res);
-	if (IS_ERR(data->base_addr))
-		return PTR_ERR(data->base_addr);
-
-	v5ctrl_addr = data->base_addr + HW_POWER_5VCTRL;
+	data->regmap = syscon_node_to_regmap(np);
+	if (IS_ERR(data->regmap))
+		return PTR_ERR(data->regmap);
 
 	/* Make sure the current limit of the linregs are disabled. */
-	writel(BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT,
-	       v5ctrl_addr + STMP_OFFSET_REG_CLR);
+	mxs_regmap_clr(data->regmap, HW_POWER_5VCTRL,
+		       BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT);
 
 	psy_cfg.drv_data = data;
 
