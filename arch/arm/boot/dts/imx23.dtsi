@@ -419,14 +419,7 @@
 				reg = <0x80044000 0x2000>;
 				interrupts = <3>;
 
-				dcdc: regulator@1 {
-					compatible = "fsl,imx23-dcdc";
-					regulator-name = "dcdc";
-					regulator-boot-on;
-					regulator-always-on;
-				};
-
-				reg_vddd: regulator@2 {
+				reg_vddd: regulator@1 {
 					compatible = "fsl,imx23-vddd";
 					regulator-name = "vddd";
 					regulator-min-microvolt = <1350000>;
@@ -436,7 +429,7 @@
 					regulator-always-on;
 				};
 
-				reg_vdda: regulator@3 {
+				reg_vdda: regulator@2 {
 					compatible = "fsl,imx23-vdda";
 					regulator-name = "vdda";
 					regulator-min-microvolt = <1725000>;
@@ -446,12 +439,19 @@
 					regulator-always-on;
 				};
 
-				reg_vddio: regulator@4 {
+				reg_vddio: regulator@3 {
 					compatible = "fsl,imx23-vddio";
 					regulator-name = "vddio";
 					regulator-min-microvolt = <3000000>;
 					regulator-max-microvolt = <3575000>;
 					regulator-microvolt-offset = <80000>;
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
+				dcdc: regulator@4 {
+					compatible = "fsl,imx23-dcdc";
+					regulator-name = "dcdc";
 					regulator-boot-on;
 					regulator-always-on;
 				};
