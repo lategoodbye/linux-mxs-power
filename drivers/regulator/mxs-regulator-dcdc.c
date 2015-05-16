@@ -50,7 +50,7 @@
 #define MXS_VDDA	3
 #define MXS_VDDD	4
 
-struct mxs_reg_info {
+struct mxs_dcdc_info {
 	/* regulator descriptor */
 	struct regulator_desc desc;
 
@@ -106,7 +106,7 @@ static struct regulator_ops mxs_dcdc_ops = {
 	.is_enabled		= regulator_is_enabled_regmap,
 };
 
-static const struct mxs_reg_info mxs_info_dcdc = {
+static const struct mxs_dcdc_info mxs_dcdc = {
 	.desc = {
 		.name = "dcdc",
 		.id = MXS_DCDC,
@@ -119,8 +119,8 @@ static const struct mxs_reg_info mxs_info_dcdc = {
 };
 
 static const struct of_device_id of_mxs_regulator_dcdc_match[] = {
-	{ .compatible = "fsl,imx23-dcdc",  .data = &mxs_info_dcdc },
-	{ .compatible = "fsl,imx28-dcdc",  .data = &mxs_info_dcdc },
+	{ .compatible = "fsl,imx23-dcdc",  .data = &mxs_dcdc },
+	{ .compatible = "fsl,imx28-dcdc",  .data = &mxs_dcdc },
 	{ /* end */ }
 };
 MODULE_DEVICE_TABLE(of, of_mxs_regulator_dcdc_match);
@@ -131,7 +131,7 @@ static int mxs_regulator_dcdc_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	struct device_node *parent_np;
 	struct regulator_dev *rdev = NULL;
-	struct mxs_reg_info *info;
+	struct mxs_dcdc_info *info;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
 	u32 switch_freq;
@@ -143,7 +143,7 @@ static int mxs_regulator_dcdc_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	info = devm_kmemdup(dev, match->data, sizeof(struct mxs_reg_info),
+	info = devm_kmemdup(dev, match->data, sizeof(struct mxs_dcdc_info),
 			    GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;

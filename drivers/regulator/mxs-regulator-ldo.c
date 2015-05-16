@@ -86,7 +86,7 @@
 #define MXS_VDDA	3
 #define MXS_VDDD	4
 
-struct mxs_reg_info {
+struct mxs_ldo_info {
 	/* regulator descriptor */
 	struct regulator_desc desc;
 
@@ -104,14 +104,14 @@ struct mxs_reg_info {
 	u8 (*get_power_source)(struct regulator_dev *);
 };
 
-static inline u8 get_linreg_offset(struct mxs_reg_info *ldo, u32 regs)
+static inline u8 get_linreg_offset(struct mxs_ldo_info *ldo, u32 regs)
 {
 	return (regs & ldo->linreg_offset_mask) >> ldo->linreg_offset_shift;
 }
 
 static u8 get_vddio_power_source(struct regulator_dev *reg)
 {
-	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
+	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 	u32 v5ctrl, status, base;
 	u8 offset;
 
@@ -154,7 +154,7 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 
 static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 {
-	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
+	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
 	u32 v5ctrl, status, base;
 	u8 offset;
@@ -206,7 +206,7 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 {
-	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
+	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
 	u32 status = 0;
 	int timeout;
@@ -259,7 +259,7 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 
 static int mxs_ldo_is_enabled(struct regulator_dev *reg)
 {
-	struct mxs_reg_info *ldo = rdev_get_drvdata(reg);
+	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 
 	if (ldo->get_power_source) {
 		switch (ldo->get_power_source(reg)) {
@@ -281,7 +281,7 @@ static struct regulator_ops mxs_ldo_ops = {
 	.is_enabled		= mxs_ldo_is_enabled,
 };
 
-static const struct mxs_reg_info imx23_info_vddio = {
+static const struct mxs_ldo_info imx23_info_vddio = {
 	.desc = {
 		.name = "vddio",
 		.id = MXS_VDDIO,
@@ -302,7 +302,7 @@ static const struct mxs_reg_info imx23_info_vddio = {
 	.get_power_source = get_vddio_power_source,
 };
 
-static const struct mxs_reg_info imx28_info_vddio = {
+static const struct mxs_ldo_info imx28_info_vddio = {
 	.desc = {
 		.name = "vddio",
 		.id = MXS_VDDIO,
@@ -323,7 +323,7 @@ static const struct mxs_reg_info imx28_info_vddio = {
 	.get_power_source = get_vddio_power_source,
 };
 
-static const struct mxs_reg_info mxs_info_vdda = {
+static const struct mxs_ldo_info mxs_info_vdda = {
 	.desc = {
 		.name = "vdda",
 		.id = MXS_VDDA,
@@ -345,7 +345,7 @@ static const struct mxs_reg_info mxs_info_vdda = {
 	.get_power_source = get_vdda_vddd_power_source,
 };
 
-static const struct mxs_reg_info mxs_info_vddd = {
+static const struct mxs_ldo_info mxs_info_vddd = {
 	.desc = {
 		.name = "vddd",
 		.id = MXS_VDDD,
@@ -384,7 +384,7 @@ static int mxs_regulator_ldo_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	struct device_node *parent_np;
 	struct regulator_dev *rdev = NULL;
-	struct mxs_reg_info *info;
+	struct mxs_ldo_info *info;
 	struct regulator_init_data *initdata;
 	struct regulator_config config = { };
 
@@ -395,7 +395,7 @@ static int mxs_regulator_ldo_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	info = devm_kmemdup(dev, match->data, sizeof(struct mxs_reg_info),
+	info = devm_kmemdup(dev, match->data, sizeof(struct mxs_ldo_info),
 			    GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
