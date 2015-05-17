@@ -40,11 +40,6 @@
 
 #define HW_POWER_5VCTRL_VBUSVALID_THRESH_4_40V	(5 << 8)
 
-struct mxs_power_data {
-	struct regmap *regmap;
-	struct power_supply *ac;
-};
-
 static enum power_supply_property mxs_power_ac_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 };
@@ -106,12 +101,24 @@ static int mxs_power_probe(struct platform_device *pdev)
 		       BM_POWER_5VCTRL_ENABLE_LINREG_ILIMIT);
 
 	psy_cfg.drv_data = data;
+	platform_set_drvdata(pdev, data);
 
 	data->ac = devm_power_supply_register(dev, &ac_desc, &psy_cfg);
 	if (IS_ERR(data->ac))
 		return PTR_ERR(data->ac);
 
+	mxs_power_init_device_debugfs(data);
+
 	return of_platform_populate(np, NULL, NULL, dev);
+}
+
+static int mxs_power_remove(struct platform_device *pdev)
+{
+	struct mxs_power_data *data = platform_get_drvdata(pdev);
+
+	mxs_power_remove_device_debugfs(data);
+
+	return 0;
 }
 
 static struct platform_driver mxs_power_driver = {
@@ -120,6 +127,7 @@ static struct platform_driver mxs_power_driver = {
 		.of_match_table = of_mxs_power_match,
 	},
 	.probe	= mxs_power_probe,
+	.remove = mxs_power_remove,
 };
 
 module_platform_driver(mxs_power_driver);

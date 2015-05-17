@@ -14,6 +14,10 @@
 #ifndef __POWER_MXS_POWER_H
 #define __POWER_MXS_POWER_H
 
+#include <linux/power_supply.h>
+#include <linux/regmap.h>
+#include <linux/stmp_device.h>
+
 /* MXS power register address offset */
 #define HW_POWER_CTRL		0x0000
 #define HW_POWER_5VCTRL		0x0010
@@ -23,5 +27,28 @@
 #define HW_POWER_MISC		0x0090
 #define HW_POWER_STS		0x00c0
 #define HW_POWER_RESET		0x0100
+
+static inline int mxs_regmap_set(struct regmap *map, unsigned int reg, unsigned int val)
+{
+	return regmap_write(map, reg + STMP_OFFSET_REG_SET, val);
+}
+
+static inline int mxs_regmap_clr(struct regmap *map, unsigned int reg, unsigned int val)
+{
+	return regmap_write(map, reg + STMP_OFFSET_REG_CLR, val);
+}
+
+struct mxs_power_data {
+	struct power_supply *ac;
+	struct regmap *regmap;
+
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *device_root;
+#endif
+};
+
+void mxs_power_init_device_debugfs(struct mxs_power_data *data);
+
+void mxs_power_remove_device_debugfs(struct mxs_power_data *data);
 
 #endif
