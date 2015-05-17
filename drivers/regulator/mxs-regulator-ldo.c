@@ -100,6 +100,12 @@ struct mxs_ldo_info {
 	unsigned int linreg_offset_mask;
 	u8 linreg_offset_shift;
 
+	/* brownout interrupt status */
+	unsigned int irq_bo;
+
+	/* brownout enable interrupt */
+	unsigned int enirq_bo;
+
 	/* function which determine power source */
 	u8 (*get_power_source)(struct regulator_dev *);
 };
@@ -209,13 +215,22 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
 	u32 status = 0;
+	u32 ctrl;
 	int timeout;
 	int ret;
+
+	ret = regmap_read(reg->regmap, HW_POWER_CTRL, &ctrl);
+	if (ret)
+		return ret;
+
+	ret = mxs_regmap_clr(reg->regmap, HW_POWER_CTRL, ldo->enirq_bo);
+	if (ret)
+		return ret;
 
 	ret = regmap_update_bits(reg->regmap, desc->vsel_reg, desc->vsel_mask,
 				 sel);
 	if (ret)
-		return ret;
+		goto restore_bo;
 
 	if (ldo->get_power_source) {
 		switch (ldo->get_power_source(reg)) {
@@ -228,7 +243,8 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 			 * for stabilization.
 			 */
 			usleep_range(1000, 2000);
-			return 0;
+			ret = 0;
+			goto restore_bo;
 		}
 	}
 
@@ -243,18 +259,27 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 
 		/* DC-DC converter control loop has stabilized */
 		if (status & BM_POWER_STS_DC_OK)
-			return 0;
+			goto restore_bo;
 
 		udelay(1);
 	}
 
-	if (!ret)
+	if (!ret) {
+		ret = -ETIMEDOUT;
 		dev_warn_ratelimited(&reg->dev, "%s: timeout status=0x%08x\n",
 				     __func__, status);
+	}
 
 	msleep(20);
 
-	return -ETIMEDOUT;
+restore_bo:
+
+	mxs_regmap_clr(reg->regmap, HW_POWER_CTRL, ldo->irq_bo);
+
+	if (ctrl & ldo->enirq_bo)
+		mxs_regmap_set(reg->regmap, HW_POWER_CTRL, ldo->enirq_bo);
+
+	return ret;
 }
 
 static int mxs_ldo_is_enabled(struct regulator_dev *reg)
@@ -299,6 +324,8 @@ static const struct mxs_ldo_info imx23_info_vddio = {
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
+	.irq_bo = 1 << 11,
+	.enirq_bo = 1 << 10,
 	.get_power_source = get_vddio_power_source,
 };
 
@@ -320,6 +347,8 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
+	.irq_bo = 1 << 11,
+	.enirq_bo = 1 << 10,
 	.get_power_source = get_vddio_power_source,
 };
 
@@ -342,6 +371,8 @@ static const struct mxs_ldo_info mxs_info_vdda = {
 	.disable_fet_mask = 1 << 16,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
+	.irq_bo = 1 << 9,
+	.enirq_bo = 1 << 8,
 	.get_power_source = get_vdda_vddd_power_source,
 };
 
@@ -364,6 +395,8 @@ static const struct mxs_ldo_info mxs_info_vddd = {
 	.disable_fet_mask = 1 << 20,
 	.linreg_offset_mask = 3 << 16,
 	.linreg_offset_shift = 16,
+	.irq_bo = 1 << 7,
+	.enirq_bo = 1 << 6,
 	.get_power_source = get_vdda_vddd_power_source,
 };
 
