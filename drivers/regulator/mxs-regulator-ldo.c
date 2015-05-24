@@ -86,6 +86,8 @@
 #define MXS_VDDA	3
 #define MXS_VDDD	4
 
+struct mxs_ldo_info;
+
 struct mxs_ldo_info {
 	/* regulator descriptor */
 	struct regulator_desc desc;
@@ -109,7 +111,7 @@ struct mxs_ldo_info {
 	unsigned int enirq_bo;
 
 	/* function which determine power source */
-	u8 (*get_power_source)(struct regulator_dev *);
+	u8 (*get_power_source)(struct mxs_ldo_info *);
 };
 
 static inline u8 get_linreg_offset(struct mxs_ldo_info *ldo, u32 regs)
@@ -117,19 +119,18 @@ static inline u8 get_linreg_offset(struct mxs_ldo_info *ldo, u32 regs)
 	return (regs & ldo->linreg_offset_mask) >> ldo->linreg_offset_shift;
 }
 
-static u8 get_vddio_power_source(struct regulator_dev *reg)
+static u8 get_vddio_power_source(struct mxs_ldo_info *ldo)
 {
-	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 	u32 v5ctrl, status, base;
 	u8 offset;
 
-	if (regmap_read(reg->regmap, HW_POWER_5VCTRL, &v5ctrl))
+	if (regmap_read(ldo->regmap, HW_POWER_5VCTRL, &v5ctrl))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(reg->regmap, HW_POWER_STS, &status))
+	if (regmap_read(ldo->regmap, HW_POWER_STS, &status))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(reg->regmap, ldo->ctrl_reg, &base))
+	if (regmap_read(ldo->regmap, ldo->ctrl_reg, &base))
 		return HW_POWER_UNKNOWN_SOURCE;
 
 	offset = get_linreg_offset(ldo, base);
@@ -160,20 +161,19 @@ static u8 get_vddio_power_source(struct regulator_dev *reg)
 	return HW_POWER_UNKNOWN_SOURCE;
 }
 
-static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
+static u8 get_vdda_vddd_power_source(struct mxs_ldo_info *ldo)
 {
-	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
 	struct regulator_desc *desc = &ldo->desc;
 	u32 v5ctrl, status, base;
 	u8 offset;
 
-	if (regmap_read(reg->regmap, HW_POWER_5VCTRL, &v5ctrl))
+	if (regmap_read(ldo->regmap, HW_POWER_5VCTRL, &v5ctrl))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(reg->regmap, HW_POWER_STS, &status))
+	if (regmap_read(ldo->regmap, HW_POWER_STS, &status))
 		return HW_POWER_UNKNOWN_SOURCE;
 
-	if (regmap_read(reg->regmap, ldo->ctrl_reg, &base))
+	if (regmap_read(ldo->regmap, ldo->ctrl_reg, &base))
 		return HW_POWER_UNKNOWN_SOURCE;
 
 	offset = get_linreg_offset(ldo, base);
@@ -231,7 +231,7 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 		goto restore_bo;
 
 	if (ldo->get_power_source) {
-		switch (ldo->get_power_source(reg)) {
+		switch (ldo->get_power_source(ldo)) {
 		case HW_POWER_LINREG_DCDC_OFF:
 		case HW_POWER_LINREG_DCDC_READY:
 			/*
