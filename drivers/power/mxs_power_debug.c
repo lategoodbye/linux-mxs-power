@@ -166,8 +166,8 @@ mxs_power_sts_mx28_show(struct seq_file *s, void *what)
 	seq_printf(s, "VDDMEM_BO %x\n", (value >> 18) & 1);
 	seq_printf(s, "AVALID0_STATUS %x\n", (value >> 17) & 1);
 	seq_printf(s, "BVALID0_STATUS %x\n", (value >> 16) & 1);
-	seq_printf(s, "SESSEND0_STATUS %x\n", (value >> 15) & 1);
-	seq_printf(s, "VBUSVALID0_STATUS %x\n", (value >> 14) & 1);
+	seq_printf(s, "VBUSVALID0_STATUS %x\n", (value >> 15) & 1);
+	seq_printf(s, "SESSEND0_STATUS %x\n", (value >> 14) & 1);
 	seq_printf(s, "BATT_BO %x\n", (value >> 13) & 1);
 	seq_printf(s, "VDD5V_FAULT %x\n", (value >> 12) & 1);
 	seq_printf(s, "CHRGSTS %x\n", (value >> 11) & 1);
