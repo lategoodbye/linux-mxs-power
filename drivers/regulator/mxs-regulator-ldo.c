@@ -277,28 +277,12 @@ restore_bo:
 	return ret;
 }
 
-static int mxs_ldo_is_enabled(struct regulator_dev *reg)
-{
-	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
-
-	if (ldo->get_power_source) {
-		switch (ldo->get_power_source(reg)) {
-		case HW_POWER_LINREG_DCDC_OFF:
-		case HW_POWER_LINREG_DCDC_READY:
-		case HW_POWER_DCDC_LINREG_ON:
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
 static struct regulator_ops mxs_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
-	.is_enabled		= mxs_ldo_is_enabled,
+	.is_enabled		= regulator_is_enabled_regmap,
 };
 
 static const struct mxs_ldo_info imx23_info_vddio = {
@@ -314,6 +298,9 @@ static const struct mxs_ldo_info imx23_info_vddio = {
 		.vsel_reg = HW_POWER_VDDIOCTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
+		.enable_reg = HW_POWER_5VCTRL,
+		.enable_mask = 1 << 2,
+		.disable_val = 1 << 2,
 	},
 	.ctrl_reg = HW_POWER_VDDIOCTRL,
 	.disable_fet_mask = 1 << 16,
@@ -337,6 +324,9 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 		.vsel_reg = HW_POWER_VDDIOCTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
+		.enable_reg = HW_POWER_5VCTRL,
+		.enable_mask = 1 << 2,
+		.disable_val = 1 << 2,
 	},
 	.ctrl_reg = HW_POWER_VDDIOCTRL,
 	.disable_fet_mask = 1 << 16,
@@ -360,7 +350,9 @@ static const struct mxs_ldo_info mxs_info_vdda = {
 		.vsel_reg = HW_POWER_VDDACTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
-		.enable_mask = (1 << 17),
+		.enable_reg = HW_POWER_VDDACTRL,
+		.enable_mask = 1 << 17,
+		.enable_val = 1 << 17,
 	},
 	.ctrl_reg = HW_POWER_VDDACTRL,
 	.disable_fet_mask = 1 << 16,
@@ -384,7 +376,9 @@ static const struct mxs_ldo_info mxs_info_vddd = {
 		.vsel_reg = HW_POWER_VDDDCTRL,
 		.vsel_mask = 0x1f,
 		.ops = &mxs_ldo_ops,
-		.enable_mask = (1 << 21),
+		.enable_reg = HW_POWER_VDDDCTRL,
+		.enable_mask = 1 << 21,
+		.enable_val = 1 << 21,
 	},
 	.ctrl_reg = HW_POWER_VDDDCTRL,
 	.disable_fet_mask = 1 << 20,
