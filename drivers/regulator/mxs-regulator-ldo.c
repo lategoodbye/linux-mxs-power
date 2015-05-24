@@ -90,6 +90,8 @@ struct mxs_ldo_info {
 	/* regulator descriptor */
 	struct regulator_desc desc;
 
+	struct regmap *regmap;
+
 	/* regulator control register */
 	unsigned int ctrl_reg;
 
@@ -452,6 +454,7 @@ static int mxs_regulator_ldo_probe(struct platform_device *pdev)
 	if (IS_ERR(config.regmap))
 		return PTR_ERR(config.regmap);
 
+	info->regmap = config.regmap;
 	config.dev = dev;
 	config.init_data = initdata;
 	config.driver_data = info;
