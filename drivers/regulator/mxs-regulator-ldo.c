@@ -91,7 +91,7 @@ struct mxs_ldo_info {
 	struct regulator_desc desc;
 
 	/* regulator control register */
-	int ctrl_reg;
+	unsigned int ctrl_reg;
 
 	/* disable DC-DC output */
 	unsigned int disable_fet_mask;
