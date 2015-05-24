@@ -277,12 +277,32 @@ restore_bo:
 	return ret;
 }
 
+static int mxs_ldo_get_status(struct regulator_dev *reg)
+{
+	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
+
+	if (ldo->get_power_source) {
+		switch (ldo->get_power_source(ldo)) {
+		case HW_POWER_LINREG_DCDC_OFF:
+		case HW_POWER_LINREG_DCDC_READY:
+		case HW_POWER_DCDC_LINREG_ON:
+			return REGULATOR_STATUS_ON;
+		case HW_POWER_DCDC_LINREG_OFF:
+		case HW_POWER_DCDC_LINREG_READY:
+			return REGULATOR_STATUS_OFF;
+		}
+	}
+
+	return REGULATOR_STATUS_UNDEFINED;
+}
+
 static struct regulator_ops mxs_ldo_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.is_enabled		= regulator_is_enabled_regmap,
+	.get_status		= mxs_ldo_get_status,
 };
 
 static const struct mxs_ldo_info imx23_info_vddio = {
