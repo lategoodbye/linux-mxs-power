@@ -178,10 +178,6 @@ static u8 get_vdda_vddd_power_source(struct regulator_dev *reg)
 
 	/* DC-DC output is disabled */
 	if (base & ldo->disable_fet_mask) {
-		/* Powered by 5 V supply */
-		if (status & BM_POWER_STS_VBUSVALID0_STATUS)
-			return HW_POWER_EXTERNAL_SOURCE_5V;
-
 		/* Powered by Linreg, DC-DC is off */
 		if (!(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE))
 			return HW_POWER_LINREG_DCDC_OFF;
@@ -236,7 +232,6 @@ static int mxs_ldo_set_voltage_sel(struct regulator_dev *reg, unsigned sel)
 		switch (ldo->get_power_source(reg)) {
 		case HW_POWER_LINREG_DCDC_OFF:
 		case HW_POWER_LINREG_DCDC_READY:
-		case HW_POWER_EXTERNAL_SOURCE_5V:
 			/*
 			 * Since the DC-DC converter is off we can't
 			 * trigger on DC_OK. So wait at least 1 ms
