@@ -324,13 +324,20 @@ static int mxs_ldo_get_status(struct regulator_dev *reg)
 	return REGULATOR_STATUS_UNDEFINED;
 }
 
-static struct regulator_ops mxs_ldo_ops = {
+static struct regulator_ops mxs_vddio_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.is_enabled		= regulator_is_enabled_regmap,
 	.get_status		= mxs_ldo_get_status,
+};
+
+static struct regulator_ops mxs_vdda_vddd_ops = {
+	.list_voltage		= regulator_list_voltage_linear,
+	.map_voltage		= regulator_map_voltage_linear,
+	.set_voltage_sel	= mxs_ldo_set_voltage_sel,
+	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 };
 
 static const struct mxs_ldo_info imx23_info_vddio = {
@@ -345,7 +352,7 @@ static const struct mxs_ldo_info imx23_info_vddio = {
 		.min_uV = 2800000,
 		.vsel_reg = HW_POWER_VDDIOCTRL,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_ldo_ops,
+		.ops = &mxs_vddio_ops,
 		.enable_reg = HW_POWER_5VCTRL,
 		.enable_mask = 1 << 2,
 		.enable_is_inverted = true,
@@ -374,7 +381,7 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 		.min_uV = 2800000,
 		.vsel_reg = HW_POWER_VDDIOCTRL,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_ldo_ops,
+		.ops = &mxs_vddio_ops,
 		.enable_reg = HW_POWER_5VCTRL,
 		.enable_mask = 1 << 2,
 		.enable_is_inverted = true,
@@ -403,7 +410,7 @@ static const struct mxs_ldo_info mxs_info_vdda = {
 		.min_uV = 1500000,
 		.vsel_reg = HW_POWER_VDDACTRL,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_ldo_ops,
+		.ops = &mxs_vdda_vddd_ops,
 		.enable_reg = HW_POWER_VDDACTRL,
 		.enable_mask = 1 << 17,
 	},
@@ -431,7 +438,7 @@ static const struct mxs_ldo_info mxs_info_vddd = {
 		.min_uV = 800000,
 		.vsel_reg = HW_POWER_VDDDCTRL,
 		.vsel_mask = 0x1f,
-		.ops = &mxs_ldo_ops,
+		.ops = &mxs_vdda_vddd_ops,
 		.enable_reg = HW_POWER_VDDDCTRL,
 		.enable_mask = 1 << 21,
 	},
