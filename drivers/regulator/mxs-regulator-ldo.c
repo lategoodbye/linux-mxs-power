@@ -167,9 +167,12 @@ static u8 get_vddio_power_source(struct mxs_ldo_info *ldo)
 			if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
 				return HW_POWER_DCDC_LINREG_ON;
 		} else {
+			/* Powered by Linreg, DC-DC is ready */
+			if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
+				return HW_POWER_LINREG_DCDC_READY;
+			
 			/* Powered by Linreg, DC-DC is off */
-			if (!(offset & BM_POWER_LINREG_OFFSET_DCDC_MODE))
-				return HW_POWER_LINREG_DCDC_OFF;
+			return HW_POWER_LINREG_DCDC_OFF;			
 		}
 	} else {
 		/* Powered by DC-DC, Linreg is on */
@@ -209,6 +212,10 @@ static u8 get_vdda_vddd_power_source(struct mxs_ldo_info *ldo)
 		/* Powered by DC-DC, Linreg is on */
 		if (v5ctrl & BM_POWER_5VCTRL_ENABLE_DCDC)
 			return HW_POWER_DCDC_LINREG_ON;
+
+		/* Powered by Linreg, DC-DC is ready */		
+		if (offset & BM_POWER_LINREG_OFFSET_DCDC_MODE)
+			return HW_POWER_LINREG_DCDC_READY;
 
 		/* Powered by Linreg, DC-DC is off */
 		return HW_POWER_LINREG_DCDC_OFF;
