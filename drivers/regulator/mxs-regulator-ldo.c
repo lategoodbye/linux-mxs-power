@@ -106,6 +106,10 @@ struct mxs_ldo_info {
 	unsigned int linreg_offset_mask;
 	u8 linreg_offset_shift;
 
+	/* brownout voltage offset */
+	unsigned int bo_offset_mask;
+	u8 bo_offset_shift;
+
 	/* brownout interrupt status */
 	unsigned int irq_bo;
 
@@ -115,6 +119,19 @@ struct mxs_ldo_info {
 	/* function which determine power source */
 	u8 (*get_power_source)(struct mxs_ldo_info *);
 };
+
+static int mxs_ldo_set_bo_offset(struct regulator_dev *reg, unsigned int offset)
+{
+	struct mxs_ldo_info *ldo = rdev_get_drvdata(reg);
+
+	if (offset > 7)
+		return -EINVAL;
+
+	offset <<= ldo->bo_offset_shift;
+
+	return regmap_update_bits(ldo->regmap, ldo->ctrl_reg,
+				  ldo->bo_offset_mask, offset);
+}
 
 static inline u8 get_linreg_offset(struct mxs_ldo_info *ldo, u32 regs)
 {
@@ -331,6 +348,8 @@ static const struct mxs_ldo_info imx23_info_vddio = {
 	.disable_stepping_mask = 1 << 17,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
+	.bo_offset_mask = 7 << 8,
+	.bo_offset_shift = 8,
 	.irq_bo = 1 << 11,
 	.enirq_bo = 1 << 10,
 	.get_power_source = get_vddio_power_source,
@@ -358,6 +377,8 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 	.disable_stepping_mask = 1 << 17,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
+	.bo_offset_mask = 7 << 8,
+	.bo_offset_shift = 8,
 	.irq_bo = 1 << 11,
 	.enirq_bo = 1 << 10,
 	.get_power_source = get_vddio_power_source,
@@ -385,6 +406,8 @@ static const struct mxs_ldo_info mxs_info_vdda = {
 	.disable_stepping_mask = 1 << 18,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
+	.bo_offset_mask = 7 << 8,
+	.bo_offset_shift = 8,
 	.irq_bo = 1 << 9,
 	.enirq_bo = 1 << 8,
 	.get_power_source = get_vdda_vddd_power_source,
@@ -412,6 +435,8 @@ static const struct mxs_ldo_info mxs_info_vddd = {
 	.disable_stepping_mask = 1 << 22,
 	.linreg_offset_mask = 3 << 16,
 	.linreg_offset_shift = 16,
+	.bo_offset_mask = 7 << 8,
+	.bo_offset_shift = 8,
 	.irq_bo = 1 << 7,
 	.enirq_bo = 1 << 6,
 	.get_power_source = get_vdda_vddd_power_source,
