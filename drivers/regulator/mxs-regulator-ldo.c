@@ -100,6 +100,8 @@ struct mxs_ldo_info {
 	/* disable DC-DC output */
 	unsigned int disable_fet_mask;
 
+	unsigned int disable_stepping_mask;
+
 	/* steps between linreg output and DC-DC target */
 	unsigned int linreg_offset_mask;
 	u8 linreg_offset_shift;
@@ -326,6 +328,7 @@ static const struct mxs_ldo_info imx23_info_vddio = {
 	},
 	.ctrl_reg = HW_POWER_VDDIOCTRL,
 	.disable_fet_mask = 1 << 16,
+	.disable_stepping_mask = 1 << 17,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
 	.irq_bo = 1 << 11,
@@ -352,6 +355,7 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 	},
 	.ctrl_reg = HW_POWER_VDDIOCTRL,
 	.disable_fet_mask = 1 << 16,
+	.disable_stepping_mask = 1 << 17,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
 	.irq_bo = 1 << 11,
@@ -378,6 +382,7 @@ static const struct mxs_ldo_info mxs_info_vdda = {
 	},
 	.ctrl_reg = HW_POWER_VDDACTRL,
 	.disable_fet_mask = 1 << 16,
+	.disable_stepping_mask = 1 << 18,
 	.linreg_offset_mask = 3 << 12,
 	.linreg_offset_shift = 12,
 	.irq_bo = 1 << 9,
@@ -404,6 +409,7 @@ static const struct mxs_ldo_info mxs_info_vddd = {
 	},
 	.ctrl_reg = HW_POWER_VDDDCTRL,
 	.disable_fet_mask = 1 << 20,
+	.disable_stepping_mask = 1 << 22,
 	.linreg_offset_mask = 3 << 16,
 	.linreg_offset_shift = 16,
 	.irq_bo = 1 << 7,
@@ -467,6 +473,17 @@ static int mxs_regulator_ldo_probe(struct platform_device *pdev)
 		dev_err(dev, "%s: failed to register regulator(%d)\n",
 			__func__, ret);
 		return ret;
+	}
+
+	if (info->get_power_source) {
+		u8 source = info->get_power_source(info);
+
+		if (source == HW_POWER_UNKNOWN_SOURCE)
+			dev_warn(dev, "%s: Invalid power source\n",
+				 info->desc.name);	
+		else
+			dev_info(dev, "%s: Current power source (%u)\n",
+				 info->desc.name, source);
 	}
 
 	return 0;
