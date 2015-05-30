@@ -17,7 +17,6 @@
 
 #include <linux/device.h>
 #include <linux/err.h>
-#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
