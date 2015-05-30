@@ -40,20 +40,65 @@
 #define HW_POWER_5VCTRL_VBUSVALID_THRESH_4_40V	(5 << 8)
 
 #define BM_POWER_STS_VBUSVALID0_STATUS		BIT(15)
+#define BM_POWER_STS_VDD5V_DROOP		BIT(4)
+
+#define STATUS_5V_CONNECTION	BIT(0)
+#define STATUS_5V_NEW		BIT(1)
+
+#define STATUS_NEW_5V_CONNECTION		(STATUS_5V_NEW | STATUS_5V_CONNECTION)
+#define STATUS_NEW_5V_DISCONNECTION		STATUS_5V_NEW
+#define STATUS_EXISTING_5V_CONNECTION		STATUS_5V_CONNECTION
+#define STATUS_EXISTING_5V_DISCONNECTION	0
 
 static enum power_supply_property mxs_power_ac_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 };
 
+static int mxs_power_5v_status(struct regmap *map)
+{
+	u32 ctrl = 0;
+	u32 status = 0;
+	int ret;
+
+	ret = regmap_read(map, HW_POWER_CTRL, &ctrl);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(map, HW_POWER_STS, &status);
+	if (ret)
+		return ret;
+
+	if (ctrl & BM_POWER_CTRL_POLARITY_VBUSVALID) {
+		if ((ctrl & BM_POWER_CTRL_VBUSVALID_IRQ) ||
+		    (status & BM_POWER_STS_VBUSVALID0_STATUS))
+			return STATUS_NEW_5V_CONNECTION;
+
+		return STATUS_EXISTING_5V_DISCONNECTION;
+	}
+	
+	if ((ctrl & BM_POWER_CTRL_VBUSVALID_IRQ) ||
+	    !(status & BM_POWER_STS_VBUSVALID0_STATUS) ||
+	    (status & BM_POWER_STS_VDD5V_DROOP))
+		return STATUS_NEW_5V_DISCONNECTION;
+
+	return STATUS_EXISTING_5V_CONNECTION;
+}
+
 static int mxs_power_ac_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
 {
-	int ret = 0;
+	struct mxs_power_data *data = power_supply_get_drvdata(psy);
+	int ret;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
-		val->intval = 1;
+		ret = mxs_power_5v_status(data->regmap);
+		if (IS_ERR(ret))
+			return ret;
+
+		val->intval = (ret & STATUS_5V_CONNECTION) ? 1 : 0;
+		ret = 0;
 		break;
 	default:
 		ret = -EINVAL;
@@ -83,7 +128,6 @@ static int mxs_power_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct mxs_power_data *data;
 	struct power_supply_config psy_cfg = {};
-	u32 status = 0;
 
 	if (!np) {
 		dev_err(dev, "missing device tree\n");
@@ -109,12 +153,16 @@ static int mxs_power_probe(struct platform_device *pdev)
 	if (IS_ERR(data->ac))
 		return PTR_ERR(data->ac);
 
-	regmap_read(data->regmap, HW_POWER_STS, &status);
-	
-	if (status & BM_POWER_STS_VBUSVALID0_STATUS)
+	switch (mxs_power_5v_status(data->regmap)) {
+	case STATUS_NEW_5V_CONNECTION:
+	case STATUS_EXISTING_5V_CONNECTION:
 		dev_info(dev, "5V = connected\n");
-	else
+		break;
+	case STATUS_NEW_5V_DISCONNECTION:
+	case STATUS_EXISTING_5V_DISCONNECTION:
 		dev_info(dev, "5V = disconnected\n");
+		break;
+	}
 
 	mxs_power_init_device_debugfs(data);
 
