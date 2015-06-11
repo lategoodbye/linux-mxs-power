@@ -151,6 +151,28 @@ mxs_power_vddio_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
+mxs_power_dcdc4p2_mx28_show(struct seq_file *s, void *what)
+{
+	struct mxs_power_data *data = s->private;
+	u32 value;
+	int ret = regmap_read(data->regmap, HW_POWER_VDDIOCTRL, &value);
+
+	if (ret)
+		return ret;
+
+	seq_printf(s, "DROPOUT_CTRL: %x\n", (value >> 28) & 0xf);
+	seq_printf(s, "ENABLE_4P2: %x\n", (value >> 23) & 1);
+	seq_printf(s, "ENABLE_DCDC: %x\n", (value >> 22) & 1);
+	seq_printf(s, "HYST_DIR: %x\n", (value >> 21) & 1);
+	seq_printf(s, "HYST_THRESH: %x\n", (value >> 20) & 3);
+	seq_printf(s, "TRG: %x\n", (value >> 16) & 7);
+	seq_printf(s, "BO: %x\n", (value >> 8) & 0x1f);
+	seq_printf(s, "CMPTRIP: %x\n", value & 0x1f);
+
+	return 0;
+}
+
+static int
 mxs_power_sts_mx28_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
@@ -217,6 +239,12 @@ mxs_power_vddio_open(struct inode *inode, struct file *file)
 }
 
 static int
+mxs_power_dcdc4p2_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mxs_power_dcdc4p2_mx28_show, inode->i_private);
+}
+
+static int
 mxs_power_sts_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, mxs_power_sts_mx28_show, inode->i_private);
@@ -257,6 +285,13 @@ static const struct file_operations mxs_power_vddio_ops = {
 	.release = single_release,
 };
 
+static const struct file_operations mxs_power_dcdc4p2_ops = {
+	.open = mxs_power_dcdc4p2_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static const struct file_operations mxs_power_sts_ops = {
 	.open = mxs_power_sts_open,
 	.read = seq_read,
@@ -287,6 +322,8 @@ mxs_power_init_device_debugfs(struct mxs_power_data *data)
 			    &mxs_power_vdda_ops);
 	debugfs_create_file("vddio", S_IFREG | S_IRUGO, device_root, data,
 			    &mxs_power_vddio_ops);
+	debugfs_create_file("dcdc4p2", S_IFREG | S_IRUGO, device_root, data,
+			    &mxs_power_dcdc4p2_ops);
 	debugfs_create_file("sts", S_IFREG | S_IRUGO, device_root, data,
 			    &mxs_power_sts_ops);
 }
