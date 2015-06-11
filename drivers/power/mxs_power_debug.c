@@ -155,7 +155,7 @@ mxs_power_dcdc4p2_mx28_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
-	int ret = regmap_read(data->regmap, HW_POWER_VDDIOCTRL, &value);
+	int ret = regmap_read(data->regmap, HW_POWER_DCDC4P2, &value);
 
 	if (ret)
 		return ret;
@@ -175,7 +175,7 @@ mxs_power_dcdc4p2_mx28_show(struct seq_file *s, void *what)
 static int
 mxs_power_sts_mx28_show(struct seq_file *s, void *what)
 {
-	struct mxs_power_data *data = s->private;
+	struct mxs_power_data *data = s->private; include/linux/power/mxs_power.h
 	u32 value;
 	int ret = regmap_read(data->regmap, HW_POWER_STS, &value);
 
