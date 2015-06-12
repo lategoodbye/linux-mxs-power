@@ -20,7 +20,7 @@
 #ifdef CONFIG_DEBUG_FS
 
 static int
-mxs_power_ctrl_mx28_show(struct seq_file *s, void *what)
+mxs_power_ctrl_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -28,6 +28,9 @@ mxs_power_ctrl_mx28_show(struct seq_file *s, void *what)
 
 	if (ret)
 		return ret;
+	
+	/* only MX23 */
+	seq_printf(s, "CLKGATE: %x\n", (value >> 30) & 1);
 
 	seq_printf(s, "PSWITCH_MID_TRAN: %x\n", (value >> 27) & 1);
 	seq_printf(s, "DCDC4P2_BO_IRQ: %x\n", (value >> 24) & 1);
@@ -60,7 +63,7 @@ mxs_power_ctrl_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
-mxs_power_5vctrl_mx28_show(struct seq_file *s, void *what)
+mxs_power_5vctrl_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -71,7 +74,7 @@ mxs_power_5vctrl_mx28_show(struct seq_file *s, void *what)
 
 	seq_printf(s, "VBUSDROOP_TRSH: %x\n", (value >> 28) & 3);
 	seq_printf(s, "HEADROOM_ADJ: %x\n", (value >> 24) & 7);
-	seq_printf(s, "PWD_CHARGE_4P2: %x\n", (value >> 20) & 3);
+	seq_printf(s, "PWD_CHARGE_4P2: %x\n", (value >> 20) & 1);
 	seq_printf(s, "CHARGE_4P2_ILIMIT: %x\n", (value >> 12) & 0x3F);
 	seq_printf(s, "VBUSVALID_TRSH: %x\n", (value >> 8) & 7);
 	seq_printf(s, "PWDN_5VBRNOUT: %x\n", (value >> 7) & 1);
@@ -87,7 +90,7 @@ mxs_power_5vctrl_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
-mxs_power_vddd_mx28_show(struct seq_file *s, void *what)
+mxs_power_vddd_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -109,7 +112,7 @@ mxs_power_vddd_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
-mxs_power_vdda_mx28_show(struct seq_file *s, void *what)
+mxs_power_vdda_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -130,7 +133,7 @@ mxs_power_vdda_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
-mxs_power_vddio_mx28_show(struct seq_file *s, void *what)
+mxs_power_vddio_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -151,7 +154,7 @@ mxs_power_vddio_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
-mxs_power_dcdc4p2_mx28_show(struct seq_file *s, void *what)
+mxs_power_dcdc4p2_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -173,7 +176,28 @@ mxs_power_dcdc4p2_mx28_show(struct seq_file *s, void *what)
 }
 
 static int
-mxs_power_sts_mx28_show(struct seq_file *s, void *what)
+mxs_power_misc_mxs_show(struct seq_file *s, void *what)
+{
+	struct mxs_power_data *data = s->private;
+	u32 value;
+	int ret = regmap_read(data->regmap, HW_POWER_MISC, &value);
+
+	if (ret)
+		return ret;
+
+	seq_printf(s, "FREQSEL %x\n", (value >> 4) & 0x7);
+
+	/* only MX28 */
+	seq_printf(s, "DISABLEFET_BO_LOGIC %x\n", (value >> 3) & 1);
+
+	seq_printf(s, "DELAY_TIMING %x\n", (value >> 2) & 1);
+	seq_printf(s, "SEL_PLLCLK %x\n", value & 1);
+
+	return 0;
+}
+
+static int
+mxs_power_sts_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
 	u32 value;
@@ -182,7 +206,7 @@ mxs_power_sts_mx28_show(struct seq_file *s, void *what)
 	if (ret)
 		return ret;
 
-	seq_printf(s, "PWRUP_SOURCE %x\n", (value >> 24) & 0x1F);
+	seq_printf(s, "PWRUP_SOURCE %x\n", (value >> 24) & 0x3F);
 	seq_printf(s, "PSWITCH %x\n", (value >> 20) & 3);
 	seq_printf(s, "THERMAL_WARNING %x\n", (value >> 19) & 1);
 	seq_printf(s, "VDDMEM_BO %x\n", (value >> 18) & 1);
@@ -211,43 +235,49 @@ mxs_power_sts_mx28_show(struct seq_file *s, void *what)
 static int
 mxs_power_ctrl_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_ctrl_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_ctrl_mxs_show, inode->i_private);
 }
 
 static int
 mxs_power_5vctrl_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_5vctrl_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_5vctrl_mxs_show, inode->i_private);
 }
 
 static int
 mxs_power_vddd_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_vddd_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_vddd_mxs_show, inode->i_private);
 }
 
 static int
 mxs_power_vdda_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_vdda_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_vdda_mxs_show, inode->i_private);
 }
 
 static int
 mxs_power_vddio_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_vddio_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_vddio_mxs_show, inode->i_private);
 }
 
 static int
 mxs_power_dcdc4p2_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_dcdc4p2_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_dcdc4p2_mxs_show, inode->i_private);
+}
+
+static int
+mxs_power_misc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mxs_power_misc_mxs_show, inode->i_private);
 }
 
 static int
 mxs_power_sts_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mxs_power_sts_mx28_show, inode->i_private);
+	return single_open(file, mxs_power_sts_mxs_show, inode->i_private);
 }
 
 static const struct file_operations mxs_power_ctrl_ops = {
@@ -292,6 +322,13 @@ static const struct file_operations mxs_power_dcdc4p2_ops = {
 	.release = single_release,
 };
 
+static const struct file_operations mxs_power_misc_ops = {
+	.open = mxs_power_misc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static const struct file_operations mxs_power_sts_ops = {
 	.open = mxs_power_sts_open,
 	.read = seq_read,
@@ -324,6 +361,8 @@ mxs_power_init_device_debugfs(struct mxs_power_data *data)
 			    &mxs_power_vddio_ops);
 	debugfs_create_file("dcdc4p2", S_IFREG | S_IRUGO, device_root, data,
 			    &mxs_power_dcdc4p2_ops);
+	debugfs_create_file("misc", S_IFREG | S_IRUGO, device_root, data,
+			    &mxs_power_misc_ops);
 	debugfs_create_file("sts", S_IFREG | S_IRUGO, device_root, data,
 			    &mxs_power_sts_ops);
 }
