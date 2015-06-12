@@ -145,7 +145,7 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
 		ret = mxs_power_5v_status(data->regmap);
-		if (IS_ERR(ret))
+		if (ret < 0)
 			return ret;
 
 		val->intval = (ret & STATUS_5V_CONNECTION) ? 1 : 0;
