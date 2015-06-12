@@ -17,6 +17,7 @@
 
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
@@ -84,6 +85,56 @@ static int mxs_power_5v_status(struct regmap *map)
 	return STATUS_EXISTING_5V_CONNECTION;
 }
 
+static void mxs_5v_work_func(struct work_struct *work)
+{
+	struct mxs_power_data *data =
+		container_of(work, struct mxs_power_data, poll_5v.work);
+
+	switch (mxs_power_5v_status(data->regmap)) {
+	case STATUS_NEW_5V_CONNECTION:
+	case STATUS_EXISTING_5V_CONNECTION:
+		mxs_regmap_clr(data->regmap, HW_POWER_CTRL,
+			       BM_POWER_CTRL_POLARITY_VBUSVALID);
+		break;
+	case STATUS_NEW_5V_DISCONNECTION:
+	case STATUS_EXISTING_5V_DISCONNECTION:
+		mxs_regmap_set(data->regmap, HW_POWER_CTRL,
+			       BM_POWER_CTRL_POLARITY_VBUSVALID);
+		break;
+	default:
+		return;
+	}
+	
+	mxs_regmap_clr(data->regmap, HW_POWER_CTRL,
+		       BM_POWER_CTRL_VBUSVALID_IRQ);
+
+	mxs_regmap_set(data->regmap, HW_POWER_CTRL,
+		       BM_POWER_CTRL_ENIRQ_VBUS_VALID);
+}
+
+static irqreturn_t mxs_irq_vdd5v(int irq, void *cookie)
+{
+	struct mxs_power_data *data = (struct mxs_power_data *)cookie;
+
+	switch (mxs_power_5v_status(data->regmap)) {
+	case STATUS_NEW_5V_CONNECTION:
+		pr_info("New 5v connection detected\n");
+		break;
+	case STATUS_NEW_5V_DISCONNECTION:
+		pr_info("New 5v disconnection detected\n");
+		break;
+	default:
+		return IRQ_HANDLED;
+	}
+
+	mxs_regmap_clr(data->regmap, HW_POWER_CTRL,
+		       BM_POWER_CTRL_ENIRQ_VBUS_VALID);
+
+	schedule_delayed_work(&data->poll_5v, msecs_to_jiffies(10));
+
+	return IRQ_HANDLED;
+}
+
 static int mxs_power_ac_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
@@ -104,6 +155,7 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 		ret = -EINVAL;
 		break;
 	}
+
 	return ret;
 }
 
@@ -128,6 +180,8 @@ static int mxs_power_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct mxs_power_data *data;
 	struct power_supply_config psy_cfg = {};
+	int ret;
+	unsigned int irq;
 
 	if (!np) {
 		dev_err(dev, "missing device tree\n");
@@ -148,6 +202,19 @@ static int mxs_power_probe(struct platform_device *pdev)
 
 	psy_cfg.drv_data = data;
 	platform_set_drvdata(pdev, data);
+
+	INIT_DELAYED_WORK(&data->poll_5v, mxs_5v_work_func);
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
+		dev_err(dev, "No IRQ resource!\n");
+		return -EINVAL;
+	}
+
+	ret = devm_request_irq(dev, irq, mxs_irq_vdd5v, IRQF_SHARED,
+			       "mxs-power", data);
+	if (ret)
+		return ret;
 
 	data->ac = devm_power_supply_register(dev, &ac_desc, &psy_cfg);
 	if (IS_ERR(data->ac))
@@ -174,6 +241,7 @@ static int mxs_power_remove(struct platform_device *pdev)
 	struct mxs_power_data *data = platform_get_drvdata(pdev);
 
 	mxs_power_remove_device_debugfs(data);
+	cancel_delayed_work(&data->poll_5v);
 
 	return 0;
 }

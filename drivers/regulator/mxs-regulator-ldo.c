@@ -35,43 +35,6 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/slab.h>
 
-/* Powered by linear regulator.  DCDC output is gated off and
-   the linreg output is equal to the target. */
-#define HW_POWER_LINREG_DCDC_OFF		1
-
-/* Powered by linear regulator.  DCDC output is not gated off
-   and is ready for the automatic hardware transistion after a 5V
-   event.  The converters are not enabled when 5V is present. LinReg output
-   is 25mV below target. */
-#define HW_POWER_LINREG_DCDC_READY		2
-
-/* Powered by DCDC converter and the LinReg is on. LinReg output
-   is 25mV below target. */
-#define HW_POWER_DCDC_LINREG_ON			3
-
-/* Powered by DCDC converter and the LinReg is off. LinReg output
-   is 25mV below target. */
-#define HW_POWER_DCDC_LINREG_OFF		4
-
-/* Powered by DCDC converter and the LinReg is ready for the
-   automatic hardware transfer.  The LinReg output is not enabled and
-   depends on the 5V presence to enable the LinRegs.  LinReg offset is 25mV
-   below target. */
-#define HW_POWER_DCDC_LINREG_READY		5
-
-/* Powered by an external source when 5V is present.  This does not
-   necessarily mean the external source is powered by 5V,but the chip needs
-   to be aware that 5V is present. */
-#define HW_POWER_EXTERNAL_SOURCE_5V		6
-
-/* Powered by an external source when 5V is not present.This doesn't
-   necessarily mean the external source is powered by the battery, but the
-   chip needs to be aware that the battery is present */
-#define HW_POWER_EXTERNAL_SOURCE_BATTERY	7
-
-/* Unknown configuration.  This is an error. */
-#define HW_POWER_UNKNOWN_SOURCE			8
-
 #define BM_POWER_STS_VBUSVALID0_STATUS	BIT(15)
 #define BM_POWER_STS_DC_OK		BIT(9)
 
@@ -79,13 +42,6 @@
 #define BM_POWER_5VCTRL_ENABLE_DCDC	BIT(0)
 
 #define BM_POWER_LINREG_OFFSET_DCDC_MODE	BIT(1)
-
-/* Regulator IDs */
-#define MXS_DCDC	1
-#define MXS_VDDIO	2
-#define MXS_VDDA	3
-#define MXS_VDDD	4
-
 struct mxs_ldo_info;
 
 struct mxs_ldo_info {
@@ -343,7 +299,7 @@ static struct regulator_ops mxs_vdda_vddd_ops = {
 static const struct mxs_ldo_info imx23_info_vddio = {
 	.desc = {
 		.name = "vddio",
-		.id = MXS_VDDIO,
+		.id = MXS_POWER_VDDIO,
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.n_voltages = 0x20,
@@ -372,7 +328,7 @@ static const struct mxs_ldo_info imx23_info_vddio = {
 static const struct mxs_ldo_info imx28_info_vddio = {
 	.desc = {
 		.name = "vddio",
-		.id = MXS_VDDIO,
+		.id = MXS_POWER_VDDIO,
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.n_voltages = 0x11,
@@ -401,7 +357,7 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 static const struct mxs_ldo_info mxs_info_vdda = {
 	.desc = {
 		.name = "vdda",
-		.id = MXS_VDDA,
+		.id = MXS_POWER_VDDA,
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.n_voltages = 0x20,
@@ -429,7 +385,7 @@ static const struct mxs_ldo_info mxs_info_vdda = {
 static const struct mxs_ldo_info mxs_info_vddd = {
 	.desc = {
 		.name = "vddd",
-		.id = MXS_VDDD,
+		.id = MXS_POWER_VDDD,
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.n_voltages = 0x20,

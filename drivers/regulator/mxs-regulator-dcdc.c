@@ -44,12 +44,6 @@
 
 #define HW_POWER_MISC_SEL_PLLCLK	BIT(0)
 
-/* Regulator IDs */
-#define MXS_DCDC	1
-#define MXS_VDDIO	2
-#define MXS_VDDA	3
-#define MXS_VDDD	4
-
 struct mxs_dcdc_info {
 	/* regulator descriptor */
 	struct regulator_desc desc;
@@ -109,7 +103,7 @@ static struct regulator_ops mxs_dcdc_ops = {
 static const struct mxs_dcdc_info mxs_dcdc = {
 	.desc = {
 		.name = "dcdc",
-		.id = MXS_DCDC,
+		.id = MXS_POWER_DCDC,
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.ops = &mxs_dcdc_ops,
