@@ -36,7 +36,7 @@
 #include <linux/seqlock.h>
 #include <trace/events/kvm.h>
 
-#include "iodev.h"
+#include <kvm/iodev.h>
 
 #ifdef CONFIG_HAVE_KVM_IRQFD
 /*
@@ -715,8 +715,8 @@ ioeventfd_in_range(struct _ioeventfd *p, gpa_t addr, int len, const void *val)
 
 /* MMIO/PIO writes trigger an event if the addr/val match */
 static int
-ioeventfd_write(struct kvm_io_device *this, gpa_t addr, int len,
-		const void *val)
+ioeventfd_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this, gpa_t addr,
+		int len, const void *val)
 {
 	struct _ioeventfd *p = to_ioeventfd(this);
 

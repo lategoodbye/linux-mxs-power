@@ -195,6 +195,32 @@ static void dccp_do_redirect(struct sk_buff *skb, struct sock *sk)
 		dst->ops->redirect(dst, sk, skb);
 }
 
+void dccp_req_err(struct sock *sk, u64 seq)
+	{
+	struct request_sock *req = inet_reqsk(sk);
+	struct net *net = sock_net(sk);
+
+	/*
+	 * ICMPs are not backlogged, hence we cannot get an established
+	 * socket here.
+	 */
+	WARN_ON(req->sk);
+
+	if (!between48(seq, dccp_rsk(req)->dreq_iss, dccp_rsk(req)->dreq_gss)) {
+		NET_INC_STATS_BH(net, LINUX_MIB_OUTOFWINDOWICMPS);
+		reqsk_put(req);
+	} else {
+		/*
+		 * Still in RESPOND, just remove it silently.
+		 * There is no good way to pass the error to the newly
+		 * created socket, and POSIX does not want network
+		 * errors returned from accept().
+		 */
+		inet_csk_reqsk_queue_drop(req->rsk_listener, req);
+	}
+}
+EXPORT_SYMBOL(dccp_req_err);
+
 /*
  * This routine is called by the ICMP module when it gets some sort of error
  * condition. If err < 0 then the socket should be closed and the error
@@ -227,10 +253,11 @@ static void dccp_v4_err(struct sk_buff *skb, u32 info)
 		return;
 	}
 
-	sk = inet_lookup(net, &dccp_hashinfo,
-			iph->daddr, dh->dccph_dport,
-			iph->saddr, dh->dccph_sport, inet_iif(skb));
-	if (sk == NULL) {
+	sk = __inet_lookup_established(net, &dccp_hashinfo,
+				       iph->daddr, dh->dccph_dport,
+				       iph->saddr, ntohs(dh->dccph_sport),
+				       inet_iif(skb));
+	if (!sk) {
 		ICMP_INC_STATS_BH(net, ICMP_MIB_INERRORS);
 		return;
 	}
@@ -239,6 +266,9 @@ static void dccp_v4_err(struct sk_buff *skb, u32 info)
 		inet_twsk_put(inet_twsk(sk));
 		return;
 	}
+	seq = dccp_hdr_seq(dh);
+	if (sk->sk_state == DCCP_NEW_SYN_RECV)
+		return dccp_req_err(sk, seq);
 
 	bh_lock_sock(sk);
 	/* If too many ICMPs get dropped on busy
@@ -251,7 +281,6 @@ static void dccp_v4_err(struct sk_buff *skb, u32 info)
 		goto out;
 
 	dp = dccp_sk(sk);
-	seq = dccp_hdr_seq(dh);
 	if ((1 << sk->sk_state) & ~(DCCPF_REQUESTING | DCCPF_LISTEN) &&
 	    !between48(seq, dp->dccps_awl, dp->dccps_awh)) {
 		NET_INC_STATS_BH(net, LINUX_MIB_OUTOFWINDOWICMPS);
@@ -288,35 +317,6 @@ static void dccp_v4_err(struct sk_buff *skb, u32 info)
 	}
 
 	switch (sk->sk_state) {
-		struct request_sock *req , **prev;
-	case DCCP_LISTEN:
-		if (sock_owned_by_user(sk))
-			goto out;
-		req = inet_csk_search_req(sk, &prev, dh->dccph_dport,
-					  iph->daddr, iph->saddr);
-		if (!req)
-			goto out;
-
-		/*
-		 * ICMPs are not backlogged, hence we cannot get an established
-		 * socket here.
-		 */
-		WARN_ON(req->sk);
-
-		if (!between48(seq, dccp_rsk(req)->dreq_iss,
-				    dccp_rsk(req)->dreq_gss)) {
-			NET_INC_STATS_BH(net, LINUX_MIB_OUTOFWINDOWICMPS);
-			goto out;
-		}
-		/*
-		 * Still in RESPOND, just remove it silently.
-		 * There is no good way to pass the error to the newly
-		 * created socket, and POSIX does not want network
-		 * errors returned from accept().
-		 */
-		inet_csk_reqsk_queue_drop(sk, req, prev);
-		goto out;
-
 	case DCCP_REQUESTING:
 	case DCCP_RESPOND:
 		if (!sock_owned_by_user(sk)) {
@@ -448,14 +448,15 @@ static struct sock *dccp_v4_hnd_req(struct sock *sk, struct sk_buff *skb)
 	const struct dccp_hdr *dh = dccp_hdr(skb);
 	const struct iphdr *iph = ip_hdr(skb);
 	struct sock *nsk;
-	struct request_sock **prev;
 	/* Find possible connection requests. */
-	struct request_sock *req = inet_csk_search_req(sk, &prev,
-						       dh->dccph_sport,
+	struct request_sock *req = inet_csk_search_req(sk, dh->dccph_sport,
 						       iph->saddr, iph->daddr);
-	if (req != NULL)
-		return dccp_check_req(sk, skb, req, prev);
-
+	if (req) {
+		nsk = dccp_check_req(sk, skb, req);
+		if (!nsk)
+			reqsk_put(req);
+		return nsk;
+	}
 	nsk = inet_lookup_established(sock_net(sk), &dccp_hashinfo,
 				      iph->saddr, dh->dccph_sport,
 				      iph->daddr, dh->dccph_dport,
@@ -574,7 +575,7 @@ static void dccp_v4_reqsk_destructor(struct request_sock *req)
 	kfree(inet_rsk(req)->opt);
 }
 
-void dccp_syn_ack_timeout(struct sock *sk, struct request_sock *req)
+void dccp_syn_ack_timeout(const struct request_sock *req)
 {
 }
 EXPORT_SYMBOL(dccp_syn_ack_timeout);

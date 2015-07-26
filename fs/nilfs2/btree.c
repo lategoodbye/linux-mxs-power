@@ -388,7 +388,7 @@ static int nilfs_btree_root_broken(const struct nilfs_btree_node *node,
 	nchildren = nilfs_btree_node_get_nchildren(node);
 
 	if (unlikely(level < NILFS_BTREE_LEVEL_NODE_MIN ||
-		     level > NILFS_BTREE_LEVEL_MAX ||
+		     level >= NILFS_BTREE_LEVEL_MAX ||
 		     nchildren < 0 ||
 		     nchildren > NILFS_BTREE_ROOT_NCHILDREN_MAX)) {
 		pr_crit("NILFS: bad btree root (inode number=%lu): level = %d, flags = 0x%x, nchildren = %d\n",
@@ -1607,9 +1607,6 @@ static int nilfs_btree_seek_key(const struct nilfs_bmap *btree, __u64 start,
 	struct nilfs_btree_path *path;
 	const int minlevel = NILFS_BTREE_LEVEL_NODE_MIN;
 	int ret;
-
-	if (start > NILFS_BTREE_KEY_MAX)
-		return -ENOENT;
 
 	path = nilfs_btree_alloc_path();
 	if (!path)

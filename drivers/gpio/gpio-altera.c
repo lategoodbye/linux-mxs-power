@@ -107,7 +107,8 @@ static int altera_gpio_irq_set_type(struct irq_data *d,
 	return -EINVAL;
 }
 
-static unsigned int altera_gpio_irq_startup(struct irq_data *d) {
+static unsigned int altera_gpio_irq_startup(struct irq_data *d)
+{
 	altera_gpio_irq_unmask(d);
 
 	return 0;
@@ -256,7 +257,7 @@ static void altera_gpio_irq_leveL_high_handler(unsigned int irq,
 	chained_irq_exit(chip, desc);
 }
 
-int altera_gpio_probe(struct platform_device *pdev)
+static int altera_gpio_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 	int reg, ret;

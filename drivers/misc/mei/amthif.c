@@ -59,46 +59,29 @@ void mei_amthif_reset_params(struct mei_device *dev)
  * mei_amthif_host_init - mei initialization amthif client.
  *
  * @dev: the device structure
+ * @me_cl: me client
  *
  * Return: 0 on success, <0 on failure.
  */
-int mei_amthif_host_init(struct mei_device *dev)
+int mei_amthif_host_init(struct mei_device *dev, struct mei_me_client *me_cl)
 {
 	struct mei_cl *cl = &dev->iamthif_cl;
-	struct mei_me_client *me_cl;
 	int ret;
 
 	dev->iamthif_state = MEI_IAMTHIF_IDLE;
 
 	mei_cl_init(cl, dev);
 
-	me_cl = mei_me_cl_by_uuid(dev, &mei_amthif_guid);
-	if (!me_cl) {
-		dev_info(dev->dev, "amthif: failed to find the client");
-		return -ENOTTY;
-	}
-
-	cl->me_client_id = me_cl->client_id;
-	cl->cl_uuid = me_cl->props.protocol_name;
-
-	/* Assign iamthif_mtu to the value received from ME  */
-
-	dev->iamthif_mtu = me_cl->props.max_msg_length;
-	dev_dbg(dev->dev, "IAMTHIF_MTU = %d\n", dev->iamthif_mtu);
-
-
 	ret = mei_cl_link(cl, MEI_IAMTHIF_HOST_CLIENT_ID);
 	if (ret < 0) {
 		dev_err(dev->dev, "amthif: failed cl_link %d\n", ret);
-		goto out;
+		return ret;
 	}
 
-	ret = mei_cl_connect(cl, NULL);
+	ret = mei_cl_connect(cl, me_cl, NULL);
 
 	dev->iamthif_state = MEI_IAMTHIF_IDLE;
 
-out:
-	mei_me_cl_put(me_cl);
 	return ret;
 }
 
@@ -250,7 +233,6 @@ static int mei_amthif_read_start(struct mei_cl *cl, struct file *file)
 {
 	struct mei_device *dev = cl->dev;
 	struct mei_cl_cb *cb;
-	size_t length = dev->iamthif_mtu;
 	int rets;
 
 	cb = mei_io_cb_init(cl, MEI_FOP_READ, file);
@@ -259,7 +241,7 @@ static int mei_amthif_read_start(struct mei_cl *cl, struct file *file)
 		goto err;
 	}
 
-	rets = mei_io_cb_alloc_buf(cb, length);
+	rets = mei_io_cb_alloc_buf(cb, mei_cl_mtu(cl));
 	if (rets)
 		goto err;
 
@@ -361,6 +343,18 @@ int mei_amthif_write(struct mei_cl *cl, struct mei_cl_cb *cb)
 	return mei_amthif_run_next_cmd(dev);
 }
 
+/**
+ * mei_amthif_poll - the amthif poll function
+ *
+ * @dev: the device structure
+ * @file: pointer to file structure
+ * @wait: pointer to poll_table structure
+ *
+ * Return: poll mask
+ *
+ * Locking: called under "dev->device_lock" lock
+ */
+
 unsigned int mei_amthif_poll(struct mei_device *dev,
 		struct file *file, poll_table *wait)
 {
@@ -368,19 +362,12 @@ unsigned int mei_amthif_poll(struct mei_device *dev,
 
 	poll_wait(file, &dev->iamthif_cl.wait, wait);
 
-	mutex_lock(&dev->device_lock);
-	if (!mei_cl_is_connected(&dev->iamthif_cl)) {
+	if (dev->iamthif_state == MEI_IAMTHIF_READ_COMPLETE &&
+	    dev->iamthif_file_object == file) {
 
-		mask = POLLERR;
-
-	} else if (dev->iamthif_state == MEI_IAMTHIF_READ_COMPLETE &&
-		   dev->iamthif_file_object == file) {
-
-		mask |= (POLLIN | POLLRDNORM);
-		dev_dbg(dev->dev, "run next amthif cb\n");
+		mask |= POLLIN | POLLRDNORM;
 		mei_amthif_run_next_cmd(dev);
 	}
-	mutex_unlock(&dev->device_lock);
 
 	return mask;
 }

@@ -45,10 +45,6 @@
  *
  */
 
-#ifdef CONFIG_ZSMALLOC_DEBUG
-#define DEBUG
-#endif
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -289,7 +285,8 @@ static int create_handle_cache(struct zs_pool *pool)
 
 static void destroy_handle_cache(struct zs_pool *pool)
 {
-	kmem_cache_destroy(pool->handle_cachep);
+	if (pool->handle_cachep)
+		kmem_cache_destroy(pool->handle_cachep);
 }
 
 static unsigned long alloc_handle(struct zs_pool *pool)
@@ -312,7 +309,8 @@ static void record_obj(unsigned long handle, unsigned long obj)
 
 #ifdef CONFIG_ZPOOL
 
-static void *zs_zpool_create(char *name, gfp_t gfp, struct zpool_ops *zpool_ops)
+static void *zs_zpool_create(char *name, gfp_t gfp, struct zpool_ops *zpool_ops,
+			     struct zpool *zpool)
 {
 	return zs_create_pool(name, gfp);
 }
@@ -731,8 +729,8 @@ out:
  * to form a zspage for each size class. This is important
  * to reduce wastage due to unusable space left at end of
  * each zspage which is given as:
- *	wastage = Zp % (class_size + ZS_HANDLE_SIZE)
- *	usage = Zp - wastage
+ *     wastage = Zp % class_size
+ *     usage = Zp - wastage
  * where Zp = zspage size = k * PAGE_SIZE where k = 1, 2, ...
  *
  * For example, for size class of 3/8 * PAGE_SIZE, we should
@@ -744,9 +742,6 @@ static int get_pages_per_zspage(int class_size)
 	int i, max_usedpc = 0;
 	/* zspage order which gives maximum used size per KB */
 	int max_usedpc_order = 1;
-
-	if (class_size > ZS_MAX_ALLOC_SIZE)
-		class_size = ZS_MAX_ALLOC_SIZE;
 
 	for (i = 1; i <= ZS_MAX_PAGES_PER_ZSPAGE; i++) {
 		int zspage_size;
@@ -1535,7 +1530,12 @@ static void zs_object_copy(unsigned long src, unsigned long dst,
 		if (written == class->size)
 			break;
 
-		if (s_off + size >= PAGE_SIZE) {
+		s_off += size;
+		s_size -= size;
+		d_off += size;
+		d_size -= size;
+
+		if (s_off >= PAGE_SIZE) {
 			kunmap_atomic(d_addr);
 			kunmap_atomic(s_addr);
 			s_page = get_next_page(s_page);
@@ -1544,21 +1544,15 @@ static void zs_object_copy(unsigned long src, unsigned long dst,
 			d_addr = kmap_atomic(d_page);
 			s_size = class->size - written;
 			s_off = 0;
-		} else {
-			s_off += size;
-			s_size -= size;
 		}
 
-		if (d_off + size >= PAGE_SIZE) {
+		if (d_off >= PAGE_SIZE) {
 			kunmap_atomic(d_addr);
 			d_page = get_next_page(d_page);
 			BUG_ON(!d_page);
 			d_addr = kmap_atomic(d_page);
 			d_size = class->size - written;
 			d_off = 0;
-		} else {
-			d_off += size;
-			d_size -= size;
 		}
 	}
 
@@ -1677,14 +1671,14 @@ static struct page *alloc_target_page(struct size_class *class)
 static void putback_zspage(struct zs_pool *pool, struct size_class *class,
 				struct page *first_page)
 {
-	int class_idx;
 	enum fullness_group fullness;
 
 	BUG_ON(!is_first_page(first_page));
 
-	get_zspage_mapping(first_page, &class_idx, &fullness);
+	fullness = get_fullness_group(first_page);
 	insert_zspage(first_page, class, fullness);
-	fullness = fix_fullness_group(class, first_page);
+	set_zspage_mapping(first_page, class->index, fullness);
+
 	if (fullness == ZS_EMPTY) {
 		zs_stat_dec(class, OBJ_ALLOCATED, get_maxobj_per_zspage(
 			class->size, class->pages_per_zspage));
@@ -1714,8 +1708,6 @@ static unsigned long __zs_compact(struct zs_pool *pool,
 	struct page *src_page;
 	struct page *dst_page = NULL;
 	unsigned long nr_total_migrated = 0;
-
-	cond_resched();
 
 	spin_lock(&class->lock);
 	while ((src_page = isolate_source_page(class))) {
@@ -1776,8 +1768,6 @@ unsigned long zs_compact(struct zs_pool *pool)
 		nr_migrated += __zs_compact(pool, class);
 	}
 
-	synchronize_rcu();
-
 	return nr_migrated;
 }
 EXPORT_SYMBOL_GPL(zs_compact);
@@ -1826,7 +1816,9 @@ struct zs_pool *zs_create_pool(char *name, gfp_t flags)
 		struct size_class *class;
 
 		size = ZS_MIN_ALLOC_SIZE + i * ZS_SIZE_CLASS_DELTA;
-		pages_per_zspage = get_pages_per_zspage(size + ZS_HANDLE_SIZE);
+		if (size > ZS_MAX_ALLOC_SIZE)
+			size = ZS_MAX_ALLOC_SIZE;
+		pages_per_zspage = get_pages_per_zspage(size);
 
 		/*
 		 * size_class is used for normal zsmalloc operation such

@@ -457,7 +457,7 @@ static struct drm_crtc *intel_fbc_find_crtc(struct drm_i915_private *dev_priv)
 		tmp_crtc = dev_priv->pipe_to_crtc_mapping[pipe];
 
 		if (intel_crtc_active(tmp_crtc) &&
-		    to_intel_crtc(tmp_crtc)->primary_enabled) {
+		    to_intel_plane_state(tmp_crtc->primary->state)->visible) {
 			if (one_pipe_only && crtc) {
 				if (set_no_fbc_reason(dev_priv, FBC_MULTIPLE_PIPES))
 					DRM_DEBUG_KMS("more than one pipe active, disabling compression\n");
@@ -521,7 +521,7 @@ void intel_fbc_update(struct drm_device *dev)
 		goto out_disable;
 	}
 
-	if (!i915.enable_fbc || !i915.powersave) {
+	if (!i915.enable_fbc) {
 		if (set_no_fbc_reason(dev_priv, FBC_MODULE_PARAM))
 			DRM_DEBUG_KMS("fbc disabled per module param\n");
 		goto out_disable;

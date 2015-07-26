@@ -36,11 +36,13 @@ static bool intel_dp_mst_compute_config(struct intel_encoder *encoder,
 	struct intel_dp_mst_encoder *intel_mst = enc_to_mst(&encoder->base);
 	struct intel_digital_port *intel_dig_port = intel_mst->primary;
 	struct intel_dp *intel_dp = &intel_dig_port->dp;
-	struct drm_device *dev = encoder->base.dev;
-	int bpp;
+	struct drm_atomic_state *state;
+	int bpp, i;
 	int lane_count, slots, rate;
 	struct drm_display_mode *adjusted_mode = &pipe_config->base.adjusted_mode;
-	struct intel_connector *found = NULL, *intel_connector;
+	struct drm_connector *drm_connector;
+	struct intel_connector *connector, *found = NULL;
+	struct drm_connector_state *connector_state;
 	int mst_pbn;
 
 	pipe_config->dp_encoder_is_mst = true;
@@ -68,9 +70,13 @@ static bool intel_dp_mst_compute_config(struct intel_encoder *encoder,
 	pipe_config->pipe_bpp = 24;
 	pipe_config->port_clock = rate;
 
-	for_each_intel_connector(dev, intel_connector) {
-		if (intel_connector->new_encoder == encoder) {
-			found = intel_connector;
+	state = pipe_config->base.state;
+
+	for_each_connector_in_state(state, drm_connector, connector_state, i) {
+		connector = to_intel_connector(drm_connector);
+
+		if (connector_state->best_encoder == &encoder->base) {
+			found = connector;
 			break;
 		}
 	}
@@ -145,14 +151,14 @@ static void intel_mst_pre_enable_dp(struct intel_encoder *encoder)
 	enum port port = intel_dig_port->port;
 	int ret;
 	uint32_t temp;
-	struct intel_connector *found = NULL, *intel_connector;
+	struct intel_connector *found = NULL, *connector;
 	int slots;
 	struct drm_crtc *crtc = encoder->base.crtc;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 
-	for_each_intel_connector(dev, intel_connector) {
-		if (intel_connector->new_encoder == encoder) {
-			found = intel_connector;
+	for_each_intel_connector(dev, connector) {
+		if (connector->base.state->best_encoder == &encoder->base) {
+			found = connector;
 			break;
 		}
 	}
@@ -168,8 +174,10 @@ static void intel_mst_pre_enable_dp(struct intel_encoder *encoder)
 	if (intel_dp->active_mst_links == 0) {
 		enum port port = intel_ddi_get_encoder_port(encoder);
 
-		I915_WRITE(PORT_CLK_SEL(port),
-			   intel_crtc->config->ddi_pll_sel);
+		/* FIXME: add support for SKL */
+		if (INTEL_INFO(dev)->gen < 9)
+			I915_WRITE(PORT_CLK_SEL(port),
+				   intel_crtc->config->ddi_pll_sel);
 
 		intel_ddi_init_dp_buf_reg(&intel_dig_port->base);
 
@@ -327,6 +335,7 @@ static const struct drm_connector_funcs intel_dp_mst_connector_funcs = {
 	.atomic_get_property = intel_connector_atomic_get_property,
 	.destroy = intel_dp_mst_connector_destroy,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
+	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
 };
 
 static int intel_dp_mst_get_modes(struct drm_connector *connector)
@@ -409,7 +418,7 @@ static struct drm_connector *intel_dp_add_mst_connector(struct drm_dp_mst_topolo
 	struct drm_connector *connector;
 	int i;
 
-	intel_connector = kzalloc(sizeof(*intel_connector), GFP_KERNEL);
+	intel_connector = intel_connector_alloc();
 	if (!intel_connector)
 		return NULL;
 

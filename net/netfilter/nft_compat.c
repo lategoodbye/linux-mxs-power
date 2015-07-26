@@ -55,7 +55,7 @@ nft_compat_set_par(struct xt_action_param *par, void *xt, const void *xt_info)
 }
 
 static void nft_target_eval_xt(const struct nft_expr *expr,
-			       struct nft_data data[NFT_REG_MAX + 1],
+			       struct nft_regs *regs,
 			       const struct nft_pktinfo *pkt)
 {
 	void *info = nft_expr_priv(expr);
@@ -72,16 +72,16 @@ static void nft_target_eval_xt(const struct nft_expr *expr,
 
 	switch (ret) {
 	case XT_CONTINUE:
-		data[NFT_REG_VERDICT].verdict = NFT_CONTINUE;
+		regs->verdict.code = NFT_CONTINUE;
 		break;
 	default:
-		data[NFT_REG_VERDICT].verdict = ret;
+		regs->verdict.code = ret;
 		break;
 	}
 }
 
 static void nft_target_eval_bridge(const struct nft_expr *expr,
-				   struct nft_data data[NFT_REG_MAX + 1],
+				   struct nft_regs *regs,
 				   const struct nft_pktinfo *pkt)
 {
 	void *info = nft_expr_priv(expr);
@@ -98,19 +98,19 @@ static void nft_target_eval_bridge(const struct nft_expr *expr,
 
 	switch (ret) {
 	case EBT_ACCEPT:
-		data[NFT_REG_VERDICT].verdict = NF_ACCEPT;
+		regs->verdict.code = NF_ACCEPT;
 		break;
 	case EBT_DROP:
-		data[NFT_REG_VERDICT].verdict = NF_DROP;
+		regs->verdict.code = NF_DROP;
 		break;
 	case EBT_CONTINUE:
-		data[NFT_REG_VERDICT].verdict = NFT_CONTINUE;
+		regs->verdict.code = NFT_CONTINUE;
 		break;
 	case EBT_RETURN:
-		data[NFT_REG_VERDICT].verdict = NFT_RETURN;
+		regs->verdict.code = NFT_RETURN;
 		break;
 	default:
-		data[NFT_REG_VERDICT].verdict = ret;
+		regs->verdict.code = ret;
 		break;
 	}
 }
@@ -135,6 +135,9 @@ nft_target_set_tgchk_param(struct xt_tgchk_param *par,
 		entry->e4.ip.invflags = inv ? IPT_INV_PROTO : 0;
 		break;
 	case AF_INET6:
+		if (proto)
+			entry->e6.ipv6.flags |= IP6T_F_PROTO;
+
 		entry->e6.ipv6.proto = proto;
 		entry->e6.ipv6.invflags = inv ? IP6T_INV_PROTO : 0;
 		break;
@@ -158,6 +161,7 @@ nft_target_set_tgchk_param(struct xt_tgchk_param *par,
 		par->hook_mask = 0;
 	}
 	par->family	= ctx->afi->family;
+	par->nft_compat = true;
 }
 
 static void target_compat_from_user(struct xt_target *t, void *in, void *out)
@@ -301,7 +305,7 @@ static int nft_target_validate(const struct nft_ctx *ctx,
 }
 
 static void nft_match_eval(const struct nft_expr *expr,
-			   struct nft_data data[NFT_REG_MAX + 1],
+			   struct nft_regs *regs,
 			   const struct nft_pktinfo *pkt)
 {
 	void *info = nft_expr_priv(expr);
@@ -314,16 +318,16 @@ static void nft_match_eval(const struct nft_expr *expr,
 	ret = match->match(skb, (struct xt_action_param *)&pkt->xt);
 
 	if (pkt->xt.hotdrop) {
-		data[NFT_REG_VERDICT].verdict = NF_DROP;
+		regs->verdict.code = NF_DROP;
 		return;
 	}
 
-	switch(ret) {
-	case true:
-		data[NFT_REG_VERDICT].verdict = NFT_CONTINUE;
+	switch (ret ? 1 : 0) {
+	case 1:
+		regs->verdict.code = NFT_CONTINUE;
 		break;
-	case false:
-		data[NFT_REG_VERDICT].verdict = NFT_BREAK;
+	case 0:
+		regs->verdict.code = NFT_BREAK;
 		break;
 	}
 }
@@ -348,6 +352,9 @@ nft_match_set_mtchk_param(struct xt_mtchk_param *par, const struct nft_ctx *ctx,
 		entry->e4.ip.invflags = inv ? IPT_INV_PROTO : 0;
 		break;
 	case AF_INET6:
+		if (proto)
+			entry->e6.ipv6.flags |= IP6T_F_PROTO;
+
 		entry->e6.ipv6.proto = proto;
 		entry->e6.ipv6.invflags = inv ? IP6T_INV_PROTO : 0;
 		break;
@@ -371,6 +378,7 @@ nft_match_set_mtchk_param(struct xt_mtchk_param *par, const struct nft_ctx *ctx,
 		par->hook_mask = 0;
 	}
 	par->family	= ctx->afi->family;
+	par->nft_compat = true;
 }
 
 static void match_compat_from_user(struct xt_match *m, void *in, void *out)

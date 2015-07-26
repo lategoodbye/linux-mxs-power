@@ -40,9 +40,10 @@ extern void cpu_remove_dev_attr(struct device_attribute *attr);
 extern int cpu_add_dev_attr_group(struct attribute_group *attrs);
 extern void cpu_remove_dev_attr_group(struct attribute_group *attrs);
 
-extern struct device *cpu_device_create(struct device *parent, void *drvdata,
-					const struct attribute_group **groups,
-					const char *fmt, ...);
+extern __printf(4, 5)
+struct device *cpu_device_create(struct device *parent, void *drvdata,
+				 const struct attribute_group **groups,
+				 const char *fmt, ...);
 #ifdef CONFIG_HOTPLUG_CPU
 extern void unregister_cpu(struct cpu *cpu);
 extern ssize_t arch_cpu_probe(const char *, size_t);
@@ -73,6 +74,7 @@ enum {
 	/* migration should happen before other stuff but after perf */
 	CPU_PRI_PERF		= 20,
 	CPU_PRI_MIGRATION	= 10,
+	CPU_PRI_SMPBOOT		= 9,
 	/* bring up workqueues before normal notifiers and down after */
 	CPU_PRI_WORKQUEUE_UP	= 5,
 	CPU_PRI_WORKQUEUE_DOWN	= -5,
@@ -165,6 +167,7 @@ static inline void __unregister_cpu_notifier(struct notifier_block *nb)
 }
 #endif
 
+void smpboot_thread_init(void);
 int cpu_up(unsigned int cpu);
 void notify_cpu_starting(unsigned int cpu);
 extern void cpu_maps_update_begin(void);
@@ -209,6 +212,10 @@ static inline void cpu_notifier_register_begin(void)
 }
 
 static inline void cpu_notifier_register_done(void)
+{
+}
+
+static inline void smpboot_thread_init(void)
 {
 }
 

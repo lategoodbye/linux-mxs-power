@@ -188,8 +188,9 @@ static int create_strip_zones(struct mddev *mddev, struct r0conf **private_conf)
 		}
 		dev[j] = rdev1;
 
-		disk_stack_limits(mddev->gendisk, rdev1->bdev,
-				  rdev1->data_offset << 9);
+		if (mddev->queue)
+			disk_stack_limits(mddev->gendisk, rdev1->bdev,
+					  rdev1->data_offset << 9);
 
 		if (rdev1->bdev->bd_disk->queue->merge_bvec_fn)
 			conf->has_merge_bvec = 1;
@@ -315,7 +316,7 @@ static struct strip_zone *find_zone(struct r0conf *conf,
 
 /*
  * remaps the bio to the target device. we separate two flows.
- * power 2 flow and a general flow for the sake of perfromance
+ * power 2 flow and a general flow for the sake of performance
 */
 static struct md_rdev *map_sector(struct mddev *mddev, struct strip_zone *zone,
 				sector_t sector, sector_t *sector_offset)
@@ -473,8 +474,6 @@ static int raid0_run(struct mddev *mddev)
 	dump_zones(mddev);
 
 	ret = md_integrity_register(mddev);
-	if (ret)
-		raid0_free(mddev, conf);
 
 	return ret;
 }
@@ -524,6 +523,9 @@ static void raid0_make_request(struct mddev *mddev, struct bio *bio)
 			(likely(is_power_of_2(chunk_sects))
 			 ? (sector & (chunk_sects-1))
 			 : sector_div(sector, chunk_sects));
+
+		/* Restore due to sector_div */
+		sector = bio->bi_iter.bi_sector;
 
 		if (sectors < bio_sectors(bio)) {
 			split = bio_split(bio, sectors, GFP_NOIO, fs_bio_set);

@@ -112,6 +112,41 @@ static struct fsl_mc_device *fsl_mc_device_lookup(struct dprc_obj_desc
 }
 
 /**
+ * check_plugged_state_change - Check change in an MC object's plugged state
+ *
+ * @mc_dev: pointer to the fsl-mc device for a given MC object
+ * @obj_desc: pointer to the MC object's descriptor in the MC
+ *
+ * If the plugged state has changed from unplugged to plugged, the fsl-mc
+ * device is bound to the corresponding device driver.
+ * If the plugged state has changed from plugged to unplugged, the fsl-mc
+ * device is unbound from the corresponding device driver.
+ */
+static void check_plugged_state_change(struct fsl_mc_device *mc_dev,
+				       struct dprc_obj_desc *obj_desc)
+{
+	int error;
+	uint32_t plugged_flag_at_mc =
+			(obj_desc->state & DPRC_OBJ_STATE_PLUGGED);
+
+	if (plugged_flag_at_mc !=
+	    (mc_dev->obj_desc.state & DPRC_OBJ_STATE_PLUGGED)) {
+		if (plugged_flag_at_mc) {
+			mc_dev->obj_desc.state |= DPRC_OBJ_STATE_PLUGGED;
+			error = device_attach(&mc_dev->dev);
+			if (error < 0) {
+				dev_err(&mc_dev->dev,
+					"device_attach() failed: %d\n",
+					error);
+			}
+		} else {
+			mc_dev->obj_desc.state &= ~DPRC_OBJ_STATE_PLUGGED;
+			device_release_driver(&mc_dev->dev);
+		}
+	}
+}
+
+/**
  * dprc_add_new_devices - Adds devices to the logical bus for a DPRC
  *
  * @mc_bus_dev: pointer to the fsl-mc device that represents a DPRC object
@@ -132,7 +167,6 @@ static void dprc_add_new_devices(struct fsl_mc_device *mc_bus_dev,
 
 	for (i = 0; i < num_child_objects_in_mc; i++) {
 		struct fsl_mc_device *child_dev;
-		struct fsl_mc_io *mc_io = NULL;
 		struct dprc_obj_desc *obj_desc = &obj_desc_array[i];
 
 		if (strlen(obj_desc->type) == 0)
@@ -142,17 +176,15 @@ static void dprc_add_new_devices(struct fsl_mc_device *mc_bus_dev,
 		 * Check if device is already known to Linux:
 		 */
 		child_dev = fsl_mc_device_lookup(obj_desc, mc_bus_dev);
-		if (child_dev)
-			continue;
-
-		error = fsl_mc_device_add(obj_desc, mc_io, &mc_bus_dev->dev,
-					  &child_dev);
-		if (error < 0) {
-			if (mc_io)
-				fsl_destroy_mc_io(mc_io);
-
+		if (child_dev) {
+			check_plugged_state_change(child_dev, obj_desc);
 			continue;
 		}
+
+		error = fsl_mc_device_add(obj_desc, NULL, &mc_bus_dev->dev,
+					  &child_dev);
+		if (error < 0)
+			continue;
 	}
 }
 
@@ -203,36 +235,6 @@ static void dprc_cleanup_all_resource_pools(struct fsl_mc_device *mc_bus_dev)
 
 	for (pool_type = 0; pool_type < FSL_MC_NUM_POOL_TYPES; pool_type++)
 		dprc_cleanup_resource_pool(mc_bus_dev, pool_type);
-}
-
-static void reorder_obj_desc_array(struct dprc_obj_desc *obj_desc_array,
-				   int num_devs)
-{
-	struct dprc_obj_desc tmp;
-	struct dprc_obj_desc *top_cursor = &obj_desc_array[0];
-	struct dprc_obj_desc *bottom_cursor = &obj_desc_array[num_devs - 1];
-
-	/*
-	 * Reorder entries in obj_desc_array so that all allocatable devices
-	 * are placed before all non-allocatable devices:
-	 *
-	 * Loop Invariant: everything before top_cursor is allocatable and
-	 * everything after bottom_cursor is non-allocatable.
-	 */
-	while (top_cursor < bottom_cursor) {
-		if (FSL_MC_IS_ALLOCATABLE(top_cursor->type)) {
-			top_cursor++;
-		} else {
-			if (FSL_MC_IS_ALLOCATABLE(bottom_cursor->type)) {
-				tmp = *bottom_cursor;
-				*bottom_cursor = *top_cursor;
-				*top_cursor = tmp;
-				top_cursor++;
-			}
-
-			bottom_cursor--;
-		}
-	}
 }
 
 /**
@@ -313,8 +315,6 @@ int dprc_scan_objects(struct fsl_mc_device *mc_bus_dev)
 				"%d out of %d devices could not be retrieved\n",
 				dprc_get_obj_failures, num_child_objects);
 		}
-
-		reorder_obj_desc_array(child_obj_desc_array, num_child_objects);
 	}
 
 	dprc_remove_devices(mc_bus_dev, child_obj_desc_array,

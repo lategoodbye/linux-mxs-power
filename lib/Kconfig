@@ -188,13 +188,6 @@ config CRC8
 	  when they need to do cyclic redundancy check according CRC8
 	  algorithm. Module will be called crc8.
 
-config CRC64_ECMA
-	tristate "CRC64 ECMA function"
-	help
-	  This option provides CRC64 ECMA function. Drivers may select this
-	  when they need to do cyclic redundancy check according to the CRC64
-	  ECMA algorithm.
-
 config AUDIT_GENERIC
 	bool
 	depends on AUDIT && !AUDIT_ARCH
@@ -219,6 +212,12 @@ config RANDOM32_SELFTEST
 #
 # compression support is select'ed if needed
 #
+config 842_COMPRESS
+	tristate
+
+config 842_DECOMPRESS
+	tristate
+
 config ZLIB_INFLATE
 	tristate
 
@@ -403,10 +402,6 @@ config CPUMASK_OFFSTACK
 	  them on the stack.  This is a bit more expensive, but avoids
 	  stack overflow.
 
-config DISABLE_OBSOLETE_CPUMASK_FUNCTIONS
-       bool "Disable obsolete cpumask functions" if DEBUG_PER_CPU_MAPS
-       depends on BROKEN
-
 config CPU_RMAP
 	bool
 	depends on SMP
@@ -532,5 +527,8 @@ source "lib/fonts/Kconfig"
 
 config ARCH_HAS_SG_CHAIN
 	def_bool n
+
+config ARCH_HAS_PMEM_API
+	bool
 
 endmenu

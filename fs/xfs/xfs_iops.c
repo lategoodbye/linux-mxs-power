@@ -41,7 +41,6 @@
 
 #include <linux/capability.h>
 #include <linux/xattr.h>
-#include <linux/namei.h>
 #include <linux/posix_acl.h>
 #include <linux/security.h>
 #include <linux/fiemap.h>
@@ -304,7 +303,7 @@ xfs_vn_link(
 	struct inode	*dir,
 	struct dentry	*dentry)
 {
-	struct inode	*inode = old_dentry->d_inode;
+	struct inode	*inode = d_inode(old_dentry);
 	struct xfs_name	name;
 	int		error;
 
@@ -329,7 +328,7 @@ xfs_vn_unlink(
 
 	xfs_dentry_to_name(&name, dentry, 0);
 
-	error = xfs_remove(XFS_I(dir), &name, XFS_I(dentry->d_inode));
+	error = xfs_remove(XFS_I(dir), &name, XFS_I(d_inode(dentry)));
 	if (error)
 		return error;
 
@@ -389,22 +388,22 @@ xfs_vn_rename(
 	struct dentry	*ndentry,
 	unsigned int	flags)
 {
-	struct inode	*new_inode = ndentry->d_inode;
+	struct inode	*new_inode = d_inode(ndentry);
 	int		omode = 0;
 	struct xfs_name	oname;
 	struct xfs_name	nname;
 
-	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE))
+	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
 		return -EINVAL;
 
 	/* if we are exchanging files, we need to set i_mode of both files */
 	if (flags & RENAME_EXCHANGE)
-		omode = ndentry->d_inode->i_mode;
+		omode = d_inode(ndentry)->i_mode;
 
 	xfs_dentry_to_name(&oname, odentry, omode);
-	xfs_dentry_to_name(&nname, ndentry, odentry->d_inode->i_mode);
+	xfs_dentry_to_name(&nname, ndentry, d_inode(odentry)->i_mode);
 
-	return xfs_rename(XFS_I(odir), &oname, XFS_I(odentry->d_inode),
+	return xfs_rename(XFS_I(odir), &oname, XFS_I(d_inode(odentry)),
 			  XFS_I(ndir), &nname,
 			  new_inode ? XFS_I(new_inode) : NULL, flags);
 }
@@ -414,10 +413,10 @@ xfs_vn_rename(
  * we need to be very careful about how much stack we use.
  * uio is kmalloced for this reason...
  */
-STATIC void *
+STATIC const char *
 xfs_vn_follow_link(
 	struct dentry		*dentry,
-	struct nameidata	*nd)
+	void			**cookie)
 {
 	char			*link;
 	int			error = -ENOMEM;
@@ -426,18 +425,16 @@ xfs_vn_follow_link(
 	if (!link)
 		goto out_err;
 
-	error = xfs_readlink(XFS_I(dentry->d_inode), link);
+	error = xfs_readlink(XFS_I(d_inode(dentry)), link);
 	if (unlikely(error))
 		goto out_kfree;
 
-	nd_set_link(nd, link);
-	return NULL;
+	return *cookie = link;
 
  out_kfree:
 	kfree(link);
  out_err:
-	nd_set_link(nd, ERR_PTR(error));
-	return NULL;
+	return ERR_PTR(error);
 }
 
 STATIC int
@@ -446,7 +443,7 @@ xfs_vn_getattr(
 	struct dentry		*dentry,
 	struct kstat		*stat)
 {
-	struct inode		*inode = dentry->d_inode;
+	struct inode		*inode = d_inode(dentry);
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 
@@ -702,7 +699,7 @@ xfs_setattr_nonsize(
 
 	if (mp->m_flags & XFS_MOUNT_WSYNC)
 		xfs_trans_set_sync(tp);
-	error = xfs_trans_commit(tp, 0);
+	error = xfs_trans_commit(tp);
 
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 
@@ -733,7 +730,7 @@ xfs_setattr_nonsize(
 	return 0;
 
 out_trans_cancel:
-	xfs_trans_cancel(tp, 0);
+	xfs_trans_cancel(tp);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 out_dqrele:
 	xfs_qm_dqrele(udqp);
@@ -755,7 +752,6 @@ xfs_setattr_size(
 	struct xfs_trans	*tp;
 	int			error;
 	uint			lock_flags = 0;
-	uint			commit_flags = 0;
 	bool			did_zeroing = false;
 
 	trace_xfs_setattr(ip);
@@ -851,7 +847,11 @@ xfs_setattr_size(
 	 * to hope that the caller sees ENOMEM and retries the truncate
 	 * operation.
 	 */
-	error = block_truncate_page(inode->i_mapping, newsize, xfs_get_blocks);
+	if (IS_DAX(inode))
+		error = dax_truncate_page(inode, newsize, xfs_get_blocks_direct);
+	else
+		error = block_truncate_page(inode->i_mapping, newsize,
+					    xfs_get_blocks);
 	if (error)
 		return error;
 	truncate_setsize(inode, newsize);
@@ -861,7 +861,6 @@ xfs_setattr_size(
 	if (error)
 		goto out_trans_cancel;
 
-	commit_flags = XFS_TRANS_RELEASE_LOG_RES;
 	lock_flags |= XFS_ILOCK_EXCL;
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_trans_ijoin(tp, ip, 0);
@@ -901,7 +900,7 @@ xfs_setattr_size(
 	if (newsize <= oldsize) {
 		error = xfs_itruncate_extents(&tp, ip, XFS_DATA_FORK, newsize);
 		if (error)
-			goto out_trans_abort;
+			goto out_trans_cancel;
 
 		/*
 		 * Truncated "down", so we're removing references to old data
@@ -928,16 +927,14 @@ xfs_setattr_size(
 	if (mp->m_flags & XFS_MOUNT_WSYNC)
 		xfs_trans_set_sync(tp);
 
-	error = xfs_trans_commit(tp, XFS_TRANS_RELEASE_LOG_RES);
+	error = xfs_trans_commit(tp);
 out_unlock:
 	if (lock_flags)
 		xfs_iunlock(ip, lock_flags);
 	return error;
 
-out_trans_abort:
-	commit_flags |= XFS_TRANS_ABORT;
 out_trans_cancel:
-	xfs_trans_cancel(tp, commit_flags);
+	xfs_trans_cancel(tp);
 	goto out_unlock;
 }
 
@@ -946,14 +943,14 @@ xfs_vn_setattr(
 	struct dentry		*dentry,
 	struct iattr		*iattr)
 {
-	struct xfs_inode	*ip = XFS_I(dentry->d_inode);
+	struct xfs_inode	*ip = XFS_I(d_inode(dentry));
 	int			error;
 
 	if (iattr->ia_valid & ATTR_SIZE) {
 		uint		iolock = XFS_IOLOCK_EXCL;
 
 		xfs_ilock(ip, iolock);
-		error = xfs_break_layouts(dentry->d_inode, &iolock);
+		error = xfs_break_layouts(d_inode(dentry), &iolock, true);
 		if (!error) {
 			xfs_ilock(ip, XFS_MMAPLOCK_EXCL);
 			iolock |= XFS_MMAPLOCK_EXCL;
@@ -984,7 +981,7 @@ xfs_vn_update_time(
 	tp = xfs_trans_alloc(mp, XFS_TRANS_FSYNC_TS);
 	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_fsyncts, 0, 0);
 	if (error) {
-		xfs_trans_cancel(tp, 0);
+		xfs_trans_cancel(tp);
 		return error;
 	}
 
@@ -1006,7 +1003,7 @@ xfs_vn_update_time(
 	}
 	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
 	xfs_trans_log_inode(tp, ip, XFS_ILOG_TIMESTAMP);
-	return xfs_trans_commit(tp, 0);
+	return xfs_trans_commit(tp);
 }
 
 #define XFS_FIEMAP_FLAGS	(FIEMAP_FLAG_SYNC|FIEMAP_FLAG_XATTR)
@@ -1191,22 +1188,22 @@ xfs_diflags_to_iflags(
 	struct inode		*inode,
 	struct xfs_inode	*ip)
 {
-	if (ip->i_d.di_flags & XFS_DIFLAG_IMMUTABLE)
+	uint16_t		flags = ip->i_d.di_flags;
+
+	inode->i_flags &= ~(S_IMMUTABLE | S_APPEND | S_SYNC |
+			    S_NOATIME | S_DAX);
+
+	if (flags & XFS_DIFLAG_IMMUTABLE)
 		inode->i_flags |= S_IMMUTABLE;
-	else
-		inode->i_flags &= ~S_IMMUTABLE;
-	if (ip->i_d.di_flags & XFS_DIFLAG_APPEND)
+	if (flags & XFS_DIFLAG_APPEND)
 		inode->i_flags |= S_APPEND;
-	else
-		inode->i_flags &= ~S_APPEND;
-	if (ip->i_d.di_flags & XFS_DIFLAG_SYNC)
+	if (flags & XFS_DIFLAG_SYNC)
 		inode->i_flags |= S_SYNC;
-	else
-		inode->i_flags &= ~S_SYNC;
-	if (ip->i_d.di_flags & XFS_DIFLAG_NOATIME)
+	if (flags & XFS_DIFLAG_NOATIME)
 		inode->i_flags |= S_NOATIME;
-	else
-		inode->i_flags &= ~S_NOATIME;
+	/* XXX: Also needs an on-disk per inode flag! */
+	if (ip->i_mount->m_flags & XFS_MOUNT_DAX)
+		inode->i_flags |= S_DAX;
 }
 
 /*

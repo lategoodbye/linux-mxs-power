@@ -44,6 +44,23 @@
 #include "comedi_internal.h"
 
 /**
+ * comedi_subdevice "runflags"
+ * @COMEDI_SRF_RT:		DEPRECATED: command is running real-time
+ * @COMEDI_SRF_ERROR:		indicates an COMEDI_CB_ERROR event has occurred
+ *				since the last command was started
+ * @COMEDI_SRF_RUNNING:		command is running
+ * @COMEDI_SRF_FREE_SPRIV:	free s->private on detach
+ *
+ * @COMEDI_SRF_BUSY_MASK:	runflags that indicate the subdevice is "busy"
+ */
+#define COMEDI_SRF_RT		BIT(1)
+#define COMEDI_SRF_ERROR	BIT(2)
+#define COMEDI_SRF_RUNNING	BIT(27)
+#define COMEDI_SRF_FREE_SPRIV	BIT(31)
+
+#define COMEDI_SRF_BUSY_MASK	(COMEDI_SRF_ERROR | COMEDI_SRF_RUNNING)
+
+/**
  * struct comedi_file - per-file private data for comedi device
  * @dev: comedi_device struct
  * @read_subdev: current "read" subdevice
@@ -601,15 +618,32 @@ static struct attribute *comedi_dev_attrs[] = {
 };
 ATTRIBUTE_GROUPS(comedi_dev);
 
-static void comedi_set_subdevice_runflags(struct comedi_subdevice *s,
-					  unsigned mask, unsigned bits)
+static void __comedi_clear_subdevice_runflags(struct comedi_subdevice *s,
+					      unsigned bits)
+{
+	s->runflags &= ~bits;
+}
+
+static void __comedi_set_subdevice_runflags(struct comedi_subdevice *s,
+					    unsigned bits)
+{
+	s->runflags |= bits;
+}
+
+static void comedi_update_subdevice_runflags(struct comedi_subdevice *s,
+					     unsigned mask, unsigned bits)
 {
 	unsigned long flags;
 
 	spin_lock_irqsave(&s->spin_lock, flags);
-	s->runflags &= ~mask;
-	s->runflags |= (bits & mask);
+	__comedi_clear_subdevice_runflags(s, mask);
+	__comedi_set_subdevice_runflags(s, bits & mask);
 	spin_unlock_irqrestore(&s->spin_lock, flags);
+}
+
+static unsigned __comedi_get_subdevice_runflags(struct comedi_subdevice *s)
+{
+	return s->runflags;
 }
 
 static unsigned comedi_get_subdevice_runflags(struct comedi_subdevice *s)
@@ -618,9 +652,19 @@ static unsigned comedi_get_subdevice_runflags(struct comedi_subdevice *s)
 	unsigned runflags;
 
 	spin_lock_irqsave(&s->spin_lock, flags);
-	runflags = s->runflags;
+	runflags = __comedi_get_subdevice_runflags(s);
 	spin_unlock_irqrestore(&s->spin_lock, flags);
 	return runflags;
+}
+
+static bool comedi_is_runflags_running(unsigned runflags)
+{
+	return runflags & COMEDI_SRF_RUNNING;
+}
+
+static bool comedi_is_runflags_in_error(unsigned runflags)
+{
+	return runflags & COMEDI_SRF_ERROR;
 }
 
 /**
@@ -634,26 +678,46 @@ bool comedi_is_subdevice_running(struct comedi_subdevice *s)
 {
 	unsigned runflags = comedi_get_subdevice_runflags(s);
 
-	return (runflags & COMEDI_SRF_RUNNING) ? true : false;
+	return comedi_is_runflags_running(runflags);
 }
 EXPORT_SYMBOL_GPL(comedi_is_subdevice_running);
 
-static bool comedi_is_subdevice_in_error(struct comedi_subdevice *s)
+static bool __comedi_is_subdevice_running(struct comedi_subdevice *s)
 {
-	unsigned runflags = comedi_get_subdevice_runflags(s);
+	unsigned runflags = __comedi_get_subdevice_runflags(s);
 
-	return (runflags & COMEDI_SRF_ERROR) ? true : false;
+	return comedi_is_runflags_running(runflags);
 }
 
 static bool comedi_is_subdevice_idle(struct comedi_subdevice *s)
 {
 	unsigned runflags = comedi_get_subdevice_runflags(s);
 
-	return (runflags & COMEDI_SRF_BUSY_MASK) ? false : true;
+	return !(runflags & COMEDI_SRF_BUSY_MASK);
+}
+
+bool comedi_can_auto_free_spriv(struct comedi_subdevice *s)
+{
+	unsigned runflags = __comedi_get_subdevice_runflags(s);
+
+	return runflags & COMEDI_SRF_FREE_SPRIV;
 }
 
 /**
- * comedi_alloc_spriv() - Allocate memory for the subdevice private data.
+ * comedi_set_spriv_auto_free - mark subdevice private data as freeable
+ * @s: comedi_subdevice struct
+ *
+ * Mark the subdevice as having a pointer to private data that can be
+ * automatically freed by the comedi core during the detach.
+ */
+void comedi_set_spriv_auto_free(struct comedi_subdevice *s)
+{
+	__comedi_set_subdevice_runflags(s, COMEDI_SRF_FREE_SPRIV);
+}
+EXPORT_SYMBOL_GPL(comedi_set_spriv_auto_free);
+
+/**
+ * comedi_alloc_spriv - Allocate memory for the subdevice private data.
  * @s: comedi_subdevice struct
  * @size: size of the memory to allocate
  *
@@ -664,7 +728,7 @@ void *comedi_alloc_spriv(struct comedi_subdevice *s, size_t size)
 {
 	s->private = kzalloc(size, GFP_KERNEL);
 	if (s->private)
-		s->runflags |= COMEDI_SRF_FREE_SPRIV;
+		comedi_set_spriv_auto_free(s);
 	return s->private;
 }
 EXPORT_SYMBOL_GPL(comedi_alloc_spriv);
@@ -677,14 +741,14 @@ static void do_become_nonbusy(struct comedi_device *dev,
 {
 	struct comedi_async *async = s->async;
 
-	comedi_set_subdevice_runflags(s, COMEDI_SRF_RUNNING, 0);
+	comedi_update_subdevice_runflags(s, COMEDI_SRF_RUNNING, 0);
 	if (async) {
 		comedi_buf_reset(s);
 		async->inttrig = NULL;
 		kfree(async->cmd.chanlist);
 		async->cmd.chanlist = NULL;
 		s->busy = NULL;
-		wake_up_interruptible_all(&s->async->wait_head);
+		wake_up_interruptible_all(&async->wait_head);
 	} else {
 		dev_err(dev->class_dev,
 			"BUG: (?) do_become_nonbusy called with async=NULL\n");
@@ -1021,11 +1085,6 @@ static int do_chaninfo_ioctl(struct comedi_device *dev,
 			if (put_user(x, it.rangelist + i))
 				return -EFAULT;
 		}
-#if 0
-		if (copy_to_user(it.rangelist, s->range_type_list,
-				 s->n_chan * sizeof(unsigned int)))
-			return -EFAULT;
-#endif
 	}
 
 	return 0;
@@ -1678,8 +1737,8 @@ static int do_cmd_ioctl(struct comedi_device *dev,
 	if (async->cmd.flags & CMDF_WAKE_EOS)
 		async->cb_mask |= COMEDI_CB_EOS;
 
-	comedi_set_subdevice_runflags(s, COMEDI_SRF_BUSY_MASK,
-				      COMEDI_SRF_RUNNING);
+	comedi_update_subdevice_runflags(s, COMEDI_SRF_BUSY_MASK,
+					 COMEDI_SRF_RUNNING);
 
 	/*
 	 * Set s->busy _after_ setting COMEDI_SRF_RUNNING flag to avoid
@@ -1698,7 +1757,7 @@ cleanup:
 
 /*
  * COMEDI_CMDTEST ioctl
- * asynchronous aquisition command testing
+ * asynchronous acquisition command testing
  *
  * arg:
  *	pointer to comedi_cmd structure
@@ -2282,13 +2341,16 @@ static ssize_t comedi_write(struct file *file, const char __user *buf,
 	add_wait_queue(&async->wait_head, &wait);
 	on_wait_queue = true;
 	while (nbytes > 0 && !retval) {
+		unsigned runflags;
+
 		set_current_state(TASK_INTERRUPTIBLE);
 
-		if (!comedi_is_subdevice_running(s)) {
+		runflags = comedi_get_subdevice_runflags(s);
+		if (!comedi_is_runflags_running(runflags)) {
 			if (count == 0) {
 				struct comedi_subdevice *new_s;
 
-				if (comedi_is_subdevice_in_error(s))
+				if (comedi_is_runflags_in_error(runflags))
 					retval = -EPIPE;
 				else
 					retval = 0;
@@ -2435,8 +2497,10 @@ static ssize_t comedi_read(struct file *file, char __user *buf, size_t nbytes,
 			n = m;
 
 		if (n == 0) {
-			if (!comedi_is_subdevice_running(s)) {
-				if (comedi_is_subdevice_in_error(s))
+			unsigned runflags = comedi_get_subdevice_runflags(s);
+
+			if (!comedi_is_runflags_running(runflags)) {
+				if (comedi_is_runflags_in_error(runflags))
 					retval = -EPIPE;
 				else
 					retval = 0;
@@ -2638,39 +2702,38 @@ static const struct file_operations comedi_fops = {
 void comedi_event(struct comedi_device *dev, struct comedi_subdevice *s)
 {
 	struct comedi_async *async = s->async;
-	unsigned runflags = 0;
-	unsigned runflags_mask = 0;
+	unsigned int events;
+	int si_code = 0;
+	unsigned long flags;
 
-	if (!comedi_is_subdevice_running(s))
+	spin_lock_irqsave(&s->spin_lock, flags);
+
+	events = async->events;
+	async->events = 0;
+	if (!__comedi_is_subdevice_running(s)) {
+		spin_unlock_irqrestore(&s->spin_lock, flags);
 		return;
+	}
 
-	if (s->async->events & COMEDI_CB_CANCEL_MASK)
-		runflags_mask |= COMEDI_SRF_RUNNING;
+	if (events & COMEDI_CB_CANCEL_MASK)
+		__comedi_clear_subdevice_runflags(s, COMEDI_SRF_RUNNING);
 
 	/*
-	 * Remember if an error event has occurred, so an error
-	 * can be returned the next time the user does a read().
+	 * Remember if an error event has occurred, so an error can be
+	 * returned the next time the user does a read() or write().
 	 */
-	if (s->async->events & COMEDI_CB_ERROR_MASK) {
-		runflags_mask |= COMEDI_SRF_ERROR;
-		runflags |= COMEDI_SRF_ERROR;
-	}
-	if (runflags_mask) {
-		/*
-		 * Sets COMEDI_SRF_ERROR and COMEDI_SRF_RUNNING together
-		 * atomically.
-		 */
-		comedi_set_subdevice_runflags(s, runflags_mask, runflags);
+	if (events & COMEDI_CB_ERROR_MASK)
+		__comedi_set_subdevice_runflags(s, COMEDI_SRF_ERROR);
+
+	if (async->cb_mask & events) {
+		wake_up_interruptible(&async->wait_head);
+		si_code = async->cmd.flags & CMDF_WRITE ? POLL_OUT : POLL_IN;
 	}
 
-	if (async->cb_mask & s->async->events) {
-		wake_up_interruptible(&async->wait_head);
-		if (s->subdev_flags & SDF_CMD_READ)
-			kill_fasync(&dev->async_queue, SIGIO, POLL_IN);
-		if (s->subdev_flags & SDF_CMD_WRITE)
-			kill_fasync(&dev->async_queue, SIGIO, POLL_OUT);
-	}
-	s->async->events = 0;
+	spin_unlock_irqrestore(&s->spin_lock, flags);
+
+	if (si_code)
+		kill_fasync(&dev->async_queue, SIGIO, si_code);
 }
 EXPORT_SYMBOL_GPL(comedi_event);
 

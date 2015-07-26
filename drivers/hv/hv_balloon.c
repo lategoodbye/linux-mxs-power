@@ -428,14 +428,13 @@ struct dm_info_msg {
  * currently hot added. We hot add in multiples of 128M
  * chunks; it is possible that we may not be able to bring
  * online all the pages in the region. The range
- * covered_start_pfn : covered_end_pfn defines the pages that can
+ * covered_end_pfn defines the pages that can
  * be brough online.
  */
 
 struct hv_hotadd_state {
 	struct list_head list;
 	unsigned long start_pfn;
-	unsigned long covered_start_pfn;
 	unsigned long covered_end_pfn;
 	unsigned long ha_end_pfn;
 	unsigned long end_pfn;
@@ -568,7 +567,9 @@ static int hv_memory_notifier(struct notifier_block *nb, unsigned long val,
 	case MEM_ONLINE:
 		dm_device.num_pages_onlined += mem->nr_pages;
 	case MEM_CANCEL_ONLINE:
-		mutex_unlock(&dm_device.ha_region_mutex);
+		if (val == MEM_ONLINE ||
+		    mutex_is_locked(&dm_device.ha_region_mutex))
+			mutex_unlock(&dm_device.ha_region_mutex);
 		if (dm_device.ha_waiting) {
 			dm_device.ha_waiting = false;
 			complete(&dm_device.ol_waitevent);
@@ -652,6 +653,7 @@ static void hv_mem_hot_add(unsigned long start, unsigned long size,
 			}
 			has->ha_end_pfn -= HA_CHUNK;
 			has->covered_end_pfn -=  processed_pfn;
+			mutex_lock(&dm_device.ha_region_mutex);
 			break;
 		}
 
@@ -678,8 +680,7 @@ static void hv_online_page(struct page *pg)
 
 	list_for_each(cur, &dm_device.ha_region_list) {
 		has = list_entry(cur, struct hv_hotadd_state, list);
-		cur_start_pgp = (unsigned long)
-				pfn_to_page(has->covered_start_pfn);
+		cur_start_pgp = (unsigned long)pfn_to_page(has->start_pfn);
 		cur_end_pgp = (unsigned long)pfn_to_page(has->covered_end_pfn);
 
 		if (((unsigned long)pg >= cur_start_pgp) &&
@@ -691,7 +692,6 @@ static void hv_online_page(struct page *pg)
 			__online_page_set_limits(pg);
 			__online_page_increment_counters(pg);
 			__online_page_free(pg);
-			has->covered_start_pfn++;
 		}
 	}
 }
@@ -735,10 +735,9 @@ static bool pfn_covered(unsigned long start_pfn, unsigned long pfn_cnt)
 		 * is, update it.
 		 */
 
-		if (has->covered_end_pfn != start_pfn) {
+		if (has->covered_end_pfn != start_pfn)
 			has->covered_end_pfn = start_pfn;
-			has->covered_start_pfn = start_pfn;
-		}
+
 		return true;
 
 	}
@@ -781,9 +780,18 @@ static unsigned long handle_pg_range(unsigned long pg_start,
 			pgs_ol = has->ha_end_pfn - start_pfn;
 			if (pgs_ol > pfn_cnt)
 				pgs_ol = pfn_cnt;
-			hv_bring_pgs_online(start_pfn, pgs_ol);
+
+			/*
+			 * Check if the corresponding memory block is already
+			 * online by checking its last previously backed page.
+			 * In case it is we need to bring rest (which was not
+			 * backed previously) online too.
+			 */
+			if (start_pfn > has->start_pfn &&
+			    !PageReserved(pfn_to_page(start_pfn - 1)))
+				hv_bring_pgs_online(start_pfn, pgs_ol);
+
 			has->covered_end_pfn +=  pgs_ol;
-			has->covered_start_pfn +=  pgs_ol;
 			pfn_cnt -= pgs_ol;
 		}
 
@@ -844,7 +852,6 @@ static unsigned long process_hot_add(unsigned long pg_start,
 		list_add_tail(&ha_region->list, &dm_device.ha_region_list);
 		ha_region->start_pfn = rg_start;
 		ha_region->ha_end_pfn = rg_start;
-		ha_region->covered_start_pfn = pg_start;
 		ha_region->covered_end_pfn = pg_start;
 		ha_region->end_pfn = rg_start + rg_size;
 	}
@@ -971,8 +978,8 @@ static unsigned long compute_balloon_floor(void)
 	 *     128        72    (1/2)
 	 *     512       168    (1/4)
 	 *    2048       360    (1/8)
-	 *    8192       768    (1/16)
-	 *   32768      1536	(1/32)
+	 *    8192       744    (1/16)
+	 *   32768      1512	(1/32)
 	 */
 	if (totalram_pages < MB2PAGES(128))
 		min_pages = MB2PAGES(8) + (totalram_pages >> 1);
@@ -981,9 +988,9 @@ static unsigned long compute_balloon_floor(void)
 	else if (totalram_pages < MB2PAGES(2048))
 		min_pages = MB2PAGES(104) + (totalram_pages >> 3);
 	else if (totalram_pages < MB2PAGES(8192))
-		min_pages = MB2PAGES(256) + (totalram_pages >> 4);
+		min_pages = MB2PAGES(232) + (totalram_pages >> 4);
 	else
-		min_pages = MB2PAGES(512) + (totalram_pages >> 5);
+		min_pages = MB2PAGES(488) + (totalram_pages >> 5);
 #undef MB2PAGES
 	return min_pages;
 }
@@ -1076,11 +1083,12 @@ static void free_balloon_pages(struct hv_dynmem_device *dm,
 
 
 
-static int  alloc_balloon_pages(struct hv_dynmem_device *dm, int num_pages,
-			 struct dm_balloon_response *bl_resp, int alloc_unit,
-			 bool *alloc_error)
+static unsigned int alloc_balloon_pages(struct hv_dynmem_device *dm,
+					unsigned int num_pages,
+					struct dm_balloon_response *bl_resp,
+					int alloc_unit)
 {
-	int i = 0;
+	unsigned int i = 0;
 	struct page *pg;
 
 	if (num_pages < alloc_unit)
@@ -1099,11 +1107,8 @@ static int  alloc_balloon_pages(struct hv_dynmem_device *dm, int num_pages,
 				__GFP_NOMEMALLOC | __GFP_NOWARN,
 				get_order(alloc_unit << PAGE_SHIFT));
 
-		if (!pg) {
-			*alloc_error = true;
+		if (!pg)
 			return i * alloc_unit;
-		}
-
 
 		dm->num_pages_ballooned += alloc_unit;
 
@@ -1130,12 +1135,11 @@ static int  alloc_balloon_pages(struct hv_dynmem_device *dm, int num_pages,
 
 static void balloon_up(struct work_struct *dummy)
 {
-	int num_pages = dm_device.balloon_wrk.num_pages;
-	int num_ballooned = 0;
+	unsigned int num_pages = dm_device.balloon_wrk.num_pages;
+	unsigned int num_ballooned = 0;
 	struct dm_balloon_response *bl_resp;
 	int alloc_unit;
 	int ret;
-	bool alloc_error;
 	bool done = false;
 	int i;
 	struct sysinfo val;
@@ -1154,7 +1158,7 @@ static void balloon_up(struct work_struct *dummy)
 	floor = compute_balloon_floor();
 
 	/* Refuse to balloon below the floor, keep the 2M granularity. */
-	if (val.freeram - num_pages < floor) {
+	if (val.freeram < num_pages || val.freeram - num_pages < floor) {
 		num_pages = val.freeram > floor ? (val.freeram - floor) : 0;
 		num_pages -= num_pages % PAGES_IN_2M;
 	}
@@ -1168,18 +1172,15 @@ static void balloon_up(struct work_struct *dummy)
 
 
 		num_pages -= num_ballooned;
-		alloc_error = false;
 		num_ballooned = alloc_balloon_pages(&dm_device, num_pages,
-						bl_resp, alloc_unit,
-						 &alloc_error);
+						    bl_resp, alloc_unit);
 
 		if (alloc_unit != 1 && num_ballooned == 0) {
 			alloc_unit = 1;
 			continue;
 		}
 
-		if ((alloc_unit == 1 && alloc_error) ||
-			(num_ballooned == num_pages)) {
+		if (num_ballooned == 0 || num_ballooned == num_pages) {
 			bl_resp->more_pages = 0;
 			done = true;
 			dm_device.state = DM_INITIALIZED;

@@ -113,6 +113,8 @@ int copy_siginfo_from_user32(siginfo_t *to, struct compat_siginfo __user *from)
 	if (!access_ok(VERIFY_READ, from, sizeof(struct compat_siginfo)))
 		return -EFAULT;
 
+	memset(to, 0, sizeof(*to));
+
 	err = __get_user(to->si_signo, &from->si_signo);
 	err |= __get_user(to->si_errno, &from->si_errno);
 	err |= __get_user(to->si_code, &from->si_code);
@@ -193,18 +195,11 @@ int compat_setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	unsigned long restorer;
 	struct compat_rt_sigframe __user *frame;
 	int err = 0, sig = ksig->sig;
-	int usig;
 
 	frame = compat_get_sigframe(&ksig->ka, regs, sizeof(*frame));
 
 	if (!access_ok(VERIFY_WRITE, frame, sizeof(*frame)))
 		goto err;
-
-	usig = current_thread_info()->exec_domain
-		&& current_thread_info()->exec_domain->signal_invmap
-		&& sig < 32
-		? current_thread_info()->exec_domain->signal_invmap[sig]
-		: sig;
 
 	/* Always write at least the signal number for the stack backtracer. */
 	if (ksig->ka.sa.sa_flags & SA_SIGINFO) {
@@ -240,7 +235,7 @@ int compat_setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	regs->ex1 = PL_ICS_EX1(USER_PL, 1); /* set crit sec in handler */
 	regs->sp = ptr_to_compat_reg(frame);
 	regs->lr = restorer;
-	regs->regs[0] = (unsigned long) usig;
+	regs->regs[0] = (unsigned long) sig;
 	regs->regs[1] = ptr_to_compat_reg(&frame->info);
 	regs->regs[2] = ptr_to_compat_reg(&frame->uc);
 	regs->flags |= PT_FLAGS_CALLER_SAVES;

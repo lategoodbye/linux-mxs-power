@@ -121,6 +121,11 @@ static void led_timer_function(unsigned long data)
 	brightness = led_get_brightness(led_cdev);
 	if (!brightness) {
 		/* Time to switch the LED on. */
+		if (led_cdev->delayed_set_value) {
+			led_cdev->blink_brightness =
+					led_cdev->delayed_set_value;
+			led_cdev->delayed_set_value = 0;
+		}
 		brightness = led_cdev->blink_brightness;
 		delay = led_cdev->blink_delay_on;
 	} else {
@@ -187,6 +192,7 @@ void led_classdev_resume(struct led_classdev *led_cdev)
 }
 EXPORT_SYMBOL_GPL(led_classdev_resume);
 
+#ifdef CONFIG_PM_SLEEP
 static int led_suspend(struct device *dev)
 {
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
@@ -206,11 +212,9 @@ static int led_resume(struct device *dev)
 
 	return 0;
 }
+#endif
 
-static const struct dev_pm_ops leds_class_dev_pm_ops = {
-	.suspend        = led_suspend,
-	.resume         = led_resume,
-};
+static SIMPLE_DEV_PM_OPS(leds_class_dev_pm_ops, led_suspend, led_resume);
 
 static int match_name(struct device *dev, const void *data)
 {
@@ -222,12 +226,17 @@ static int match_name(struct device *dev, const void *data)
 static int led_classdev_next_name(const char *init_name, char *name,
 				  size_t len)
 {
-	int i = 0;
+	unsigned int i = 0;
+	int ret = 0;
 
-	strncpy(name, init_name, len);
+	strlcpy(name, init_name, len);
 
-	while (class_find_device(leds_class, NULL, name, match_name))
-		snprintf(name, len, "%s_%d", init_name, ++i);
+	while (class_find_device(leds_class, NULL, name, match_name) &&
+	       (ret < len))
+		ret = snprintf(name, len, "%s_%u", init_name, ++i);
+
+	if (ret >= len)
+		return -ENOMEM;
 
 	return i;
 }
@@ -243,13 +252,16 @@ int led_classdev_register(struct device *parent, struct led_classdev *led_cdev)
 	int ret;
 
 	ret = led_classdev_next_name(led_cdev->name, name, sizeof(name));
+	if (ret < 0)
+		return ret;
+
 	led_cdev->dev = device_create_with_groups(leds_class, parent, 0,
-					led_cdev, led_cdev->groups, name);
+				led_cdev, led_cdev->groups, "%s", name);
 	if (IS_ERR(led_cdev->dev))
 		return PTR_ERR(led_cdev->dev);
 
 	if (ret)
-		dev_info(parent, "Led %s renamed to %s due to name collision",
+		dev_warn(parent, "Led %s renamed to %s due to name collision",
 				led_cdev->name, dev_name(led_cdev->dev));
 
 #ifdef CONFIG_LEDS_TRIGGERS

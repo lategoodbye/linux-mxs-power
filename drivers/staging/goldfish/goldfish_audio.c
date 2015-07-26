@@ -40,12 +40,12 @@ struct goldfish_audio {
 	spinlock_t lock;
 	wait_queue_head_t wait;
 
-	char __iomem *buffer_virt;      /* combined buffer virtual address */
+	char *buffer_virt;		/* combined buffer virtual address */
 	unsigned long buffer_phys;      /* combined buffer physical address */
 
-	char __iomem *write_buffer1;    /* write buffer 1 virtual address */
-	char __iomem *write_buffer2;    /* write buffer 2 virtual address */
-	char __iomem *read_buffer;      /* read buffer virtual address */
+	char *write_buffer1;		/* write buffer 1 virtual address */
+	char *write_buffer2;		/* write buffer 2 virtual address */
+	char *read_buffer;		/* read buffer virtual address */
 	int buffer_status;
 	int read_supported;         /* true if we have audio input support */
 };
@@ -63,7 +63,7 @@ struct goldfish_audio {
 #define AUDIO_READ(data, addr)		(readl(data->reg_base + addr))
 #define AUDIO_WRITE(data, addr, x)	(writel(x, data->reg_base + addr))
 #define AUDIO_WRITE64(data, addr, addr2, x)	\
-	(gf_write64((u64)(x), data->reg_base + addr, data->reg_base+addr2))
+	(gf_write_dma_addr((x), data->reg_base + addr, data->reg_base+addr2))
 
 /*
  *  temporary variable used between goldfish_audio_probe() and
@@ -147,7 +147,7 @@ static ssize_t goldfish_audio_write(struct file *fp, const char __user *buf,
 	struct goldfish_audio *data = fp->private_data;
 	unsigned long irq_flags;
 	ssize_t result = 0;
-	char __iomem *kbuf;
+	char *kbuf;
 
 	while (count > 0) {
 		ssize_t copy = count;

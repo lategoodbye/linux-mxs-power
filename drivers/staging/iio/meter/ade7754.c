@@ -216,9 +216,13 @@ error_ret:
 
 static int ade7754_reset(struct device *dev)
 {
+	int ret;
 	u8 val;
 
-	ade7754_spi_read_reg_8(dev, ADE7754_OPMODE, &val);
+	ret = ade7754_spi_read_reg_8(dev, ADE7754_OPMODE, &val);
+	if (ret < 0)
+		return ret;
+
 	val |= 1 << 6; /* Software Chip Reset */
 	return ade7754_spi_write_reg_8(dev, ADE7754_OPMODE, val);
 }
@@ -362,9 +366,16 @@ error_ret:
 /* Power down the device */
 static int ade7754_stop_device(struct device *dev)
 {
+	int ret;
 	u8 val;
 
-	ade7754_spi_read_reg_8(dev, ADE7754_OPMODE, &val);
+	ret = ade7754_spi_read_reg_8(dev, ADE7754_OPMODE, &val);
+	if (ret < 0) {
+		dev_err(dev, "unable to power down the device, error: %d",
+			ret);
+		return ret;
+	}
+
 	val |= 7 << 3;  /* ADE7754 powered down */
 	return ade7754_spi_write_reg_8(dev, ADE7754_OPMODE, val);
 }
@@ -539,8 +550,15 @@ static int ade7754_probe(struct spi_device *spi)
 	/* Get the device into a sane initial state */
 	ret = ade7754_initial_setup(indio_dev);
 	if (ret)
-		return ret;
-	return iio_device_register(indio_dev);
+		goto powerdown_on_error;
+	ret = iio_device_register(indio_dev);
+	if (ret)
+		goto powerdown_on_error;
+	return ret;
+
+powerdown_on_error:
+	ade7754_stop_device(&indio_dev->dev);
+	return ret;
 }
 
 /* fixme, confirm ordering in this function */

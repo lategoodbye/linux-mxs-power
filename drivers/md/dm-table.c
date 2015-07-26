@@ -820,6 +820,12 @@ void dm_consume_args(struct dm_arg_set *as, unsigned num_args)
 }
 EXPORT_SYMBOL(dm_consume_args);
 
+static bool __table_type_request_based(unsigned table_type)
+{
+	return (table_type == DM_TYPE_REQUEST_BASED ||
+		table_type == DM_TYPE_MQ_REQUEST_BASED);
+}
+
 static int dm_table_set_type(struct dm_table *t)
 {
 	unsigned i;
@@ -852,8 +858,7 @@ static int dm_table_set_type(struct dm_table *t)
 		 * Determine the type from the live device.
 		 * Default to bio-based if device is new.
 		 */
-		if (live_md_type == DM_TYPE_REQUEST_BASED ||
-		    live_md_type == DM_TYPE_MQ_REQUEST_BASED)
+		if (__table_type_request_based(live_md_type))
 			request_based = 1;
 		else
 			bio_based = 1;
@@ -903,7 +908,7 @@ static int dm_table_set_type(struct dm_table *t)
 			}
 		t->type = DM_TYPE_MQ_REQUEST_BASED;
 
-	} else if (hybrid && list_empty(devices) && live_md_type != DM_TYPE_NONE) {
+	} else if (list_empty(devices) && __table_type_request_based(live_md_type)) {
 		/* inherit live MD type */
 		t->type = live_md_type;
 
@@ -925,10 +930,7 @@ struct target_type *dm_table_get_immutable_target_type(struct dm_table *t)
 
 bool dm_table_request_based(struct dm_table *t)
 {
-	unsigned table_type = dm_table_get_type(t);
-
-	return (table_type == DM_TYPE_REQUEST_BASED ||
-		table_type == DM_TYPE_MQ_REQUEST_BASED);
+	return __table_type_request_based(dm_table_get_type(t));
 }
 
 bool dm_table_mq_request_based(struct dm_table *t)
@@ -1336,14 +1338,14 @@ static bool dm_table_supports_flush(struct dm_table *t, unsigned flush)
 			continue;
 
 		if (ti->flush_supported)
-			return 1;
+			return true;
 
 		if (ti->type->iterate_devices &&
 		    ti->type->iterate_devices(ti, device_flush_capable, &flush))
-			return 1;
+			return true;
 	}
 
-	return 0;
+	return false;
 }
 
 static bool dm_table_discard_zeroes_data(struct dm_table *t)
@@ -1356,10 +1358,10 @@ static bool dm_table_discard_zeroes_data(struct dm_table *t)
 		ti = dm_table_get_target(t, i++);
 
 		if (ti->discard_zeroes_data_unsupported)
-			return 0;
+			return false;
 	}
 
-	return 1;
+	return true;
 }
 
 static int device_is_nonrot(struct dm_target *ti, struct dm_dev *dev,
@@ -1405,10 +1407,10 @@ static bool dm_table_all_devices_attribute(struct dm_table *t,
 
 		if (!ti->type->iterate_devices ||
 		    !ti->type->iterate_devices(ti, func, NULL))
-			return 0;
+			return false;
 	}
 
-	return 1;
+	return true;
 }
 
 static int device_not_write_same_capable(struct dm_target *ti, struct dm_dev *dev,
@@ -1465,14 +1467,14 @@ static bool dm_table_supports_discards(struct dm_table *t)
 			continue;
 
 		if (ti->discards_supported)
-			return 1;
+			return true;
 
 		if (ti->type->iterate_devices &&
 		    ti->type->iterate_devices(ti, device_discard_capable, NULL))
-			return 1;
+			return true;
 	}
 
-	return 0;
+	return false;
 }
 
 void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,

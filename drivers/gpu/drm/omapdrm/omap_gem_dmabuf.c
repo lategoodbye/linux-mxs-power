@@ -17,9 +17,9 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "omap_drv.h"
-
 #include <linux/dma-buf.h>
+
+#include "omap_drv.h"
 
 static struct sg_table *omap_gem_map_dma_buf(
 		struct dma_buf_attachment *attachment,
@@ -156,16 +156,16 @@ static int omap_gem_dmabuf_mmap(struct dma_buf *buffer,
 }
 
 static struct dma_buf_ops omap_dmabuf_ops = {
-		.map_dma_buf = omap_gem_map_dma_buf,
-		.unmap_dma_buf = omap_gem_unmap_dma_buf,
-		.release = omap_gem_dmabuf_release,
-		.begin_cpu_access = omap_gem_dmabuf_begin_cpu_access,
-		.end_cpu_access = omap_gem_dmabuf_end_cpu_access,
-		.kmap_atomic = omap_gem_dmabuf_kmap_atomic,
-		.kunmap_atomic = omap_gem_dmabuf_kunmap_atomic,
-		.kmap = omap_gem_dmabuf_kmap,
-		.kunmap = omap_gem_dmabuf_kunmap,
-		.mmap = omap_gem_dmabuf_mmap,
+	.map_dma_buf = omap_gem_map_dma_buf,
+	.unmap_dma_buf = omap_gem_unmap_dma_buf,
+	.release = omap_gem_dmabuf_release,
+	.begin_cpu_access = omap_gem_dmabuf_begin_cpu_access,
+	.end_cpu_access = omap_gem_dmabuf_end_cpu_access,
+	.kmap_atomic = omap_gem_dmabuf_kmap_atomic,
+	.kunmap_atomic = omap_gem_dmabuf_kunmap_atomic,
+	.kmap = omap_gem_dmabuf_kmap,
+	.kunmap = omap_gem_dmabuf_kunmap,
+	.mmap = omap_gem_dmabuf_mmap,
 };
 
 struct dma_buf *omap_gem_prime_export(struct drm_device *dev,

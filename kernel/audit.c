@@ -1904,7 +1904,7 @@ EXPORT_SYMBOL(audit_log_task_info);
 
 /**
  * audit_log_link_denied - report a link restriction denial
- * @operation: specific link opreation
+ * @operation: specific link operation
  * @link: the path that triggered the restriction
  */
 void audit_log_link_denied(const char *operation, struct path *link)
@@ -1928,7 +1928,7 @@ void audit_log_link_denied(const char *operation, struct path *link)
 
 	/* Generate AUDIT_PATH record with object. */
 	name->type = AUDIT_TYPE_NORMAL;
-	audit_copy_inode(name, link->dentry, link->dentry->d_inode);
+	audit_copy_inode(name, link->dentry, d_backing_inode(link->dentry));
 	audit_log_name(current->audit_context, name, link, 0, NULL);
 out:
 	kfree(name);

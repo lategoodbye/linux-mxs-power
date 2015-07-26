@@ -521,8 +521,10 @@ static void update_temperature(struct thermal_zone_device *tz)
 
 	ret = thermal_zone_get_temp(tz, &temp);
 	if (ret) {
-		dev_warn(&tz->device, "failed to read out thermal zone %d\n",
-			 tz->id);
+		if (ret != -EAGAIN)
+			dev_warn(&tz->device,
+				 "failed to read out thermal zone (%d)\n",
+				 ret);
 		return;
 	}
 
@@ -873,6 +875,106 @@ emul_temp_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(emul_temp, S_IWUSR, NULL, emul_temp_store);
 #endif/*CONFIG_THERMAL_EMULATION*/
 
+static ssize_t
+sustainable_power_show(struct device *dev, struct device_attribute *devattr,
+		       char *buf)
+{
+	struct thermal_zone_device *tz = to_thermal_zone(dev);
+
+	if (tz->tzp)
+		return sprintf(buf, "%u\n", tz->tzp->sustainable_power);
+	else
+		return -EIO;
+}
+
+static ssize_t
+sustainable_power_store(struct device *dev, struct device_attribute *devattr,
+			const char *buf, size_t count)
+{
+	struct thermal_zone_device *tz = to_thermal_zone(dev);
+	u32 sustainable_power;
+
+	if (!tz->tzp)
+		return -EIO;
+
+	if (kstrtou32(buf, 10, &sustainable_power))
+		return -EINVAL;
+
+	tz->tzp->sustainable_power = sustainable_power;
+
+	return count;
+}
+static DEVICE_ATTR(sustainable_power, S_IWUSR | S_IRUGO, sustainable_power_show,
+		sustainable_power_store);
+
+#define create_s32_tzp_attr(name)					\
+	static ssize_t							\
+	name##_show(struct device *dev, struct device_attribute *devattr, \
+		char *buf)						\
+	{								\
+	struct thermal_zone_device *tz = to_thermal_zone(dev);		\
+									\
+	if (tz->tzp)							\
+		return sprintf(buf, "%u\n", tz->tzp->name);		\
+	else								\
+		return -EIO;						\
+	}								\
+									\
+	static ssize_t							\
+	name##_store(struct device *dev, struct device_attribute *devattr, \
+		const char *buf, size_t count)				\
+	{								\
+		struct thermal_zone_device *tz = to_thermal_zone(dev);	\
+		s32 value;						\
+									\
+		if (!tz->tzp)						\
+			return -EIO;					\
+									\
+		if (kstrtos32(buf, 10, &value))				\
+			return -EINVAL;					\
+									\
+		tz->tzp->name = value;					\
+									\
+		return count;						\
+	}								\
+	static DEVICE_ATTR(name, S_IWUSR | S_IRUGO, name##_show, name##_store)
+
+create_s32_tzp_attr(k_po);
+create_s32_tzp_attr(k_pu);
+create_s32_tzp_attr(k_i);
+create_s32_tzp_attr(k_d);
+create_s32_tzp_attr(integral_cutoff);
+create_s32_tzp_attr(slope);
+create_s32_tzp_attr(offset);
+#undef create_s32_tzp_attr
+
+static struct device_attribute *dev_tzp_attrs[] = {
+	&dev_attr_sustainable_power,
+	&dev_attr_k_po,
+	&dev_attr_k_pu,
+	&dev_attr_k_i,
+	&dev_attr_k_d,
+	&dev_attr_integral_cutoff,
+	&dev_attr_slope,
+	&dev_attr_offset,
+};
+
+static int create_tzp_attrs(struct device *dev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(dev_tzp_attrs); i++) {
+		int ret;
+		struct device_attribute *dev_attr = dev_tzp_attrs[i];
+
+		ret = device_create_file(dev, dev_attr);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 /**
  * power_actor_get_max_power() - get the maximum power that a cdev can consume
  * @cdev:	pointer to &thermal_cooling_device
@@ -1016,6 +1118,22 @@ thermal_cooling_device_trip_point_show(struct device *dev,
 		return sprintf(buf, "%d\n", instance->trip);
 }
 
+static struct attribute *cooling_device_attrs[] = {
+	&dev_attr_cdev_type.attr,
+	&dev_attr_max_state.attr,
+	&dev_attr_cur_state.attr,
+	NULL,
+};
+
+static const struct attribute_group cooling_device_attr_group = {
+	.attrs = cooling_device_attrs,
+};
+
+static const struct attribute_group *cooling_device_attr_groups[] = {
+	&cooling_device_attr_group,
+	NULL,
+};
+
 static ssize_t
 thermal_cooling_device_weight_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
@@ -1044,23 +1162,6 @@ thermal_cooling_device_weight_store(struct device *dev,
 
 	return count;
 }
-
-static struct attribute *cooling_device_attrs[] = {
-	&dev_attr_cdev_type.attr,
-	&dev_attr_max_state.attr,
-	&dev_attr_cur_state.attr,
-	NULL,
-};
-
-static const struct attribute_group cooling_device_attr_group = {
-	.attrs = cooling_device_attrs,
-};
-
-static const struct attribute_group *cooling_device_attr_groups[] = {
-	&cooling_device_attr_group,
-	NULL,
-};
-
 /* Device management */
 
 /**
@@ -1708,6 +1809,11 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 #endif
 	/* Create policy attribute */
 	result = device_create_file(&tz->device, &dev_attr_policy);
+	if (result)
+		goto unregister;
+
+	/* Add thermal zone params */
+	result = create_tzp_attrs(&tz->device);
 	if (result)
 		goto unregister;
 

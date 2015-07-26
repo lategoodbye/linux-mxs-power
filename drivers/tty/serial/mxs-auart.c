@@ -169,14 +169,14 @@ struct mxs_auart_port {
 	bool			ms_irq_enabled;
 };
 
-static struct platform_device_id mxs_auart_devtype[] = {
+static const struct platform_device_id mxs_auart_devtype[] = {
 	{ .name = "mxs-auart-imx23", .driver_data = IMX23_AUART },
 	{ .name = "mxs-auart-imx28", .driver_data = IMX28_AUART },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(platform, mxs_auart_devtype);
 
-static struct of_device_id mxs_auart_dt_ids[] = {
+static const struct of_device_id mxs_auart_dt_ids[] = {
 	{
 		.compatible = "fsl,imx28-auart",
 		.data = &mxs_auart_devtype[IMX28_AUART]

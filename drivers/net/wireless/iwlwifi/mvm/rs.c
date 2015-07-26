@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
+ * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -138,7 +138,7 @@ struct rs_tx_column;
 
 typedef bool (*allow_column_func_t) (struct iwl_mvm *mvm,
 				     struct ieee80211_sta *sta,
-				     struct iwl_scale_tbl_info *tbl,
+				     struct rs_rate *rate,
 				     const struct rs_tx_column *next_col);
 
 struct rs_tx_column {
@@ -150,14 +150,14 @@ struct rs_tx_column {
 };
 
 static bool rs_ant_allow(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
-			 struct iwl_scale_tbl_info *tbl,
+			 struct rs_rate *rate,
 			 const struct rs_tx_column *next_col)
 {
 	return iwl_mvm_bt_coex_is_ant_avail(mvm, next_col->ant);
 }
 
 static bool rs_mimo_allow(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
-			  struct iwl_scale_tbl_info *tbl,
+			  struct rs_rate *rate,
 			  const struct rs_tx_column *next_col)
 {
 	struct iwl_mvm_sta *mvmsta;
@@ -180,11 +180,14 @@ static bool rs_mimo_allow(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 	if (iwl_mvm_vif_low_latency(mvmvif) && mvmsta->vif->p2p)
 		return false;
 
+	if (mvm->nvm_data->sku_cap_mimo_disabled)
+		return false;
+
 	return true;
 }
 
 static bool rs_siso_allow(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
-			  struct iwl_scale_tbl_info *tbl,
+			  struct rs_rate *rate,
 			  const struct rs_tx_column *next_col)
 {
 	if (!sta->ht_cap.ht_supported)
@@ -194,10 +197,9 @@ static bool rs_siso_allow(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 }
 
 static bool rs_sgi_allow(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
-			 struct iwl_scale_tbl_info *tbl,
+			 struct rs_rate *rate,
 			 const struct rs_tx_column *next_col)
 {
-	struct rs_rate *rate = &tbl->rate;
 	struct ieee80211_sta_ht_cap *ht_cap = &sta->ht_cap;
 	struct ieee80211_sta_vht_cap *vht_cap = &sta->vht_cap;
 
@@ -1125,8 +1127,8 @@ void iwl_mvm_rs_tx_status(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 	u32 tx_resp_hwrate = (uintptr_t)info->status.status_driver_data[1];
 	struct iwl_mvm_sta *mvmsta = iwl_mvm_sta_from_mac80211(sta);
 	struct iwl_lq_sta *lq_sta = &mvmsta->lq_sta;
-	bool allow_ant_mismatch = mvm->fw->ucode_capa.api[0] &
-		IWL_UCODE_TLV_API_LQ_SS_PARAMS;
+	bool allow_ant_mismatch = fw_has_api(&mvm->fw->ucode_capa,
+					     IWL_UCODE_TLV_API_LQ_SS_PARAMS);
 
 	/* Treat uninitialized rate scaling data same as non-existing. */
 	if (!lq_sta) {
@@ -1277,9 +1279,7 @@ void iwl_mvm_rs_tx_status(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 					info->status.ampdu_ack_len);
 		}
 	} else {
-	/*
-	 * For legacy, update frame history with for each Tx retry.
-	 */
+		/* For legacy, update frame history with for each Tx retry. */
 		retries = info->status.rates[0].count - 1;
 		/* HW doesn't send more than 15 retries */
 		retries = min(retries, 15);
@@ -1335,6 +1335,9 @@ static void rs_mac80211_tx_status(void *mvm_r,
 	struct iwl_op_mode *op_mode = (struct iwl_op_mode *)mvm_r;
 	struct iwl_mvm *mvm = IWL_OP_MODE_GET_MVM(op_mode);
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+
+	if (!iwl_mvm_sta_from_mac80211(sta)->vif)
+		return;
 
 	if (!ieee80211_is_data(hdr->frame_control) ||
 	    info->flags & IEEE80211_TX_CTL_NO_ACK)
@@ -1612,9 +1615,9 @@ static void rs_stay_in_table(struct iwl_lq_sta *lq_sta, bool force_search)
 static void rs_update_rate_tbl(struct iwl_mvm *mvm,
 			       struct ieee80211_sta *sta,
 			       struct iwl_lq_sta *lq_sta,
-			       struct rs_rate *rate)
+			       struct iwl_scale_tbl_info *tbl)
 {
-	rs_fill_lq_cmd(mvm, sta, lq_sta, rate);
+	rs_fill_lq_cmd(mvm, sta, lq_sta, &tbl->rate);
 	iwl_mvm_send_lq_cmd(mvm, &lq_sta->lq, false);
 }
 
@@ -1655,7 +1658,8 @@ static enum rs_column rs_get_next_column(struct iwl_mvm *mvm,
 
 		for (j = 0; j < MAX_COLUMN_CHECKS; j++) {
 			allow_func = next_col->checks[j];
-			if (allow_func && !allow_func(mvm, sta, tbl, next_col))
+			if (allow_func && !allow_func(mvm, sta, &tbl->rate,
+						      next_col))
 				break;
 		}
 
@@ -2132,7 +2136,7 @@ static void rs_rate_scale_perform(struct iwl_mvm *mvm,
 	}
 
 	/* current tx rate */
-	index = lq_sta->last_txrate_idx;
+	index = rate->index;
 
 	/* rates available for this association, and for modulation mode */
 	rate_mask = rs_get_supported_rates(lq_sta, rate);
@@ -2144,7 +2148,7 @@ static void rs_rate_scale_perform(struct iwl_mvm *mvm,
 			rate->type = LQ_NONE;
 			lq_sta->search_better_tbl = 0;
 			tbl = &(lq_sta->lq_info[lq_sta->active_tbl]);
-			rs_update_rate_tbl(mvm, sta, lq_sta, &tbl->rate);
+			rs_update_rate_tbl(mvm, sta, lq_sta, tbl);
 		}
 		return;
 	}
@@ -2180,14 +2184,7 @@ static void rs_rate_scale_perform(struct iwl_mvm *mvm,
 		 * or search for a new one? */
 		rs_stay_in_table(lq_sta, false);
 
-		goto out;
-	}
-	/* Else we have enough samples; calculate estimate of
-	 * actual average throughput */
-	if (window->average_tpt != ((window->success_ratio *
-			tbl->expected_tpt[index] + 64) / 128)) {
-		window->average_tpt = ((window->success_ratio *
-					tbl->expected_tpt[index] + 64) / 128);
+		return;
 	}
 
 	/* If we are searching for better modulation mode, check success. */
@@ -2307,7 +2304,7 @@ lq_update:
 	/* Replace uCode's rate table for the destination station. */
 	if (update_lq) {
 		tbl->rate.index = index;
-		rs_update_rate_tbl(mvm, sta, lq_sta, &tbl->rate);
+		rs_update_rate_tbl(mvm, sta, lq_sta, tbl);
 	}
 
 	rs_stay_in_table(lq_sta, false);
@@ -2354,8 +2351,7 @@ lq_update:
 
 			rs_dump_rate(mvm, &tbl->rate,
 				     "Switch to SEARCH TABLE:");
-			rs_fill_lq_cmd(mvm, sta, lq_sta, &tbl->rate);
-			iwl_mvm_send_lq_cmd(mvm, &lq_sta->lq, false);
+			rs_update_rate_tbl(mvm, sta, lq_sta, tbl);
 		} else {
 			done_search = 1;
 		}
@@ -2400,9 +2396,6 @@ lq_update:
 			rs_set_stay_in_table(mvm, 0, lq_sta);
 		}
 	}
-
-out:
-	lq_sta->last_txrate_idx = index;
 }
 
 struct rs_init_rate_info {
@@ -2545,7 +2538,6 @@ static void rs_initialize_lq(struct iwl_mvm *mvm,
 	rate = &tbl->rate;
 
 	rs_get_initial_rate(mvm, lq_sta, band, rate);
-	lq_sta->last_txrate_idx = rate->index;
 
 	WARN_ON_ONCE(rate->ant != ANT_A && rate->ant != ANT_B);
 	if (rate->ant == ANT_A)
@@ -2568,6 +2560,14 @@ static void rs_get_rate(void *mvm_r, struct ieee80211_sta *sta, void *mvm_sta,
 	struct iwl_mvm *mvm __maybe_unused = IWL_OP_MODE_GET_MVM(op_mode);
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct iwl_lq_sta *lq_sta = mvm_sta;
+
+	if (sta && !iwl_mvm_sta_from_mac80211(sta)->vif) {
+		/* if vif isn't initialized mvm doesn't know about
+		 * this station, so don't do anything with the it
+		 */
+		sta = NULL;
+		mvm_sta = NULL;
+	}
 
 	/* TODO: handle rate_idx_mask and rate_idx_mcs_mask */
 
@@ -2714,7 +2714,7 @@ static void rs_vht_init(struct iwl_mvm *mvm,
 	    (vht_cap->cap & IEEE80211_VHT_CAP_RXSTBC_MASK))
 		lq_sta->stbc_capable = true;
 
-	if ((mvm->fw->ucode_capa.capa[0] & IWL_UCODE_TLV_CAPA_BEAMFORMER) &&
+	if (fw_has_capa(&mvm->fw->ucode_capa, IWL_UCODE_TLV_CAPA_BEAMFORMER) &&
 	    (num_of_ant(iwl_mvm_get_valid_tx_ant(mvm)) > 1) &&
 	    (vht_cap->cap & IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE))
 		lq_sta->bfer_capable = true;
@@ -2886,6 +2886,9 @@ static void rs_rate_update(void *mvm_r,
 			(struct iwl_op_mode *)mvm_r;
 	struct iwl_mvm *mvm = IWL_OP_MODE_GET_MVM(op_mode);
 
+	if (!iwl_mvm_sta_from_mac80211(sta)->vif)
+		return;
+
 	/* Stop any ongoing aggregations as rs starts off assuming no agg */
 	for (tid = 0; tid < IWL_MAX_TID_COUNT; tid++)
 		ieee80211_stop_tx_ba_session(sta, tid);
@@ -2995,7 +2998,7 @@ static void rs_build_rates_table(struct iwl_mvm *mvm,
 	valid_tx_ant = iwl_mvm_get_valid_tx_ant(mvm);
 
 	/* TODO: remove old API when min FW API hits 14 */
-	if (!(mvm->fw->ucode_capa.api[0] & IWL_UCODE_TLV_API_LQ_SS_PARAMS) &&
+	if (!fw_has_api(&mvm->fw->ucode_capa, IWL_UCODE_TLV_API_LQ_SS_PARAMS) &&
 	    rs_stbc_allow(mvm, sta, lq_sta))
 		rate.stbc = true;
 
@@ -3209,11 +3212,8 @@ static void rs_fill_lq_cmd(struct iwl_mvm *mvm,
 
 	rs_build_rates_table(mvm, sta, lq_sta, initial_rate);
 
-	if (mvm->fw->ucode_capa.api[0] & IWL_UCODE_TLV_API_LQ_SS_PARAMS)
+	if (fw_has_api(&mvm->fw->ucode_capa, IWL_UCODE_TLV_API_LQ_SS_PARAMS))
 		rs_set_lq_ss_params(mvm, sta, lq_sta, initial_rate);
-
-	if (num_of_ant(initial_rate->ant) == 1)
-		lq_cmd->single_stream_ant_msk = initial_rate->ant;
 
 	mvmsta = iwl_mvm_sta_from_mac80211(sta);
 	mvmvif = iwl_mvm_vif_from_mac80211(mvmsta->vif);
@@ -3224,7 +3224,7 @@ static void rs_fill_lq_cmd(struct iwl_mvm *mvm,
 	lq_cmd->agg_frame_cnt_limit = mvmsta->max_agg_bufsize;
 
 	/*
-	 * In case of low latency, tell the firwmare to leave a frame in the
+	 * In case of low latency, tell the firmware to leave a frame in the
 	 * Tx Fifo so that it can start a transaction in the same TxOP. This
 	 * basically allows the firmware to send bursts.
 	 */
@@ -3659,9 +3659,15 @@ static ssize_t iwl_dbgfs_ss_force_write(struct iwl_lq_sta *lq_sta, char *buf,
 
 MVM_DEBUGFS_READ_WRITE_FILE_OPS(ss_force, 32);
 
-static void rs_add_debugfs(void *mvm, void *mvm_sta, struct dentry *dir)
+static void rs_add_debugfs(void *mvm, void *priv_sta, struct dentry *dir)
 {
-	struct iwl_lq_sta *lq_sta = mvm_sta;
+	struct iwl_lq_sta *lq_sta = priv_sta;
+	struct iwl_mvm_sta *mvmsta;
+
+	mvmsta = container_of(lq_sta, struct iwl_mvm_sta, lq_sta);
+
+	if (!mvmsta->vif)
+		return;
 
 	debugfs_create_file("rate_scale_table", S_IRUSR | S_IWUSR, dir,
 			    lq_sta, &rs_sta_dbgfs_scale_table_ops);
@@ -3725,7 +3731,7 @@ void iwl_mvm_rate_control_unregister(void)
 
 /**
  * iwl_mvm_tx_protection - Gets LQ command, change it to enable/disable
- * Tx protection, according to this rquest and previous requests,
+ * Tx protection, according to this request and previous requests,
  * and send the LQ command.
  * @mvmsta: The station
  * @enable: Enable Tx protection?

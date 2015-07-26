@@ -51,6 +51,7 @@ struct msghdr {
 	void		*msg_control;	/* ancillary data */
 	__kernel_size_t	msg_controllen;	/* ancillary data buffer length */
 	unsigned int	msg_flags;	/* flags on received message */
+	struct kiocb	*msg_iocb;	/* ptr to iocb for async requests */
 };
  
 struct user_msghdr {
@@ -136,6 +137,11 @@ static inline struct cmsghdr * __cmsg_nxthdr(void *__ctl, __kernel_size_t __size
 static inline struct cmsghdr * cmsg_nxthdr (struct msghdr *__msg, struct cmsghdr *__cmsg)
 {
 	return __cmsg_nxthdr(__msg->msg_control, __msg->msg_controllen, __cmsg);
+}
+
+static inline size_t msg_data_left(struct msghdr *msg)
+{
+	return iov_iter_count(&msg->msg_iter);
 }
 
 /* "Socket"-level control message types: */

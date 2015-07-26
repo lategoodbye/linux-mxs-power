@@ -75,7 +75,6 @@ static void radeon_ttm_bo_destroy(struct ttm_buffer_object *tbo)
 	bo = container_of(tbo, struct radeon_bo, tbo);
 
 	radeon_update_memory_usage(bo, bo->tbo.mem.mem_type, -1);
-	radeon_mn_unregister(bo);
 
 	mutex_lock(&bo->rdev->gem.mutex);
 	list_del_init(&bo->list);
@@ -172,17 +171,6 @@ void radeon_ttm_placement_from_domain(struct radeon_bo *rbo, u32 domain)
 				rbo->rdev->mc.visible_vram_size >> PAGE_SHIFT;
 		else
 			rbo->placements[i].lpfn = 0;
-	}
-
-	/*
-	 * Use two-ended allocation depending on the buffer size to
-	 * improve fragmentation quality.
-	 * 512kb was measured as the most optimal number.
-	 */
-	if (rbo->tbo.mem.size > 512 * 1024) {
-		for (i = 0; i < c; i++) {
-			rbo->placements[i].flags |= TTM_PL_FLAG_TOPDOWN;
-		}
 	}
 }
 

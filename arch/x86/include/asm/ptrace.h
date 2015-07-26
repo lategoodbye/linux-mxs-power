@@ -96,28 +96,20 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 }
 
 /*
- * user_mode_vm(regs) determines whether a register set came from user mode.
- * This is true if V8086 mode was enabled OR if the register set was from
- * protected mode with RPL-3 CS value.  This tricky test checks that with
- * one comparison.  Many places in the kernel can bypass this full check
- * if they have already ruled out V8086 mode, so user_mode(regs) can be used.
+ * user_mode(regs) determines whether a register set came from user
+ * mode.  On x86_32, this is true if V8086 mode was enabled OR if the
+ * register set was from protected mode with RPL-3 CS value.  This
+ * tricky test checks that with one comparison.
+ *
+ * On x86_64, vm86 mode is mercifully nonexistent, and we don't need
+ * the extra check.
  */
 static inline int user_mode(struct pt_regs *regs)
 {
 #ifdef CONFIG_X86_32
-	return (regs->cs & SEGMENT_RPL_MASK) == USER_RPL;
+	return ((regs->cs & SEGMENT_RPL_MASK) | (regs->flags & X86_VM_MASK)) >= USER_RPL;
 #else
 	return !!(regs->cs & 3);
-#endif
-}
-
-static inline int user_mode_vm(struct pt_regs *regs)
-{
-#ifdef CONFIG_X86_32
-	return ((regs->cs & SEGMENT_RPL_MASK) | (regs->flags & X86_VM_MASK)) >=
-		USER_RPL;
-#else
-	return user_mode(regs);
 #endif
 }
 
@@ -251,7 +243,7 @@ static inline unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
  */
 #define arch_ptrace_stop_needed(code, info)				\
 ({									\
-	set_thread_flag(TIF_NOTIFY_RESUME);				\
+	force_iret();							\
 	false;								\
 })
 

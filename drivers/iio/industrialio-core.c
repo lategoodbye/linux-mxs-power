@@ -101,6 +101,8 @@ static const char * const iio_modifier_names[] = {
 	[IIO_MOD_WALKING] = "walking",
 	[IIO_MOD_STILL] = "still",
 	[IIO_MOD_ROOT_SUM_SQUARED_X_Y_Z] = "sqrt(x^2+y^2+z^2)",
+	[IIO_MOD_I] = "i",
+	[IIO_MOD_Q] = "q",
 };
 
 /* relies on pairs of these shared then separate */
@@ -117,6 +119,8 @@ static const char * const iio_chan_info_postfix[] = {
 	[IIO_CHAN_INFO_AVERAGE_RAW] = "mean_raw",
 	[IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY]
 	= "filter_low_pass_3db_frequency",
+	[IIO_CHAN_INFO_HIGH_PASS_FILTER_3DB_FREQUENCY]
+	= "filter_high_pass_3db_frequency",
 	[IIO_CHAN_INFO_SAMP_FREQ] = "sampling_frequency",
 	[IIO_CHAN_INFO_FREQUENCY] = "frequency",
 	[IIO_CHAN_INFO_PHASE] = "phase",
@@ -128,6 +132,8 @@ static const char * const iio_chan_info_postfix[] = {
 	[IIO_CHAN_INFO_CALIBWEIGHT] = "calibweight",
 	[IIO_CHAN_INFO_DEBOUNCE_COUNT] = "debounce_count",
 	[IIO_CHAN_INFO_DEBOUNCE_TIME] = "debounce_time",
+	[IIO_CHAN_INFO_CALIBEMISSIVITY] = "calibemissivity",
+	[IIO_CHAN_INFO_OVERSAMPLING_RATIO] = "oversampling_ratio",
 };
 
 /**
@@ -847,8 +853,7 @@ static int iio_device_add_channel_sysfs(struct iio_dev *indio_dev,
  * @attr_list: List of IIO device attributes
  *
  * This function frees the memory allocated for each of the IIO device
- * attributes in the list. Note: if you want to reuse the list after calling
- * this function you have to reinitialize it using INIT_LIST_HEAD().
+ * attributes in the list.
  */
 void iio_free_chan_devattr_list(struct list_head *attr_list)
 {
@@ -856,6 +861,7 @@ void iio_free_chan_devattr_list(struct list_head *attr_list)
 
 	list_for_each_entry_safe(p, n, attr_list, l) {
 		kfree(p->dev_attr.attr.name);
+		list_del(&p->l);
 		kfree(p);
 	}
 }
@@ -936,6 +942,7 @@ static void iio_device_unregister_sysfs(struct iio_dev *indio_dev)
 
 	iio_free_chan_devattr_list(&indio_dev->channel_attr_list);
 	kfree(indio_dev->chan_attr_group.attrs);
+	indio_dev->chan_attr_group.attrs = NULL;
 }
 
 static void iio_dev_release(struct device *device)

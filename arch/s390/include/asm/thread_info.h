@@ -29,7 +29,6 @@
  */
 struct thread_info {
 	struct task_struct	*task;		/* main task structure */
-	struct exec_domain	*exec_domain;	/* execution domain */
 	unsigned long		flags;		/* low level flags */
 	unsigned long		sys_call_table;	/* System call table address */
 	unsigned int		cpu;		/* current CPU */
@@ -46,7 +45,6 @@ struct thread_info {
 #define INIT_THREAD_INFO(tsk)			\
 {						\
 	.task		= &tsk,			\
-	.exec_domain	= &default_exec_domain,	\
 	.flags		= 0,			\
 	.cpu		= 0,			\
 	.preempt_count	= INIT_PREEMPT_COUNT,	\
@@ -60,6 +58,8 @@ static inline struct thread_info *current_thread_info(void)
 {
 	return (struct thread_info *) S390_lowcore.thread_info;
 }
+
+void arch_release_task_struct(struct task_struct *tsk);
 
 #define THREAD_SIZE_ORDER THREAD_ORDER
 

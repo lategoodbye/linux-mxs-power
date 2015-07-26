@@ -6,8 +6,6 @@
  *
  */
 
-#include <linux/time64.h>
-
 #define DSPVERSZ	4
 #define HWSERNUMSZ	16
 #define SKUSZ		20
@@ -349,7 +347,7 @@ struct ft1000_info {
 	u8 HwSerNum[HWSERNUMSZ];	/* Hardware Serial Number */
 	u8 Sku[SKUSZ];			/* SKU */
 	u8 eui64[EUISZ];		/* EUI64 */
-	time64_t ConTm;			/* Connection Time */
+	time_t ConTm;			/* Connection Time */
 	u8 ProductMode[MODESZ];
 	u8 RfCalVer[CALVERSZ];
 	u8 RfCalDate[CALDATESZ];

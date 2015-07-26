@@ -238,7 +238,7 @@ static void drm_fb_helper_restore_lut_atomic(struct drm_crtc *crtc)
 int drm_fb_helper_debug_enter(struct fb_info *info)
 {
 	struct drm_fb_helper *helper = info->par;
-	struct drm_crtc_helper_funcs *funcs;
+	const struct drm_crtc_helper_funcs *funcs;
 	int i;
 
 	list_for_each_entry(helper, &kernel_fb_helper_list, kernel_fb_list) {
@@ -285,7 +285,7 @@ int drm_fb_helper_debug_leave(struct fb_info *info)
 {
 	struct drm_fb_helper *helper = info->par;
 	struct drm_crtc *crtc;
-	struct drm_crtc_helper_funcs *funcs;
+	const struct drm_crtc_helper_funcs *funcs;
 	struct drm_framebuffer *fb;
 	int i;
 
@@ -765,7 +765,7 @@ int drm_fb_helper_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 {
 	struct drm_fb_helper *fb_helper = info->par;
 	struct drm_device *dev = fb_helper->dev;
-	struct drm_crtc_helper_funcs *crtc_funcs;
+	const struct drm_crtc_helper_funcs *crtc_funcs;
 	u16 *red, *green, *blue, *transp;
 	struct drm_crtc *crtc;
 	int i, j, rc = 0;
@@ -1283,12 +1283,12 @@ struct drm_display_mode *drm_pick_cmdline_mode(struct drm_fb_helper_connector *f
 						      int width, int height)
 {
 	struct drm_cmdline_mode *cmdline_mode;
-	struct drm_display_mode *mode = NULL;
+	struct drm_display_mode *mode;
 	bool prefer_non_interlace;
 
 	cmdline_mode = &fb_helper_conn->connector->cmdline_mode;
 	if (cmdline_mode->specified == false)
-		return mode;
+		return NULL;
 
 	/* attempt to find a matching mode in the list of modes
 	 *  we have gotten so far, if not add a CVT mode that conforms
@@ -1297,7 +1297,7 @@ struct drm_display_mode *drm_pick_cmdline_mode(struct drm_fb_helper_connector *f
 		goto create_mode;
 
 	prefer_non_interlace = !cmdline_mode->interlace;
- again:
+again:
 	list_for_each_entry(mode, &fb_helper_conn->connector->modes, head) {
 		/* check width/height */
 		if (mode->hdisplay != cmdline_mode->xres ||
@@ -1551,7 +1551,7 @@ static int drm_pick_crtcs(struct drm_fb_helper *fb_helper,
 	int c, o;
 	struct drm_device *dev = fb_helper->dev;
 	struct drm_connector *connector;
-	struct drm_connector_helper_funcs *connector_funcs;
+	const struct drm_connector_helper_funcs *connector_funcs;
 	struct drm_encoder *encoder;
 	int my_score, best_score, score;
 	struct drm_fb_helper_crtc **crtcs, *crtc;

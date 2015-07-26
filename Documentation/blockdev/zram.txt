@@ -104,17 +104,17 @@ size of the disk when not in use so a huge zram is wasteful.
 zram provides a control interface, which enables dynamic (on-demand) device
 addition and removal.
 
-In order to add a new /dev/zramX device, perform read operation on zram_add
+In order to add a new /dev/zramX device, perform read operation on hot_add
 attribute. This will return either new device's device id (meaning that you
 can use /dev/zram<id>) or error code.
 
 Example:
-	cat /sys/class/zram-control/zram_add
+	cat /sys/class/zram-control/hot_add
 	1
 
 To remove the existing /dev/zramX device (where X is a device id)
 execute
-	echo X > /sys/class/zram-control/zram_remove
+	echo X > /sys/class/zram-control/hot_remove
 
 8) Stats:
 Per-device statistics are exported as various nodes under /sys/block/zram<id>/
@@ -147,7 +147,6 @@ mem_limit         RW    the maximum amount of memory ZRAM can use to store
 num_migrated      RO    the number of objects migrated migrated by compaction
 compact           WO    trigger memory compaction
 
-
 WARNING
 =======
 per-stat sysfs attributes are considered to be deprecated.
@@ -169,7 +168,6 @@ File /sys/block/zram<id>/stat
 Represents block layer statistics. Read Documentation/block/stat.txt for
 details.
 
-
 File /sys/block/zram<id>/io_stat
 
 The stat file represents device's I/O statistics not accounted by block
@@ -180,7 +178,6 @@ whitespace:
 	failed_writes
 	invalid_io
 	notify_free
-
 
 File /sys/block/zram<id>/mm_stat
 
@@ -193,7 +190,6 @@ line of text and contains the following stats separated by whitespace:
 	mem_used_max
 	zero_pages
 	num_migrated
-
 
 9) Deactivate:
 	swapoff /dev/zram0

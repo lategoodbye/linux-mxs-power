@@ -110,7 +110,7 @@ smb2_hdr_assemble(struct smb2_hdr *hdr, __le16 smb2_cmd /* command */ ,
 
 	/* GLOBAL_CAP_LARGE_MTU will only be set if dialect > SMB2.02 */
 	/* See sections 2.2.4 and 3.2.4.1.5 of MS-SMB2 */
-	if ((tcon->ses) &&
+	if ((tcon->ses) && (tcon->ses->server) &&
 	    (tcon->ses->server->capabilities & SMB2_GLOBAL_CAP_LARGE_MTU))
 		hdr->CreditCharge = cpu_to_le16(1);
 	/* else CreditCharge MBZ */
@@ -304,7 +304,7 @@ small_smb2_init(__le16 smb2_command, struct cifs_tcon *tcon,
 	return rc;
 }
 
-#ifdef CONFIG_CIFS_SMB31
+#ifdef CONFIG_CIFS_SMB311
 /* offset is sizeof smb2_negotiate_req - 4 but rounded up to 8 bytes */
 #define OFFSET_OF_NEG_CONTEXT 0x68  /* sizeof(struct smb2_negotiate_req) - 4 */
 
@@ -318,8 +318,8 @@ build_preauth_ctxt(struct smb2_preauth_neg_context *pneg_ctxt)
 	pneg_ctxt->ContextType = SMB2_PREAUTH_INTEGRITY_CAPABILITIES;
 	pneg_ctxt->DataLength = cpu_to_le16(38);
 	pneg_ctxt->HashAlgorithmCount = cpu_to_le16(1);
-	pneg_ctxt->SaltLength = cpu_to_le16(SMB31_SALT_SIZE);
-	get_random_bytes(pneg_ctxt->Salt, SMB31_SALT_SIZE);
+	pneg_ctxt->SaltLength = cpu_to_le16(SMB311_SALT_SIZE);
+	get_random_bytes(pneg_ctxt->Salt, SMB311_SALT_SIZE);
 	pneg_ctxt->HashAlgorithms = SMB2_PREAUTH_INTEGRITY_SHA512;
 }
 
@@ -328,8 +328,9 @@ build_encrypt_ctxt(struct smb2_encryption_neg_context *pneg_ctxt)
 {
 	pneg_ctxt->ContextType = SMB2_ENCRYPTION_CAPABILITIES;
 	pneg_ctxt->DataLength = cpu_to_le16(6);
-	pneg_ctxt->CipherCount = cpu_to_le16(1);
-	pneg_ctxt->Ciphers = SMB2_ENCRYPTION_AES128_CCM;
+	pneg_ctxt->CipherCount = cpu_to_le16(2);
+	pneg_ctxt->Ciphers[0] = SMB2_ENCRYPTION_AES128_GCM;
+	pneg_ctxt->Ciphers[1] = SMB2_ENCRYPTION_AES128_CCM;
 }
 
 static void
@@ -346,14 +347,14 @@ assemble_neg_contexts(struct smb2_negotiate_req *req)
 	req->NegotiateContextOffset = cpu_to_le32(OFFSET_OF_NEG_CONTEXT);
 	req->NegotiateContextCount = cpu_to_le16(2);
 	inc_rfc1001_len(req, 4 + sizeof(struct smb2_preauth_neg_context) + 2
-			+ sizeof(struct smb2_encryption_neg_context));
+			+ sizeof(struct smb2_encryption_neg_context)); /* calculate hash */
 }
 #else
 static void assemble_neg_contexts(struct smb2_negotiate_req *req)
 {
 	return;
 }
-#endif /* SMB31 */
+#endif /* SMB311 */
 
 
 /*
@@ -418,7 +419,7 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 	else {
 		memcpy(req->ClientGUID, server->client_guid,
 			SMB2_CLIENT_GUID_SIZE);
-		if (ses->server->vals->protocol_id == SMB31_PROT_ID)
+		if (ses->server->vals->protocol_id == SMB311_PROT_ID)
 			assemble_neg_contexts(req);
 	}
 	iov[0].iov_base = (char *)req;
@@ -447,12 +448,12 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 		cifs_dbg(FYI, "negotiated smb3.0 dialect\n");
 	else if (rsp->DialectRevision == cpu_to_le16(SMB302_PROT_ID))
 		cifs_dbg(FYI, "negotiated smb3.02 dialect\n");
-#ifdef CONFIG_CIFS_SMB31
-	else if (rsp->DialectRevision == cpu_to_le16(SMB31_PROT_ID))
-		cifs_dbg(FYI, "negotiated smb3.1 dialect\n");
-#endif /* SMB31 */
+#ifdef CONFIG_CIFS_SMB311
+	else if (rsp->DialectRevision == cpu_to_le16(SMB311_PROT_ID))
+		cifs_dbg(FYI, "negotiated smb3.1.1 dialect\n");
+#endif /* SMB311 */
 	else {
-		cifs_dbg(VFS, "Illegal dialect returned by server %d\n",
+		cifs_dbg(VFS, "Illegal dialect returned by server 0x%x\n",
 			 le16_to_cpu(rsp->DialectRevision));
 		rc = -EIO;
 		goto neg_exit;
@@ -1276,7 +1277,7 @@ SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
 	struct smb2_ioctl_req *req;
 	struct smb2_ioctl_rsp *rsp;
 	struct TCP_Server_Info *server;
-	struct cifs_ses *ses = tcon->ses;
+	struct cifs_ses *ses;
 	struct kvec iov[2];
 	int resp_buftype;
 	int num_iovecs;
@@ -1290,6 +1291,11 @@ SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
 	/* zero out returned data len, in case of error */
 	if (plen)
 		*plen = 0;
+
+	if (tcon)
+		ses = tcon->ses;
+	else
+		return -EIO;
 
 	if (ses && (ses->server))
 		server = ses->server;
@@ -1354,14 +1360,12 @@ SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
 	rsp = (struct smb2_ioctl_rsp *)iov[0].iov_base;
 
 	if ((rc != 0) && (rc != -EINVAL)) {
-		if (tcon)
-			cifs_stats_fail_inc(tcon, SMB2_IOCTL_HE);
+		cifs_stats_fail_inc(tcon, SMB2_IOCTL_HE);
 		goto ioctl_exit;
 	} else if (rc == -EINVAL) {
 		if ((opcode != FSCTL_SRV_COPYCHUNK_WRITE) &&
 		    (opcode != FSCTL_SRV_COPYCHUNK)) {
-			if (tcon)
-				cifs_stats_fail_inc(tcon, SMB2_IOCTL_HE);
+			cifs_stats_fail_inc(tcon, SMB2_IOCTL_HE);
 			goto ioctl_exit;
 		}
 	}
@@ -1687,7 +1691,7 @@ SMB2_flush(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
 
 	rc = SendReceive2(xid, ses, iov, 1, &resp_buftype, 0);
 
-	if ((rc != 0) && tcon)
+	if (rc != 0)
 		cifs_stats_fail_inc(tcon, SMB2_FLUSH_HE);
 
 	free_rsp_buf(resp_buftype, iov[0].iov_base);
@@ -2172,7 +2176,7 @@ SMB2_query_directory(const unsigned int xid, struct cifs_tcon *tcon,
 	struct kvec iov[2];
 	int rc = 0;
 	int len;
-	int resp_buftype;
+	int resp_buftype = CIFS_NO_BUFFER;
 	unsigned char *bufptr;
 	struct TCP_Server_Info *server;
 	struct cifs_ses *ses = tcon->ses;

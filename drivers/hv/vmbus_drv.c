@@ -657,21 +657,36 @@ static void vmbus_on_msg_dpc(unsigned long data)
 	void *page_addr = hv_context.synic_message_page[cpu];
 	struct hv_message *msg = (struct hv_message *)page_addr +
 				  VMBUS_MESSAGE_SINT;
+	struct vmbus_channel_message_header *hdr;
+	struct vmbus_channel_message_table_entry *entry;
 	struct onmessage_work_context *ctx;
 
 	while (1) {
-		if (msg->header.message_type == HVMSG_NONE) {
+		if (msg->header.message_type == HVMSG_NONE)
 			/* no msg */
 			break;
-		} else {
+
+		hdr = (struct vmbus_channel_message_header *)msg->u.payload;
+
+		if (hdr->msgtype >= CHANNELMSG_COUNT) {
+			WARN_ONCE(1, "unknown msgtype=%d\n", hdr->msgtype);
+			goto msg_handled;
+		}
+
+		entry = &channel_message_table[hdr->msgtype];
+		if (entry->handler_type	== VMHT_BLOCKING) {
 			ctx = kmalloc(sizeof(*ctx), GFP_ATOMIC);
 			if (ctx == NULL)
 				continue;
+
 			INIT_WORK(&ctx->work, vmbus_onmessage_work);
 			memcpy(&ctx->msg, msg, sizeof(*msg));
-			queue_work(vmbus_connection.work_queue, &ctx->work);
-		}
 
+			queue_work(vmbus_connection.work_queue, &ctx->work);
+		} else
+			entry->message_handler(hdr);
+
+msg_handled:
 		msg->header.message_type = HVMSG_NONE;
 
 		/*
@@ -1020,6 +1035,15 @@ acpi_walk_err:
 	return ret_val;
 }
 
+static int vmbus_acpi_remove(struct acpi_device *device)
+{
+	int ret = 0;
+
+	if (hyperv_mmio.start && hyperv_mmio.end)
+		ret = release_resource(&hyperv_mmio);
+	return ret;
+}
+
 static const struct acpi_device_id vmbus_acpi_device_ids[] = {
 	{"VMBUS", 0},
 	{"VMBus", 0},
@@ -1032,6 +1056,7 @@ static struct acpi_driver vmbus_acpi_driver = {
 	.ids = vmbus_acpi_device_ids,
 	.ops = {
 		.add = vmbus_acpi_add,
+		.remove = vmbus_acpi_remove,
 	},
 };
 
@@ -1081,15 +1106,22 @@ static void __exit vmbus_exit(void)
 
 	vmbus_connection.conn_state = DISCONNECTED;
 	hv_synic_clockevents_cleanup();
+	vmbus_disconnect();
 	hv_remove_vmbus_irq();
+	tasklet_kill(&msg_dpc);
 	vmbus_free_channels();
+	if (ms_hyperv.features & HV_FEATURE_GUEST_CRASH_MSR_AVAILABLE) {
+		atomic_notifier_chain_unregister(&panic_notifier_list,
+						 &hyperv_panic_block);
+	}
 	bus_unregister(&hv_bus);
 	hv_cleanup();
-	for_each_online_cpu(cpu)
+	for_each_online_cpu(cpu) {
+		tasklet_kill(hv_context.event_dpc[cpu]);
 		smp_call_function_single(cpu, hv_synic_cleanup, NULL, 1);
+	}
 	acpi_bus_unregister_driver(&vmbus_acpi_driver);
 	hv_cpu_hotplug_quirk(false);
-	vmbus_disconnect();
 }
 
 

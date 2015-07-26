@@ -18,11 +18,6 @@
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
  *
- *     You should have received a copy of the GNU General Public
- *     License along with this file; if not, write to the Free
- *     Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
- *     MA 02110-1301 USA
- *
  * Or, alternatively,
  *
  *  b) Permission is hereby granted, free of charge, to any person
@@ -58,6 +53,14 @@
 	model = "Miniand Hackberry";
 	compatible = "miniand,hackberry", "allwinner,sun4i-a10";
 
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
 	reg_emac_3v3: emac-3v3 {
 		compatible = "regulator-fixed";
 		regulator-name = "emac-3v3";
@@ -83,9 +86,13 @@
 	status = "okay";
 };
 
+&emac_sram {
+	status = "okay";
+};
+
 &ir0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&ir0_pins_a>;
+	pinctrl-0 = <&ir0_rx_pins_a>;
 	status = "okay";
 };
 

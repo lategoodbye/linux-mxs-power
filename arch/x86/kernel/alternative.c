@@ -21,6 +21,10 @@
 #include <asm/io.h>
 #include <asm/fixmap.h>
 
+int __read_mostly alternatives_patched;
+
+EXPORT_SYMBOL_GPL(alternatives_patched);
+
 #define MAX_PATCH_LEN (255-1)
 
 static int __initdata_or_module debug_alternative;
@@ -227,6 +231,15 @@ void __init arch_init_ideal_nops(void)
 #endif
 		}
 		break;
+
+	case X86_VENDOR_AMD:
+		if (boot_cpu_data.x86 > 0xf) {
+			ideal_nops = p6_nops;
+			return;
+		}
+
+		/* fall through */
+
 	default:
 #ifdef CONFIG_X86_64
 		ideal_nops = k8_nops;
@@ -325,6 +338,9 @@ done:
 
 static void __init_or_module optimize_nops(struct alt_instr *a, u8 *instr)
 {
+	if (instr[0] != 0x90)
+		return;
+
 	add_nops(instr + (a->instrlen - a->padlen), a->padlen);
 
 	DUMP_BYTES(instr, a->instrlen, "%p: [%d:%d) optimized NOPs: ",
@@ -369,11 +385,11 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 			continue;
 		}
 
-		DPRINTK("feat: %d*32+%d, old: (%p, len: %d), repl: (%p, len: %d)",
+		DPRINTK("feat: %d*32+%d, old: (%p, len: %d), repl: (%p, len: %d), pad: %d",
 			a->cpuid >> 5,
 			a->cpuid & 0x1f,
 			instr, a->instrlen,
-			replacement, a->replacementlen);
+			replacement, a->replacementlen, a->padlen);
 
 		DUMP_BYTES(instr, a->instrlen, "%p: old_insn: ", instr);
 		DUMP_BYTES(replacement, a->replacementlen, "%p: rpl_insn: ", replacement);
@@ -624,6 +640,7 @@ void __init alternative_instructions(void)
 	apply_paravirt(__parainstructions, __parainstructions_end);
 
 	restart_nmi();
+	alternatives_patched = 1;
 }
 
 /**
@@ -715,7 +732,7 @@ int poke_int3_handler(struct pt_regs *regs)
 	if (likely(!bp_patching_in_progress))
 		return 0;
 
-	if (user_mode_vm(regs) || regs->ip != (unsigned long)bp_int3_addr)
+	if (user_mode(regs) || regs->ip != (unsigned long)bp_int3_addr)
 		return 0;
 
 	/* set up the specified breakpoint handler */

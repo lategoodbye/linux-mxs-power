@@ -35,6 +35,8 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/if_link.h>
+#include <linux/mlx4/device.h>
+#include <linux/netdevice.h>
 
 enum {
 	/* initialization and general commands */
@@ -68,6 +70,8 @@ enum {
 	MLX4_CMD_UNMAP_ICM_AUX	 = 0xffb,
 	MLX4_CMD_SET_ICM_SIZE	 = 0xffd,
 	MLX4_CMD_ACCESS_REG	 = 0x3b,
+	MLX4_CMD_ALLOCATE_VPP	 = 0x80,
+	MLX4_CMD_SET_VPORT_QOS	 = 0x81,
 
 	/*master notify fw on finish for slave's flr*/
 	MLX4_CMD_INFORM_FLR_DONE = 0x5b,
@@ -186,7 +190,14 @@ enum {
 };
 
 enum {
-	/* set port opcode modifiers */
+	/* Set port opcode modifiers */
+	MLX4_SET_PORT_IB_OPCODE		= 0x0,
+	MLX4_SET_PORT_ETH_OPCODE	= 0x1,
+	MLX4_SET_PORT_BEACON_OPCODE	= 0x4,
+};
+
+enum {
+	/* Set port Ethernet input modifiers */
 	MLX4_SET_PORT_GENERAL   = 0x0,
 	MLX4_SET_PORT_RQP_CALC  = 0x1,
 	MLX4_SET_PORT_MAC_TABLE = 0x2,
@@ -291,9 +302,15 @@ static inline int mlx4_cmd_imm(struct mlx4_dev *dev, u64 in_param, u64 *out_para
 struct mlx4_cmd_mailbox *mlx4_alloc_cmd_mailbox(struct mlx4_dev *dev);
 void mlx4_free_cmd_mailbox(struct mlx4_dev *dev, struct mlx4_cmd_mailbox *mailbox);
 
+int mlx4_get_counter_stats(struct mlx4_dev *dev, int counter_index,
+			   struct mlx4_counter *counter_stats, int reset);
+int mlx4_get_vf_stats(struct mlx4_dev *dev, int port, int vf_idx,
+		      struct ifla_vf_stats *vf_stats);
 u32 mlx4_comm_get_version(void);
 int mlx4_set_vf_mac(struct mlx4_dev *dev, int port, int vf, u64 mac);
 int mlx4_set_vf_vlan(struct mlx4_dev *dev, int port, int vf, u16 vlan, u8 qos);
+int mlx4_set_vf_rate(struct mlx4_dev *dev, int port, int vf, int min_tx_rate,
+		     int max_tx_rate);
 int mlx4_set_vf_spoofchk(struct mlx4_dev *dev, int port, int vf, bool setting);
 int mlx4_get_vf_config(struct mlx4_dev *dev, int port, int vf, struct ifla_vf_info *ivf);
 int mlx4_set_vf_link_state(struct mlx4_dev *dev, int port, int vf, int link_state);

@@ -118,7 +118,7 @@ static inline int i40e_fcoe_fc_eof(struct sk_buff *skb, u8 *eof)
  *
  * The FC EOF is converted to the value understood by HW for descriptor
  * programming. Never call this w/o calling i40e_fcoe_eof_is_supported()
- * first.
+ * first and that already checks for all supported valid eof values.
  **/
 static inline u32 i40e_fcoe_ctxt_eof(u8 eof)
 {
@@ -132,9 +132,12 @@ static inline u32 i40e_fcoe_ctxt_eof(u8 eof)
 	case FC_EOF_A:
 		return I40E_TX_DESC_CMD_L4T_EOFT_EOF_A;
 	default:
-		/* FIXME: still returns 0 */
-		pr_err("Unrecognized EOF %x\n", eof);
-		return 0;
+		/* Supported valid eof shall be already checked by
+		 * calling i40e_fcoe_eof_is_supported() first,
+		 * therefore this default case shall never hit.
+		 */
+		WARN_ON(1);
+		return -EINVAL;
 	}
 }
 
@@ -1306,8 +1309,7 @@ static void i40e_fcoe_tx_map(struct i40e_ring *tx_ring,
 	/* MACLEN is ether header length in words not bytes */
 	td_offset |= (maclen >> 1) << I40E_TX_DESC_LENGTH_MACLEN_SHIFT;
 
-	return i40e_tx_map(tx_ring, skb, first, tx_flags, hdr_len,
-			   td_cmd, td_offset);
+	i40e_tx_map(tx_ring, skb, first, tx_flags, hdr_len, td_cmd, td_offset);
 }
 
 /**

@@ -391,11 +391,11 @@ static inline void neo_parse_isr(struct dgnc_board *brd, uint port)
 	if (!brd || brd->magic != DGNC_BOARD_MAGIC)
 		return;
 
-	if (port > brd->maxports)
+	if (port >= brd->maxports)
 		return;
 
 	ch = brd->channels[port];
-	if (!ch || ch->magic != DGNC_CHANNEL_MAGIC)
+	if (ch->magic != DGNC_CHANNEL_MAGIC)
 		return;
 
 	/* Here we try to figure out what caused the interrupt to happen */
@@ -521,7 +521,7 @@ static inline void neo_parse_lsr(struct dgnc_board *brd, uint port)
 	if (!brd || brd->magic != DGNC_BOARD_MAGIC)
 		return;
 
-	if (port > brd->maxports)
+	if (port >= brd->maxports)
 		return;
 
 	ch = brd->channels[port];
@@ -1003,7 +1003,7 @@ static irqreturn_t neo_intr(int irq, void *voidbrd)
 			 */
 
 			/* Verify the port is in range. */
-			if (port > brd->nasync)
+			if (port >= brd->nasync)
 				continue;
 
 			ch = brd->channels[port];
@@ -1203,7 +1203,7 @@ static void neo_copy_data_from_uart_to_queue(struct channel_t *ch)
 		memcpy_fromio(ch->ch_rqueue + head, &ch->ch_neo_uart->txrxburst, n);
 
 		/*
-		 * Since RX_FIFO_DATA_ERROR was 0, we are guarenteed
+		 * Since RX_FIFO_DATA_ERROR was 0, we are guaranteed
 		 * that all the data currently in the FIFO is free of
 		 * breaks and parity/frame/orun errors.
 		 */

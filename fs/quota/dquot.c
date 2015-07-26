@@ -1163,8 +1163,8 @@ static int need_print_warning(struct dquot_warn *warn)
 			return uid_eq(current_fsuid(), warn->w_dq_id.uid);
 		case GRPQUOTA:
 			return in_group_p(warn->w_dq_id.gid);
-		case PRJQUOTA:	/* Never taken... Just make gcc happy */
-			return 0;
+		case PRJQUOTA:
+			return 1;
 	}
 	return 0;
 }
@@ -1405,6 +1405,9 @@ static void __dquot_initialize(struct inode *inode, int type)
 	/* First get references to structures we might need. */
 	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
 		struct kqid qid;
+		kprojid_t projid;
+		int rc;
+
 		got[cnt] = NULL;
 		if (type != -1 && cnt != type)
 			continue;
@@ -1415,6 +1418,10 @@ static void __dquot_initialize(struct inode *inode, int type)
 		 */
 		if (dquots[cnt])
 			continue;
+
+		if (!sb_has_quota_active(sb, cnt))
+			continue;
+
 		init_needed = 1;
 
 		switch (cnt) {
@@ -1423,6 +1430,12 @@ static void __dquot_initialize(struct inode *inode, int type)
 			break;
 		case GRPQUOTA:
 			qid = make_kqid_gid(inode->i_gid);
+			break;
+		case PRJQUOTA:
+			rc = inode->i_sb->dq_op->get_projid(inode, &projid);
+			if (rc)
+				continue;
+			qid = make_kqid_projid(projid);
 			break;
 		}
 		got[cnt] = dqget(sb, qid);
@@ -2176,7 +2189,8 @@ static int vfs_load_quota_inode(struct inode *inode, int type, int format_id,
 		error = -EROFS;
 		goto out_fmt;
 	}
-	if (!sb->s_op->quota_write || !sb->s_op->quota_read) {
+	if (!sb->s_op->quota_write || !sb->s_op->quota_read ||
+	    (type == PRJQUOTA && sb->dq_op->get_projid == NULL)) {
 		error = -EINVAL;
 		goto out_fmt;
 	}
@@ -2314,7 +2328,7 @@ int dquot_quota_on(struct super_block *sb, int type, int format_id,
 	if (path->dentry->d_sb != sb)
 		error = -EXDEV;
 	else
-		error = vfs_load_quota_inode(path->dentry->d_inode, type,
+		error = vfs_load_quota_inode(d_inode(path->dentry), type,
 					     format_id, DQUOT_USAGE_ENABLED |
 					     DQUOT_LIMITS_ENABLED);
 	return error;
@@ -2378,20 +2392,20 @@ int dquot_quota_on_mount(struct super_block *sb, char *qf_name,
 	struct dentry *dentry;
 	int error;
 
-	mutex_lock(&sb->s_root->d_inode->i_mutex);
+	mutex_lock(&d_inode(sb->s_root)->i_mutex);
 	dentry = lookup_one_len(qf_name, sb->s_root, strlen(qf_name));
-	mutex_unlock(&sb->s_root->d_inode->i_mutex);
+	mutex_unlock(&d_inode(sb->s_root)->i_mutex);
 	if (IS_ERR(dentry))
 		return PTR_ERR(dentry);
 
-	if (!dentry->d_inode) {
+	if (d_really_is_negative(dentry)) {
 		error = -ENOENT;
 		goto out;
 	}
 
 	error = security_quota_on(dentry);
 	if (!error)
-		error = vfs_load_quota_inode(dentry->d_inode, type, format_id,
+		error = vfs_load_quota_inode(d_inode(dentry), type, format_id,
 				DQUOT_USAGE_ENABLED | DQUOT_LIMITS_ENABLED);
 
 out:

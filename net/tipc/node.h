@@ -45,8 +45,6 @@
 /* Out-of-range value for node signature */
 #define INVALID_NODE_SIG	0x10000
 
-#define NODE_HTABLE_SIZE	512
-
 /* Flags used to take different actions according to flag type
  * TIPC_WAIT_PEER_LINKS_DOWN: wait to see that peer's links are down
  * TIPC_WAIT_OWN_LINKS_DOWN: wait until peer node is declared down
@@ -64,7 +62,8 @@ enum {
 	TIPC_NOTIFY_LINK_UP		= (1 << 6),
 	TIPC_NOTIFY_LINK_DOWN		= (1 << 7),
 	TIPC_NAMED_MSG_EVT		= (1 << 8),
-	TIPC_BCAST_MSG_EVT		= (1 << 9)
+	TIPC_BCAST_MSG_EVT		= (1 << 9),
+	TIPC_BCAST_RESET		= (1 << 10)
 };
 
 /**
@@ -93,6 +92,7 @@ struct tipc_node_bclink {
 /**
  * struct tipc_node - TIPC node structure
  * @addr: network address of node
+ * @ref: reference counter to node object
  * @lock: spinlock governing access to structure
  * @net: the applicable net namespace
  * @hash: links to adjacent nodes in unsorted hash chain
@@ -114,6 +114,7 @@ struct tipc_node_bclink {
  */
 struct tipc_node {
 	u32 addr;
+	struct kref kref;
 	spinlock_t lock;
 	struct net *net;
 	struct hlist_node hash;
@@ -136,6 +137,7 @@ struct tipc_node {
 };
 
 struct tipc_node *tipc_node_find(struct net *net, u32 addr);
+void tipc_node_put(struct tipc_node *node);
 struct tipc_node *tipc_node_create(struct net *net, u32 addr);
 void tipc_node_stop(struct net *net);
 void tipc_node_attach_link(struct tipc_node *n_ptr, struct tipc_link *l_ptr);
@@ -170,10 +172,12 @@ static inline uint tipc_node_get_mtu(struct net *net, u32 addr, u32 selector)
 
 	node = tipc_node_find(net, addr);
 
-	if (likely(node))
+	if (likely(node)) {
 		mtu = node->act_mtus[selector & 1];
-	else
+		tipc_node_put(node);
+	} else {
 		mtu = MAX_MSG_SIZE;
+	}
 
 	return mtu;
 }

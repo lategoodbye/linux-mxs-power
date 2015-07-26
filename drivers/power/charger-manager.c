@@ -1484,7 +1484,7 @@ static int cm_init_thermal_data(struct charger_manager *cm,
 	return ret;
 }
 
-static struct of_device_id charger_manager_match[] = {
+static const struct of_device_id charger_manager_match[] = {
 	{
 		.compatible = "charger-manager",
 	},
@@ -1768,11 +1768,12 @@ static int charger_manager_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&cm->fullbatt_vchk_work, fullbatt_vchk);
 
-	cm->charger_psy = power_supply_register(NULL, &cm->charger_psy_desc,
+	cm->charger_psy = power_supply_register(&pdev->dev,
+						&cm->charger_psy_desc,
 						&psy_cfg);
 	if (IS_ERR(cm->charger_psy)) {
 		dev_err(&pdev->dev, "Cannot register charger-manager with name \"%s\"\n",
-			cm->charger_psy->desc->name);
+			cm->charger_psy_desc.name);
 		return PTR_ERR(cm->charger_psy);
 	}
 

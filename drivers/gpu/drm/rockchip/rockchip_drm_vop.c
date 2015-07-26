@@ -19,6 +19,7 @@
 #include <drm/drm_plane_helper.h>
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/of.h>
@@ -169,6 +170,7 @@ struct vop_win_phy {
 
 	struct vop_reg enable;
 	struct vop_reg format;
+	struct vop_reg rb_swap;
 	struct vop_reg act_info;
 	struct vop_reg dsp_info;
 	struct vop_reg dsp_st;
@@ -198,8 +200,12 @@ struct vop_data {
 static const uint32_t formats_01[] = {
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_ARGB8888,
+	DRM_FORMAT_XBGR8888,
+	DRM_FORMAT_ABGR8888,
 	DRM_FORMAT_RGB888,
+	DRM_FORMAT_BGR888,
 	DRM_FORMAT_RGB565,
+	DRM_FORMAT_BGR565,
 	DRM_FORMAT_NV12,
 	DRM_FORMAT_NV16,
 	DRM_FORMAT_NV24,
@@ -208,8 +214,12 @@ static const uint32_t formats_01[] = {
 static const uint32_t formats_234[] = {
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_ARGB8888,
+	DRM_FORMAT_XBGR8888,
+	DRM_FORMAT_ABGR8888,
 	DRM_FORMAT_RGB888,
+	DRM_FORMAT_BGR888,
 	DRM_FORMAT_RGB565,
+	DRM_FORMAT_BGR565,
 };
 
 static const struct vop_win_phy win01_data = {
@@ -217,6 +227,7 @@ static const struct vop_win_phy win01_data = {
 	.nformats = ARRAY_SIZE(formats_01),
 	.enable = VOP_REG(WIN0_CTRL0, 0x1, 0),
 	.format = VOP_REG(WIN0_CTRL0, 0x7, 1),
+	.rb_swap = VOP_REG(WIN0_CTRL0, 0x1, 12),
 	.act_info = VOP_REG(WIN0_ACT_INFO, 0x1fff1fff, 0),
 	.dsp_info = VOP_REG(WIN0_DSP_INFO, 0x0fff0fff, 0),
 	.dsp_st = VOP_REG(WIN0_DSP_ST, 0x1fff1fff, 0),
@@ -233,21 +244,13 @@ static const struct vop_win_phy win23_data = {
 	.nformats = ARRAY_SIZE(formats_234),
 	.enable = VOP_REG(WIN2_CTRL0, 0x1, 0),
 	.format = VOP_REG(WIN2_CTRL0, 0x7, 1),
+	.rb_swap = VOP_REG(WIN2_CTRL0, 0x1, 12),
 	.dsp_info = VOP_REG(WIN2_DSP_INFO0, 0x0fff0fff, 0),
 	.dsp_st = VOP_REG(WIN2_DSP_ST0, 0x1fff1fff, 0),
 	.yrgb_mst = VOP_REG(WIN2_MST0, 0xffffffff, 0),
 	.yrgb_vir = VOP_REG(WIN2_VIR0_1, 0x1fff, 0),
 	.src_alpha_ctl = VOP_REG(WIN2_SRC_ALPHA_CTRL, 0xff, 0),
 	.dst_alpha_ctl = VOP_REG(WIN2_DST_ALPHA_CTRL, 0xff, 0),
-};
-
-static const struct vop_win_phy cursor_data = {
-	.data_formats = formats_234,
-	.nformats = ARRAY_SIZE(formats_234),
-	.enable = VOP_REG(HWC_CTRL0, 0x1, 0),
-	.format = VOP_REG(HWC_CTRL0, 0x7, 1),
-	.dsp_st = VOP_REG(HWC_DSP_ST, 0x1fff1fff, 0),
-	.yrgb_mst = VOP_REG(HWC_MST, 0xffffffff, 0),
 };
 
 static const struct vop_ctrl ctrl_data = {
@@ -281,14 +284,14 @@ static const struct vop_reg_data vop_init_reg_table[] = {
 /*
  * Note: rk3288 has a dedicated 'cursor' window, however, that window requires
  * special support to get alpha blending working.  For now, just use overlay
- * window 1 for the drm cursor.
+ * window 3 for the drm cursor.
+ *
  */
 static const struct vop_win_data rk3288_vop_win_data[] = {
 	{ .base = 0x00, .phy = &win01_data, .type = DRM_PLANE_TYPE_PRIMARY },
-	{ .base = 0x40, .phy = &win01_data, .type = DRM_PLANE_TYPE_CURSOR },
+	{ .base = 0x40, .phy = &win01_data, .type = DRM_PLANE_TYPE_OVERLAY },
 	{ .base = 0x00, .phy = &win23_data, .type = DRM_PLANE_TYPE_OVERLAY },
-	{ .base = 0x50, .phy = &win23_data, .type = DRM_PLANE_TYPE_OVERLAY },
-	{ .base = 0x00, .phy = &cursor_data, .type = DRM_PLANE_TYPE_OVERLAY },
+	{ .base = 0x50, .phy = &win23_data, .type = DRM_PLANE_TYPE_CURSOR },
 };
 
 static const struct vop_data rk3288_vop = {
@@ -351,15 +354,32 @@ static inline void vop_mask_write_relaxed(struct vop *vop, uint32_t offset,
 	}
 }
 
+static bool has_rb_swapped(uint32_t format)
+{
+	switch (format) {
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_ABGR8888:
+	case DRM_FORMAT_BGR888:
+	case DRM_FORMAT_BGR565:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static enum vop_data_format vop_convert_format(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_XRGB8888:
 	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_ABGR8888:
 		return VOP_FMT_ARGB8888;
 	case DRM_FORMAT_RGB888:
+	case DRM_FORMAT_BGR888:
 		return VOP_FMT_RGB888;
 	case DRM_FORMAT_RGB565:
+	case DRM_FORMAT_BGR565:
 		return VOP_FMT_RGB565;
 	case DRM_FORMAT_NV12:
 		return VOP_FMT_YUV420SP;
@@ -377,6 +397,7 @@ static bool is_alpha_support(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_ABGR8888:
 		return true;
 	default:
 		return false;
@@ -420,6 +441,12 @@ static void vop_enable(struct drm_crtc *crtc)
 
 	if (vop->is_enabled)
 		return;
+
+	ret = pm_runtime_get_sync(vop->dev);
+	if (ret < 0) {
+		dev_err(vop->dev, "failed to get pm runtime: %d\n", ret);
+		return;
+	}
 
 	ret = clk_enable(vop->hclk);
 	if (ret < 0) {
@@ -517,6 +544,7 @@ static void vop_disable(struct drm_crtc *crtc)
 	clk_disable(vop->dclk);
 	clk_disable(vop->aclk);
 	clk_disable(vop->hclk);
+	pm_runtime_put(vop->dev);
 }
 
 /*
@@ -580,6 +608,7 @@ static int vop_update_plane_event(struct drm_plane *plane,
 	enum vop_data_format format;
 	uint32_t val;
 	bool is_alpha;
+	bool rb_swap;
 	bool visible;
 	int ret;
 	struct drm_rect dest = {
@@ -613,6 +642,7 @@ static int vop_update_plane_event(struct drm_plane *plane,
 		return 0;
 
 	is_alpha = is_alpha_support(fb->pixel_format);
+	rb_swap = has_rb_swapped(fb->pixel_format);
 	format = vop_convert_format(fb->pixel_format);
 	if (format < 0)
 		return format;
@@ -681,6 +711,7 @@ static int vop_update_plane_event(struct drm_plane *plane,
 	val = (dsp_sty - 1) << 16;
 	val |= (dsp_stx - 1) & 0xffff;
 	VOP_WIN_SET(vop, win, dsp_st, val);
+	VOP_WIN_SET(vop, win, rb_swap, rb_swap);
 
 	if (is_alpha) {
 		VOP_WIN_SET(vop, win, dst_alpha_ctl,
@@ -893,7 +924,7 @@ static int vop_crtc_mode_set(struct drm_crtc *crtc,
 	u16 vsync_len = adjusted_mode->vsync_end - adjusted_mode->vsync_start;
 	u16 vact_st = adjusted_mode->vtotal - adjusted_mode->vsync_start;
 	u16 vact_end = vact_st + vdisplay;
-	int ret;
+	int ret, ret_clk;
 	uint32_t val;
 
 	/*
@@ -915,7 +946,8 @@ static int vop_crtc_mode_set(struct drm_crtc *crtc,
 	default:
 		DRM_ERROR("unsupport connector_type[%d]\n",
 			  vop->connector_type);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	};
 	VOP_CTRL_SET(vop, out_mode, vop->connector_out_mode);
 
@@ -938,7 +970,7 @@ static int vop_crtc_mode_set(struct drm_crtc *crtc,
 
 	ret = vop_crtc_mode_set_base(crtc, x, y, fb);
 	if (ret)
-		return ret;
+		goto out;
 
 	/*
 	 * reset dclk, take all mode config affect, so the clk would run in
@@ -949,13 +981,14 @@ static int vop_crtc_mode_set(struct drm_crtc *crtc,
 	reset_control_deassert(vop->dclk_rst);
 
 	clk_set_rate(vop->dclk, adjusted_mode->clock * 1000);
-	ret = clk_enable(vop->dclk);
-	if (ret < 0) {
-		dev_err(vop->dev, "failed to enable dclk - %d\n", ret);
-		return ret;
+out:
+	ret_clk = clk_enable(vop->dclk);
+	if (ret_clk < 0) {
+		dev_err(vop->dev, "failed to enable dclk - %d\n", ret_clk);
+		return ret_clk;
 	}
 
-	return 0;
+	return ret;
 }
 
 static void vop_crtc_commit(struct drm_crtc *crtc)
@@ -1400,7 +1433,7 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 	struct vop *vop;
 	struct resource *res;
 	size_t alloc_size;
-	int ret;
+	int ret, irq;
 
 	of_id = of_match_device(vop_driver_dt_match, dev);
 	vop_data = of_id->data;
@@ -1436,11 +1469,12 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 		return ret;
 	}
 
-	vop->irq = platform_get_irq(pdev, 0);
-	if (vop->irq < 0) {
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
 		dev_err(dev, "cannot find irq for vop\n");
-		return vop->irq;
+		return irq;
 	}
+	vop->irq = (unsigned int)irq;
 
 	spin_lock_init(&vop->reg_lock);
 	spin_lock_init(&vop->irq_lock);

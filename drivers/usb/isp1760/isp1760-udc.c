@@ -812,6 +812,8 @@ static struct usb_request *isp1760_ep_alloc_request(struct usb_ep *ep,
 	struct isp1760_request *req;
 
 	req = kzalloc(sizeof(*req), gfp_flags);
+	if (!req)
+		return NULL;
 
 	return &req->req;
 }
@@ -1203,7 +1205,7 @@ static int isp1760_udc_start(struct usb_gadget *gadget,
 
 	if (udc->driver) {
 		dev_err(udc->isp->dev, "UDC already has a gadget driver\n");
-		spin_unlock(&udc->lock);
+		spin_unlock_irqrestore(&udc->lock, flags);
 		return -EBUSY;
 	}
 

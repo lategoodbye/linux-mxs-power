@@ -199,39 +199,6 @@ unsigned long cpufreq_cooling_get_level(unsigned int cpu, unsigned int freq)
 }
 EXPORT_SYMBOL_GPL(cpufreq_cooling_get_level);
 
-static void update_cpu_device(int cpu)
-{
-	struct cpufreq_cooling_device *cpufreq_dev;
-
-	mutex_lock(&cooling_cpufreq_lock);
-	list_for_each_entry(cpufreq_dev, &cpufreq_dev_list, node) {
-		if (cpumask_test_cpu(cpu, &cpufreq_dev->allowed_cpus)) {
-			cpufreq_dev->cpu_dev = get_cpu_device(cpu);
-			if (!cpufreq_dev->cpu_dev) {
-				dev_warn(&cpufreq_dev->cool_dev->device,
-					"No cpu device for new policy cpu %d\n",
-					 cpu);
-			}
-			break;
-		}
-	}
-	mutex_unlock(&cooling_cpufreq_lock);
-}
-
-static void remove_cpu_device(int cpu)
-{
-	struct cpufreq_cooling_device *cpufreq_dev;
-
-	mutex_lock(&cooling_cpufreq_lock);
-	list_for_each_entry(cpufreq_dev, &cpufreq_dev_list, node) {
-		if (cpumask_test_cpu(cpu, &cpufreq_dev->allowed_cpus)) {
-			cpufreq_dev->cpu_dev = NULL;
-			break;
-		}
-	}
-	mutex_unlock(&cooling_cpufreq_lock);
-}
-
 /**
  * cpufreq_thermal_notifier - notifier callback for cpufreq policy change.
  * @nb:	struct notifier_block * with callback info.
@@ -267,13 +234,6 @@ static int cpufreq_thermal_notifier(struct notifier_block *nb,
 							     max_freq);
 		}
 		mutex_unlock(&cooling_cpufreq_lock);
-		break;
-
-	case CPUFREQ_CREATE_POLICY:
-		update_cpu_device(policy->cpu);
-		break;
-	case CPUFREQ_REMOVE_POLICY:
-		remove_cpu_device(policy->cpu);
 		break;
 	default:
 		return NOTIFY_DONE;
@@ -329,6 +289,10 @@ static int build_dyn_power_table(struct cpufreq_cooling_device *cpufreq_device,
 	}
 
 	power_table = kcalloc(num_opps, sizeof(*power_table), GFP_KERNEL);
+	if (!power_table) {
+		ret = -ENOMEM;
+		goto unlock;
+	}
 
 	for (freq = 0, i = 0;
 	     opp = dev_pm_opp_find_freq_ceil(dev, &freq), !IS_ERR(opp);
@@ -595,7 +559,18 @@ static int cpufreq_get_requested_power(struct thermal_cooling_device *cdev,
 	struct cpufreq_cooling_device *cpufreq_device = cdev->devdata;
 	u32 *load_cpu = NULL;
 
-	freq = cpufreq_quick_get(cpumask_any(&cpufreq_device->allowed_cpus));
+	cpu = cpumask_any_and(&cpufreq_device->allowed_cpus, cpu_online_mask);
+
+	/*
+	 * All the CPUs are offline, thus the requested power by
+	 * the cdev is 0
+	 */
+	if (cpu >= nr_cpu_ids) {
+		*power = 0;
+		return 0;
+	}
+
+	freq = cpufreq_quick_get(cpu);
 
 	if (trace_thermal_power_cpu_get_power_enabled()) {
 		u32 ncpus = cpumask_weight(&cpufreq_device->allowed_cpus);

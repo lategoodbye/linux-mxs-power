@@ -11,11 +11,10 @@ ifneq ($(obj-perf),)
 obj-perf := $(abspath $(obj-perf))/
 endif
 
-$(shell echo -n > .config-detected)
-detected     = $(shell echo "$(1)=y"       >> .config-detected)
-detected_var = $(shell echo "$(1)=$($(1))" >> .config-detected)
+$(shell echo -n > $(OUTPUT).config-detected)
+detected     = $(shell echo "$(1)=y"       >> $(OUTPUT).config-detected)
+detected_var = $(shell echo "$(1)=$($(1))" >> $(OUTPUT).config-detected)
 
-LIB_INCLUDE := $(srctree)/tools/lib/
 CFLAGS := $(EXTRA_CFLAGS) $(EXTRA_WARNINGS)
 
 include $(src-perf)/config/Makefile.arch
@@ -33,7 +32,7 @@ ifeq ($(ARCH),x86)
     LIBUNWIND_LIBS = -lunwind -lunwind-x86_64
     $(call detected,CONFIG_X86_64)
   else
-    LIBUNWIND_LIBS = -lunwind -lunwind-x86
+    LIBUNWIND_LIBS = -lunwind-x86 -llzma -lunwind
   endif
   NO_PERF_REGS := 0
 endif
@@ -96,7 +95,7 @@ ifndef NO_LIBELF
   FEATURE_CHECK_LDFLAGS-libdw-dwarf-unwind := $(LIBDW_LDFLAGS) -ldw
 endif
 
-ifndef NO_LIBBABELTRACE
+ifdef LIBBABELTRACE
   # for linking with debug library, run like:
   # make DEBUG=1 LIBBABELTRACE_DIR=/opt/libbabeltrace/
   ifdef LIBBABELTRACE_DIR
@@ -131,6 +130,8 @@ endif
 
 ifeq ($(DEBUG),0)
   CFLAGS += -O6
+else
+  CFLAGS += $(call cc-option,-Og,-O0)
 endif
 
 ifdef PARSER_DEBUG
@@ -177,123 +178,7 @@ LDFLAGS += -Wl,-z,noexecstack
 
 EXTLIBS = -lpthread -lrt -lm -ldl
 
-ifneq ($(OUTPUT),)
-  OUTPUT_FEATURES = $(OUTPUT)config/feature-checks/
-  $(shell mkdir -p $(OUTPUT_FEATURES))
-endif
-
-feature_check = $(eval $(feature_check_code))
-define feature_check_code
-  feature-$(1) := $(shell $(MAKE) OUTPUT=$(OUTPUT_FEATURES) CFLAGS="$(EXTRA_CFLAGS) $(FEATURE_CHECK_CFLAGS-$(1))" LDFLAGS="$(LDFLAGS) $(FEATURE_CHECK_LDFLAGS-$(1))" -C config/feature-checks test-$1.bin > $(OUTPUT)config/feature-checks/.make-$(1).output 2>&1 && echo 1 || echo 0)
-endef
-
-feature_set = $(eval $(feature_set_code))
-define feature_set_code
-  feature-$(1) := 1
-endef
-
-#
-# Build the feature check binaries in parallel, ignore errors, ignore return value and suppress output:
-#
-
-#
-# Note that this is not a complete list of all feature tests, just
-# those that are typically built on a fully configured system.
-#
-# [ Feature tests not mentioned here have to be built explicitly in
-#   the rule that uses them - an example for that is the 'bionic'
-#   feature check. ]
-#
-CORE_FEATURE_TESTS =			\
-	backtrace			\
-	dwarf				\
-	fortify-source			\
-	sync-compare-and-swap		\
-	glibc				\
-	gtk2				\
-	gtk2-infobar			\
-	libaudit			\
-	libbfd				\
-	libelf				\
-	libelf-getphdrnum		\
-	libelf-mmap			\
-	libnuma				\
-	libperl				\
-	libpython			\
-	libpython-version		\
-	libslang			\
-	libunwind			\
-	pthread-attr-setaffinity-np	\
-	stackprotector-all		\
-	timerfd				\
-	libdw-dwarf-unwind		\
-	libbabeltrace			\
-	zlib
-
-LIB_FEATURE_TESTS =			\
-	dwarf				\
-	glibc				\
-	gtk2				\
-	libaudit			\
-	libbfd				\
-	libelf				\
-	libnuma				\
-	libperl				\
-	libpython			\
-	libslang			\
-	libunwind			\
-	libdw-dwarf-unwind		\
-	libbabeltrace			\
-	zlib
-
-VF_FEATURE_TESTS =			\
-	backtrace			\
-	fortify-source			\
-	sync-compare-and-swap		\
-	gtk2-infobar			\
-	libelf-getphdrnum		\
-	libelf-mmap			\
-	libpython-version		\
-	pthread-attr-setaffinity-np	\
-	stackprotector-all		\
-	timerfd				\
-	libunwind-debug-frame		\
-	bionic				\
-	liberty				\
-	liberty-z			\
-	cplus-demangle			\
-	compile-32			\
-	compile-x32
-
-# Set FEATURE_CHECK_(C|LD)FLAGS-all for all CORE_FEATURE_TESTS features.
-# If in the future we need per-feature checks/flags for features not
-# mentioned in this list we need to refactor this ;-).
-set_test_all_flags = $(eval $(set_test_all_flags_code))
-define set_test_all_flags_code
-  FEATURE_CHECK_CFLAGS-all  += $(FEATURE_CHECK_CFLAGS-$(1))
-  FEATURE_CHECK_LDFLAGS-all += $(FEATURE_CHECK_LDFLAGS-$(1))
-endef
-
-$(foreach feat,$(CORE_FEATURE_TESTS),$(call set_test_all_flags,$(feat)))
-
-#
-# Special fast-path for the 'all features are available' case:
-#
-$(call feature_check,all,$(MSG))
-
-#
-# Just in case the build freshly failed, make sure we print the
-# feature matrix:
-#
-ifeq ($(feature-all), 1)
-  #
-  # test-all.c passed - just set all the core feature flags to 1:
-  #
-  $(foreach feat,$(CORE_FEATURE_TESTS),$(call feature_set,$(feat)))
-else
-  $(shell $(MAKE) OUTPUT=$(OUTPUT_FEATURES) CFLAGS="$(EXTRA_CFLAGS)" LDFLAGS=$(LDFLAGS) -i -j -C config/feature-checks $(addsuffix .bin,$(CORE_FEATURE_TESTS)) >/dev/null 2>&1)
-  $(foreach feat,$(CORE_FEATURE_TESTS),$(call feature_check,$(feat)))
-endif
+include $(srctree)/tools/build/Makefile.feature
 
 ifeq ($(feature-stackprotector-all), 1)
   CFLAGS += -fstack-protector-all
@@ -322,7 +207,7 @@ endif
 
 CFLAGS += -I$(src-perf)/util
 CFLAGS += -I$(src-perf)
-CFLAGS += -I$(LIB_INCLUDE)
+CFLAGS += -I$(srctree)/tools/lib/
 
 CFLAGS += -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE
 
@@ -384,6 +269,10 @@ else
     endif # Dwarf support
   endif # libelf support
 endif # NO_LIBELF
+
+ifdef NO_DWARF
+  NO_LIBDW_DWARF_UNWIND := 1
+endif
 
 ifndef NO_LIBELF
   CFLAGS += -DHAVE_LIBELF_SUPPORT
@@ -658,6 +547,17 @@ ifndef NO_ZLIB
   endif
 endif
 
+ifndef NO_LZMA
+  ifeq ($(feature-lzma), 1)
+    CFLAGS += -DHAVE_LZMA_SUPPORT
+    EXTLIBS += -llzma
+    $(call detected,CONFIG_LZMA)
+  else
+    msg := $(warning No liblzma found, disables xz kernel module decompression, please install xz-devel/liblzma-dev);
+    NO_LZMA := 1
+  endif
+endif
+
 ifndef NO_BACKTRACE
   ifeq ($(feature-backtrace), 1)
     CFLAGS += -DHAVE_BACKTRACE_SUPPORT
@@ -688,7 +588,7 @@ ifeq (${IS_64_BIT}, 1)
       NO_PERF_READ_VDSO32 := 1
     endif
   endif
-  ifneq (${IS_X86_64}, 1)
+  ifneq ($(ARCH), x86)
     NO_PERF_READ_VDSOX32 := 1
   endif
   ifndef NO_PERF_READ_VDSOX32
@@ -704,16 +604,21 @@ else
   NO_PERF_READ_VDSOX32 := 1
 endif
 
-ifndef NO_LIBBABELTRACE
-  ifeq ($(feature-libbabeltrace), 0)
-    msg := $(warning No libbabeltrace found, disables 'perf data' CTF format support, please install libbabeltrace-dev[el]/libbabeltrace-ctf-dev);
-    NO_LIBBABELTRACE := 1
-  else
+ifdef LIBBABELTRACE
+  $(call feature_check,libbabeltrace)
+  ifeq ($(feature-libbabeltrace), 1)
     CFLAGS += -DHAVE_LIBBABELTRACE_SUPPORT $(LIBBABELTRACE_CFLAGS)
     LDFLAGS += $(LIBBABELTRACE_LDFLAGS)
     EXTLIBS += -lbabeltrace-ctf
     $(call detected,CONFIG_LIBBABELTRACE)
+  else
+    msg := $(warning No libbabeltrace found, disables 'perf data' CTF format support, please install libbabeltrace-dev[el]/libbabeltrace-ctf-dev);
   endif
+endif
+
+ifndef NO_AUXTRACE
+  $(call detected,CONFIG_AUXTRACE)
+  CFLAGS += -DHAVE_AUXTRACE_SUPPORT
 endif
 
 # Among the variables below, these:
@@ -748,7 +653,7 @@ sysconfdir = $(prefix)/etc
 ETC_PERFCONFIG = etc/perfconfig
 endif
 ifndef lib
-ifeq ($(IS_X86_64),1)
+ifeq ($(ARCH)$(IS_64_BIT), x861)
 lib = lib64
 else
 lib = lib
@@ -784,84 +689,18 @@ plugindir=$(libdir)/traceevent/plugins
 plugindir_SQ= $(subst ','\'',$(plugindir))
 endif
 
-#
-# Print the result of the feature test:
-#
-feature_print_status = $(eval $(feature_print_status_code)) $(info $(MSG))
-
-define feature_print_status_code
-  ifeq ($(feature-$(1)), 1)
-    MSG = $(shell printf '...%30s: [ \033[32mon\033[m  ]' $(1))
-  else
-    MSG = $(shell printf '...%30s: [ \033[31mOFF\033[m ]' $(1))
-  endif
-endef
-
-feature_print_var = $(eval $(feature_print_var_code)) $(info $(MSG))
-define feature_print_var_code
+print_var = $(eval $(print_var_code)) $(info $(MSG))
+define print_var_code
     MSG = $(shell printf '...%30s: %s' $(1) $($(1)))
 endef
 
-feature_print_text = $(eval $(feature_print_text_code)) $(info $(MSG))
-define feature_print_text_code
-    MSG = $(shell printf '...%30s: %s' $(1) $(2))
-endef
-
-PERF_FEATURES := $(foreach feat,$(LIB_FEATURE_TESTS),feature-$(feat)($(feature-$(feat))))
-PERF_FEATURES_FILE := $(shell touch $(OUTPUT)PERF-FEATURES; cat $(OUTPUT)PERF-FEATURES)
-
-ifeq ($(dwarf-post-unwind),1)
-  PERF_FEATURES += dwarf-post-unwind($(dwarf-post-unwind-text))
-endif
-
-# The $(display_lib) controls the default detection message
-# output. It's set if:
-# - detected features differes from stored features from
-#   last build (in PERF-FEATURES file)
-# - one of the $(LIB_FEATURE_TESTS) is not detected
-# - VF is enabled
-
-ifneq ("$(PERF_FEATURES)","$(PERF_FEATURES_FILE)")
-  $(shell echo "$(PERF_FEATURES)" > $(OUTPUT)PERF-FEATURES)
-  display_lib := 1
-endif
-
-feature_check = $(eval $(feature_check_code))
-define feature_check_code
-  ifneq ($(feature-$(1)), 1)
-    display_lib := 1
-  endif
-endef
-
-$(foreach feat,$(LIB_FEATURE_TESTS),$(call feature_check,$(feat)))
-
 ifeq ($(VF),1)
-  display_lib := 1
-  display_vf := 1
-endif
-
-ifeq ($(display_lib),1)
-  $(info )
-  $(info Auto-detecting system features:)
-  $(foreach feat,$(LIB_FEATURE_TESTS),$(call feature_print_status,$(feat),))
-
-  ifeq ($(dwarf-post-unwind),1)
-    $(call feature_print_text,"DWARF post unwind library", $(dwarf-post-unwind-text))
-  endif
-endif
-
-ifeq ($(display_vf),1)
-  $(foreach feat,$(VF_FEATURE_TESTS),$(call feature_print_status,$(feat),))
-  $(info )
-  $(call feature_print_var,prefix)
-  $(call feature_print_var,bindir)
-  $(call feature_print_var,libdir)
-  $(call feature_print_var,sysconfdir)
-  $(call feature_print_var,LIBUNWIND_DIR)
-  $(call feature_print_var,LIBDW_DIR)
-endif
-
-ifeq ($(display_lib),1)
+  $(call print_var,prefix)
+  $(call print_var,bindir)
+  $(call print_var,libdir)
+  $(call print_var,sysconfdir)
+  $(call print_var,LIBUNWIND_DIR)
+  $(call print_var,LIBDW_DIR)
   $(info )
 endif
 

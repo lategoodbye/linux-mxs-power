@@ -58,7 +58,7 @@ static inline int ksft_exit_fail(void)
 #define NSEC_PER_SEC 1000000000ULL
 #define UNRESONABLE_LATENCY 40000000 /* 40ms in nanosecs */
 
-#define TIMER_SECS 3
+#define TIMER_SECS 1
 int alarmcount;
 int clock_id;
 struct timespec start_time;
@@ -139,6 +139,13 @@ int do_timer(int clock_id, int flags)
 
 	err = timer_create(clock_id, &se, &tm1);
 	if (err) {
+		if ((clock_id == CLOCK_REALTIME_ALARM) ||
+		    (clock_id == CLOCK_BOOTTIME_ALARM)) {
+			printf("%-22s %s missing CAP_WAKE_ALARM?    : [UNSUPPORTED]\n",
+					clockstring(clock_id),
+					flags ? "ABSTIME":"RELTIME");
+			return 0;
+		}
 		printf("%s - timer_create() failed\n", clockstring(clock_id));
 		return -1;
 	}

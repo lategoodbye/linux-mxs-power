@@ -23,8 +23,8 @@
 #define PEEK32(addr) \
 readl(cursor->mmio + (addr))
 
-#define POKE32(addr,data) \
-writel((data),cursor->mmio + (addr))
+#define POKE32(addr, data) \
+writel((data), cursor->mmio + (addr))
 
 /* cursor control for voyager and 718/750*/
 #define HWC_ADDRESS                         0x0
@@ -58,47 +58,47 @@ writel((data),cursor->mmio + (addr))
 
 
 /* hw_cursor_xxx works for voyager,718 and 750 */
-void hw_cursor_enable(struct lynx_cursor * cursor)
+void hw_cursor_enable(struct lynx_cursor *cursor)
 {
 	u32 reg;
-	reg = FIELD_VALUE(0,HWC_ADDRESS,ADDRESS,cursor->offset)|
-			FIELD_SET(0,HWC_ADDRESS,EXT,LOCAL)|
-			FIELD_SET(0,HWC_ADDRESS,ENABLE,ENABLE);
-	POKE32(HWC_ADDRESS,reg);
+	reg = FIELD_VALUE(0, HWC_ADDRESS, ADDRESS, cursor->offset)|
+			FIELD_SET(0, HWC_ADDRESS, EXT, LOCAL)|
+			FIELD_SET(0, HWC_ADDRESS, ENABLE, ENABLE);
+	POKE32(HWC_ADDRESS, reg);
 }
-void hw_cursor_disable(struct lynx_cursor * cursor)
+void hw_cursor_disable(struct lynx_cursor *cursor)
 {
-	POKE32(HWC_ADDRESS,0);
+	POKE32(HWC_ADDRESS, 0);
 }
 
-void hw_cursor_setSize(struct lynx_cursor * cursor,
-						int w,int h)
+void hw_cursor_setSize(struct lynx_cursor *cursor,
+						int w, int h)
 {
 	cursor->w = w;
 	cursor->h = h;
 }
-void hw_cursor_setPos(struct lynx_cursor * cursor,
-						int x,int y)
+void hw_cursor_setPos(struct lynx_cursor *cursor,
+						int x, int y)
 {
 	u32 reg;
-	reg = FIELD_VALUE(0,HWC_LOCATION,Y,y)|
-			FIELD_VALUE(0,HWC_LOCATION,X,x);
-	POKE32(HWC_LOCATION,reg);
+	reg = FIELD_VALUE(0, HWC_LOCATION, Y, y)|
+			FIELD_VALUE(0, HWC_LOCATION, X, x);
+	POKE32(HWC_LOCATION, reg);
 }
-void hw_cursor_setColor(struct lynx_cursor * cursor,
-						u32 fg,u32 bg)
+void hw_cursor_setColor(struct lynx_cursor *cursor,
+						u32 fg, u32 bg)
 {
-	POKE32(HWC_COLOR_12,(fg<<16)|(bg&0xffff));
-	POKE32(HWC_COLOR_3,0xffe0);
+	POKE32(HWC_COLOR_12, (fg<<16)|(bg&0xffff));
+	POKE32(HWC_COLOR_3, 0xffe0);
 }
 
-void hw_cursor_setData(struct lynx_cursor * cursor,
-			u16 rop,const u8* pcol,const u8* pmsk)
+void hw_cursor_setData(struct lynx_cursor *cursor,
+			u16 rop, const u8* pcol, const u8* pmsk)
 {
-	int i,j,count,pitch,offset;
-	u8 color,mask,opr;
+	int i, j, count, pitch, offset;
+	u8 color, mask, opr;
 	u16 data;
-	u16 * pbuffer,*pstart;
+	void __iomem *pbuffer, *pstart;
 
 	/*  in byte*/
 	pitch = cursor->w >> 3;
@@ -106,11 +106,11 @@ void hw_cursor_setData(struct lynx_cursor * cursor,
 	/* in byte	*/
 	count = pitch * cursor->h;
 
-	/* in ushort */
-	offset = cursor->maxW * 2 / 8 / 2;
+	/* in byte */
+	offset = cursor->maxW * 2 / 8;
 
 	data = 0;
-	pstart = (u16 *)cursor->vstart;
+	pstart = cursor->vstart;
 	pbuffer = pstart;
 
 /*
@@ -141,10 +141,10 @@ void hw_cursor_setData(struct lynx_cursor * cursor,
 		{
 
 			if(opr & (0x80 >> j))
-			{	//use fg color,id = 2
+			{	/* use fg color,id = 2 */
 				data |= 2 << (j*2);
 			}else{
-				//use bg color,id = 1
+				/* use bg color,id = 1 */
 				data |= 1 << (j*2);
 			}
 		}
@@ -161,7 +161,7 @@ void hw_cursor_setData(struct lynx_cursor * cursor,
 			}
 		}
 #endif
-		*pbuffer = data;
+		iowrite16(data, pbuffer);
 
 		/* assume pitch is 1,2,4,8,...*/
 #if 0
@@ -174,7 +174,7 @@ void hw_cursor_setData(struct lynx_cursor * cursor,
 			pstart += offset;
 			pbuffer = pstart;
 		}else{
-			pbuffer++;
+			pbuffer += sizeof(u16);
 		}
 
 	}
@@ -183,13 +183,13 @@ void hw_cursor_setData(struct lynx_cursor * cursor,
 }
 
 
-void hw_cursor_setData2(struct lynx_cursor * cursor,
-			u16 rop,const u8* pcol,const u8* pmsk)
+void hw_cursor_setData2(struct lynx_cursor *cursor,
+			u16 rop, const u8* pcol, const u8* pmsk)
 {
-	int i,j,count,pitch,offset;
+	int i, j, count, pitch, offset;
 	u8 color, mask;
 	u16 data;
-	u16 * pbuffer,*pstart;
+	void __iomem *pbuffer, *pstart;
 
 	/*  in byte*/
 	pitch = cursor->w >> 3;
@@ -197,11 +197,11 @@ void hw_cursor_setData2(struct lynx_cursor * cursor,
 	/* in byte	*/
 	count = pitch * cursor->h;
 
-	/* in ushort */
-	offset = cursor->maxW * 2 / 8 / 2;
+	/* in byte */
+	offset = cursor->maxW * 2 / 8;
 
 	data = 0;
-	pstart = (u16 *)cursor->vstart;
+	pstart = cursor->vstart;
 	pbuffer = pstart;
 
 	for(i=0;i<count;i++)
@@ -221,10 +221,10 @@ void hw_cursor_setData2(struct lynx_cursor * cursor,
 		{
 
 			if(opr & (0x80 >> j))
-			{	//use fg color,id = 2
+			{	/* use fg color,id = 2 */
 				data |= 2 << (j*2);
 			}else{
-				//use bg color,id = 1
+				/* use bg color,id = 1 */
 				data |= 1 << (j*2);
 			}
 		}
@@ -234,17 +234,16 @@ void hw_cursor_setData2(struct lynx_cursor * cursor,
 				data |= ((color & (1<<j))?1:2)<<(j*2);
 		}
 #endif
-		*pbuffer = data;
+		iowrite16(data, pbuffer);
 
 		/* assume pitch is 1,2,4,8,...*/
 		if(!(i&(pitch-1)))
-		//if((i+1) % pitch == 0)
 		{
 			/* need a return */
 			pstart += offset;
 			pbuffer = pstart;
 		}else{
-			pbuffer++;
+			pbuffer += sizeof(u16);
 		}
 
 	}

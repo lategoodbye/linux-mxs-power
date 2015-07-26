@@ -1045,11 +1045,6 @@ static void hci_cc_read_local_oob_data(struct hci_dev *hdev,
 	struct hci_rp_read_local_oob_data *rp = (void *) skb->data;
 
 	BT_DBG("%s status 0x%2.2x", hdev->name, rp->status);
-
-	hci_dev_lock(hdev);
-	mgmt_read_local_oob_data_complete(hdev, rp->hash, rp->rand, NULL, NULL,
-					  rp->status);
-	hci_dev_unlock(hdev);
 }
 
 static void hci_cc_read_local_oob_ext_data(struct hci_dev *hdev,
@@ -1058,14 +1053,7 @@ static void hci_cc_read_local_oob_ext_data(struct hci_dev *hdev,
 	struct hci_rp_read_local_oob_ext_data *rp = (void *) skb->data;
 
 	BT_DBG("%s status 0x%2.2x", hdev->name, rp->status);
-
-	hci_dev_lock(hdev);
-	mgmt_read_local_oob_data_complete(hdev, rp->hash192, rp->rand192,
-					  rp->hash256, rp->rand256,
-					  rp->status);
-	hci_dev_unlock(hdev);
 }
-
 
 static void hci_cc_le_set_random_addr(struct hci_dev *hdev, struct sk_buff *skb)
 {
@@ -2048,6 +2036,33 @@ unlock:
 	hci_dev_unlock(hdev);
 }
 
+static void hci_cs_le_read_remote_features(struct hci_dev *hdev, u8 status)
+{
+	struct hci_cp_le_read_remote_features *cp;
+	struct hci_conn *conn;
+
+	BT_DBG("%s status 0x%2.2x", hdev->name, status);
+
+	if (!status)
+		return;
+
+	cp = hci_sent_cmd_data(hdev, HCI_OP_LE_READ_REMOTE_FEATURES);
+	if (!cp)
+		return;
+
+	hci_dev_lock(hdev);
+
+	conn = hci_conn_hash_lookup_handle(hdev, __le16_to_cpu(cp->handle));
+	if (conn) {
+		if (conn->state == BT_CONFIG) {
+			hci_connect_cfm(conn, status);
+			hci_conn_drop(conn);
+		}
+	}
+
+	hci_dev_unlock(hdev);
+}
+
 static void hci_cs_le_start_enc(struct hci_dev *hdev, u8 status)
 {
 	struct hci_cp_le_start_enc *cp;
@@ -2588,6 +2603,63 @@ unlock:
 	hci_dev_unlock(hdev);
 }
 
+static void read_enc_key_size_complete(struct hci_dev *hdev, u8 status,
+				       u16 opcode, struct sk_buff *skb)
+{
+	const struct hci_rp_read_enc_key_size *rp;
+	struct hci_conn *conn;
+	u16 handle;
+
+	BT_DBG("%s status 0x%02x", hdev->name, status);
+
+	if (!skb || skb->len < sizeof(*rp)) {
+		BT_ERR("%s invalid HCI Read Encryption Key Size response",
+		       hdev->name);
+		return;
+	}
+
+	rp = (void *)skb->data;
+	handle = le16_to_cpu(rp->handle);
+
+	hci_dev_lock(hdev);
+
+	conn = hci_conn_hash_lookup_handle(hdev, handle);
+	if (!conn)
+		goto unlock;
+
+	/* If we fail to read the encryption key size, assume maximum
+	 * (which is the same we do also when this HCI command isn't
+	 * supported.
+	 */
+	if (rp->status) {
+		BT_ERR("%s failed to read key size for handle %u", hdev->name,
+		       handle);
+		conn->enc_key_size = HCI_LINK_KEY_SIZE;
+	} else {
+		conn->enc_key_size = rp->key_size;
+	}
+
+	if (conn->state == BT_CONFIG) {
+		conn->state = BT_CONNECTED;
+		hci_connect_cfm(conn, 0);
+		hci_conn_drop(conn);
+	} else {
+		u8 encrypt;
+
+		if (!test_bit(HCI_CONN_ENCRYPT, &conn->flags))
+			encrypt = 0x00;
+		else if (test_bit(HCI_CONN_AES_CCM, &conn->flags))
+			encrypt = 0x02;
+		else
+			encrypt = 0x01;
+
+		hci_encrypt_cfm(conn, 0, encrypt);
+	}
+
+unlock:
+	hci_dev_unlock(hdev);
+}
+
 static void hci_encrypt_change_evt(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct hci_ev_encrypt_change *ev = (void *) skb->data;
@@ -2635,21 +2707,50 @@ static void hci_encrypt_change_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		goto unlock;
 	}
 
+	/* In Secure Connections Only mode, do not allow any connections
+	 * that are not encrypted with AES-CCM using a P-256 authenticated
+	 * combination key.
+	 */
+	if (hci_dev_test_flag(hdev, HCI_SC_ONLY) &&
+	    (!test_bit(HCI_CONN_AES_CCM, &conn->flags) ||
+	     conn->key_type != HCI_LK_AUTH_COMBINATION_P256)) {
+		hci_connect_cfm(conn, HCI_ERROR_AUTH_FAILURE);
+		hci_conn_drop(conn);
+		goto unlock;
+	}
+
+	/* Try reading the encryption key size for encrypted ACL links */
+	if (!ev->status && ev->encrypt && conn->type == ACL_LINK) {
+		struct hci_cp_read_enc_key_size cp;
+		struct hci_request req;
+
+		/* Only send HCI_Read_Encryption_Key_Size if the
+		 * controller really supports it. If it doesn't, assume
+		 * the default size (16).
+		 */
+		if (!(hdev->commands[20] & 0x10)) {
+			conn->enc_key_size = HCI_LINK_KEY_SIZE;
+			goto notify;
+		}
+
+		hci_req_init(&req, hdev);
+
+		cp.handle = cpu_to_le16(conn->handle);
+		hci_req_add(&req, HCI_OP_READ_ENC_KEY_SIZE, sizeof(cp), &cp);
+
+		if (hci_req_run_skb(&req, read_enc_key_size_complete)) {
+			BT_ERR("Sending HCI Read Encryption Key Size failed");
+			conn->enc_key_size = HCI_LINK_KEY_SIZE;
+			goto notify;
+		}
+
+		goto unlock;
+	}
+
+notify:
 	if (conn->state == BT_CONFIG) {
 		if (!ev->status)
 			conn->state = BT_CONNECTED;
-
-		/* In Secure Connections Only mode, do not allow any
-		 * connections that are not encrypted with AES-CCM
-		 * using a P-256 authenticated combination key.
-		 */
-		if (hci_dev_test_flag(hdev, HCI_SC_ONLY) &&
-		    (!test_bit(HCI_CONN_AES_CCM, &conn->flags) ||
-		     conn->key_type != HCI_LK_AUTH_COMBINATION_P256)) {
-			hci_connect_cfm(conn, HCI_ERROR_AUTH_FAILURE);
-			hci_conn_drop(conn);
-			goto unlock;
-		}
 
 		hci_connect_cfm(conn, ev->status);
 		hci_conn_drop(conn);
@@ -2732,17 +2833,19 @@ unlock:
 	hci_dev_unlock(hdev);
 }
 
-static void hci_cmd_complete_evt(struct hci_dev *hdev, struct sk_buff *skb)
+static void hci_cmd_complete_evt(struct hci_dev *hdev, struct sk_buff *skb,
+				 u16 *opcode, u8 *status,
+				 hci_req_complete_t *req_complete,
+				 hci_req_complete_skb_t *req_complete_skb)
 {
 	struct hci_ev_cmd_complete *ev = (void *) skb->data;
-	u8 status = skb->data[sizeof(*ev)];
-	__u16 opcode;
+
+	*opcode = __le16_to_cpu(ev->opcode);
+	*status = skb->data[sizeof(*ev)];
 
 	skb_pull(skb, sizeof(*ev));
 
-	opcode = __le16_to_cpu(ev->opcode);
-
-	switch (opcode) {
+	switch (*opcode) {
 	case HCI_OP_INQUIRY_CANCEL:
 		hci_cc_inquiry_cancel(hdev, skb);
 		break;
@@ -3020,32 +3123,36 @@ static void hci_cmd_complete_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		break;
 
 	default:
-		BT_DBG("%s opcode 0x%4.4x", hdev->name, opcode);
+		BT_DBG("%s opcode 0x%4.4x", hdev->name, *opcode);
 		break;
 	}
 
-	if (opcode != HCI_OP_NOP)
+	if (*opcode != HCI_OP_NOP)
 		cancel_delayed_work(&hdev->cmd_timer);
 
-	hci_req_cmd_complete(hdev, opcode, status);
-
-	if (ev->ncmd && !test_bit(HCI_RESET, &hdev->flags)) {
+	if (ev->ncmd && !test_bit(HCI_RESET, &hdev->flags))
 		atomic_set(&hdev->cmd_cnt, 1);
-		if (!skb_queue_empty(&hdev->cmd_q))
-			queue_work(hdev->workqueue, &hdev->cmd_work);
-	}
+
+	hci_req_cmd_complete(hdev, *opcode, *status, req_complete,
+			     req_complete_skb);
+
+	if (atomic_read(&hdev->cmd_cnt) && !skb_queue_empty(&hdev->cmd_q))
+		queue_work(hdev->workqueue, &hdev->cmd_work);
 }
 
-static void hci_cmd_status_evt(struct hci_dev *hdev, struct sk_buff *skb)
+static void hci_cmd_status_evt(struct hci_dev *hdev, struct sk_buff *skb,
+			       u16 *opcode, u8 *status,
+			       hci_req_complete_t *req_complete,
+			       hci_req_complete_skb_t *req_complete_skb)
 {
 	struct hci_ev_cmd_status *ev = (void *) skb->data;
-	__u16 opcode;
 
 	skb_pull(skb, sizeof(*ev));
 
-	opcode = __le16_to_cpu(ev->opcode);
+	*opcode = __le16_to_cpu(ev->opcode);
+	*status = ev->status;
 
-	switch (opcode) {
+	switch (*opcode) {
 	case HCI_OP_INQUIRY:
 		hci_cs_inquiry(hdev, ev->status);
 		break;
@@ -3110,27 +3217,38 @@ static void hci_cmd_status_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		hci_cs_le_create_conn(hdev, ev->status);
 		break;
 
+	case HCI_OP_LE_READ_REMOTE_FEATURES:
+		hci_cs_le_read_remote_features(hdev, ev->status);
+		break;
+
 	case HCI_OP_LE_START_ENC:
 		hci_cs_le_start_enc(hdev, ev->status);
 		break;
 
 	default:
-		BT_DBG("%s opcode 0x%4.4x", hdev->name, opcode);
+		BT_DBG("%s opcode 0x%4.4x", hdev->name, *opcode);
 		break;
 	}
 
-	if (opcode != HCI_OP_NOP)
+	if (*opcode != HCI_OP_NOP)
 		cancel_delayed_work(&hdev->cmd_timer);
 
-	if (ev->status ||
-	    (hdev->sent_cmd && !bt_cb(hdev->sent_cmd)->req_event))
-		hci_req_cmd_complete(hdev, opcode, ev->status);
-
-	if (ev->ncmd && !test_bit(HCI_RESET, &hdev->flags)) {
+	if (ev->ncmd && !test_bit(HCI_RESET, &hdev->flags))
 		atomic_set(&hdev->cmd_cnt, 1);
-		if (!skb_queue_empty(&hdev->cmd_q))
-			queue_work(hdev->workqueue, &hdev->cmd_work);
-	}
+
+	/* Indicate request completion if the command failed. Also, if
+	 * we're not waiting for a special event and we get a success
+	 * command status we should try to flag the request as completed
+	 * (since for this kind of commands there will not be a command
+	 * complete event).
+	 */
+	if (ev->status ||
+	    (hdev->sent_cmd && !bt_cb(hdev->sent_cmd)->req.event))
+		hci_req_cmd_complete(hdev, *opcode, ev->status, req_complete,
+				     req_complete_skb);
+
+	if (atomic_read(&hdev->cmd_cnt) && !skb_queue_empty(&hdev->cmd_q))
+		queue_work(hdev->workqueue, &hdev->cmd_work);
 }
 
 static void hci_hardware_error_evt(struct hci_dev *hdev, struct sk_buff *skb)
@@ -4514,7 +4632,7 @@ static void hci_le_conn_complete_evt(struct hci_dev *hdev, struct sk_buff *skb)
 
 	conn->sec_level = BT_SECURITY_LOW;
 	conn->handle = __le16_to_cpu(ev->handle);
-	conn->state = BT_CONNECTED;
+	conn->state = BT_CONFIG;
 
 	conn->le_conn_interval = le16_to_cpu(ev->interval);
 	conn->le_conn_latency = le16_to_cpu(ev->latency);
@@ -4523,7 +4641,33 @@ static void hci_le_conn_complete_evt(struct hci_dev *hdev, struct sk_buff *skb)
 	hci_debugfs_create_conn(conn);
 	hci_conn_add_sysfs(conn);
 
-	hci_connect_cfm(conn, ev->status);
+	if (!ev->status) {
+		/* The remote features procedure is defined for master
+		 * role only. So only in case of an initiated connection
+		 * request the remote features.
+		 *
+		 * If the local controller supports slave-initiated features
+		 * exchange, then requesting the remote features in slave
+		 * role is possible. Otherwise just transition into the
+		 * connected state without requesting the remote features.
+		 */
+		if (conn->out ||
+		    (hdev->le_features[0] & HCI_LE_SLAVE_FEATURES)) {
+			struct hci_cp_le_read_remote_features cp;
+
+			cp.handle = __cpu_to_le16(conn->handle);
+
+			hci_send_cmd(hdev, HCI_OP_LE_READ_REMOTE_FEATURES,
+				     sizeof(cp), &cp);
+
+			hci_conn_hold(conn);
+		} else {
+			conn->state = BT_CONNECTED;
+			hci_connect_cfm(conn, ev->status);
+		}
+	} else {
+		hci_connect_cfm(conn, ev->status);
+	}
 
 	params = hci_pend_le_action_lookup(&hdev->pend_le_conns, &conn->dst,
 					   conn->dst_type);
@@ -4825,6 +4969,48 @@ static void hci_le_adv_report_evt(struct hci_dev *hdev, struct sk_buff *skb)
 	hci_dev_unlock(hdev);
 }
 
+static void hci_le_remote_feat_complete_evt(struct hci_dev *hdev,
+					    struct sk_buff *skb)
+{
+	struct hci_ev_le_remote_feat_complete *ev = (void *)skb->data;
+	struct hci_conn *conn;
+
+	BT_DBG("%s status 0x%2.2x", hdev->name, ev->status);
+
+	hci_dev_lock(hdev);
+
+	conn = hci_conn_hash_lookup_handle(hdev, __le16_to_cpu(ev->handle));
+	if (conn) {
+		if (!ev->status)
+			memcpy(conn->features[0], ev->features, 8);
+
+		if (conn->state == BT_CONFIG) {
+			__u8 status;
+
+			/* If the local controller supports slave-initiated
+			 * features exchange, but the remote controller does
+			 * not, then it is possible that the error code 0x1a
+			 * for unsupported remote feature gets returned.
+			 *
+			 * In this specific case, allow the connection to
+			 * transition into connected state and mark it as
+			 * successful.
+			 */
+			if ((hdev->le_features[0] & HCI_LE_SLAVE_FEATURES) &&
+			    !conn->out && ev->status == 0x1a)
+				status = 0x00;
+			else
+				status = ev->status;
+
+			conn->state = BT_CONNECTED;
+			hci_connect_cfm(conn, status);
+			hci_conn_drop(conn);
+		}
+	}
+
+	hci_dev_unlock(hdev);
+}
+
 static void hci_le_ltk_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct hci_ev_le_ltk_req *ev = (void *) skb->data;
@@ -4855,7 +5041,8 @@ static void hci_le_ltk_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
 			goto not_found;
 	}
 
-	memcpy(cp.ltk, ltk->val, sizeof(ltk->val));
+	memcpy(cp.ltk, ltk->val, ltk->enc_size);
+	memset(cp.ltk + ltk->enc_size, 0, sizeof(cp.ltk) - ltk->enc_size);
 	cp.handle = cpu_to_le16(conn->handle);
 
 	conn->pending_sec_level = smp_ltk_sec_level(ltk);
@@ -4998,6 +5185,10 @@ static void hci_le_meta_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		hci_le_adv_report_evt(hdev, skb);
 		break;
 
+	case HCI_EV_LE_REMOTE_FEAT_COMPLETE:
+		hci_le_remote_feat_complete_evt(hdev, skb);
+		break;
+
 	case HCI_EV_LE_LTK_REQ:
 		hci_le_ltk_request_evt(hdev, skb);
 		break;
@@ -5031,31 +5222,78 @@ static void hci_chan_selected_evt(struct hci_dev *hdev, struct sk_buff *skb)
 	amp_read_loc_assoc_final_data(hdev, hcon);
 }
 
+static bool hci_get_cmd_complete(struct hci_dev *hdev, u16 opcode,
+				 u8 event, struct sk_buff *skb)
+{
+	struct hci_ev_cmd_complete *ev;
+	struct hci_event_hdr *hdr;
+
+	if (!skb)
+		return false;
+
+	if (skb->len < sizeof(*hdr)) {
+		BT_ERR("Too short HCI event");
+		return false;
+	}
+
+	hdr = (void *) skb->data;
+	skb_pull(skb, HCI_EVENT_HDR_SIZE);
+
+	if (event) {
+		if (hdr->evt != event)
+			return false;
+		return true;
+	}
+
+	if (hdr->evt != HCI_EV_CMD_COMPLETE) {
+		BT_DBG("Last event is not cmd complete (0x%2.2x)", hdr->evt);
+		return false;
+	}
+
+	if (skb->len < sizeof(*ev)) {
+		BT_ERR("Too short cmd_complete event");
+		return false;
+	}
+
+	ev = (void *) skb->data;
+	skb_pull(skb, sizeof(*ev));
+
+	if (opcode != __le16_to_cpu(ev->opcode)) {
+		BT_DBG("opcode doesn't match (0x%2.2x != 0x%2.2x)", opcode,
+		       __le16_to_cpu(ev->opcode));
+		return false;
+	}
+
+	return true;
+}
+
 void hci_event_packet(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct hci_event_hdr *hdr = (void *) skb->data;
-	__u8 event = hdr->evt;
+	hci_req_complete_t req_complete = NULL;
+	hci_req_complete_skb_t req_complete_skb = NULL;
+	struct sk_buff *orig_skb = NULL;
+	u8 status = 0, event = hdr->evt, req_evt = 0;
+	u16 opcode = HCI_OP_NOP;
 
-	hci_dev_lock(hdev);
-
-	/* Received events are (currently) only needed when a request is
-	 * ongoing so avoid unnecessary memory allocation.
-	 */
-	if (hci_req_pending(hdev)) {
-		kfree_skb(hdev->recv_evt);
-		hdev->recv_evt = skb_clone(skb, GFP_KERNEL);
+	if (hdev->sent_cmd && bt_cb(hdev->sent_cmd)->req.event == event) {
+		struct hci_command_hdr *cmd_hdr = (void *) hdev->sent_cmd->data;
+		opcode = __le16_to_cpu(cmd_hdr->opcode);
+		hci_req_cmd_complete(hdev, opcode, status, &req_complete,
+				     &req_complete_skb);
+		req_evt = event;
 	}
 
-	hci_dev_unlock(hdev);
+	/* If it looks like we might end up having to call
+	 * req_complete_skb, store a pristine copy of the skb since the
+	 * various handlers may modify the original one through
+	 * skb_pull() calls, etc.
+	 */
+	if (req_complete_skb || event == HCI_EV_CMD_STATUS ||
+	    event == HCI_EV_CMD_COMPLETE)
+		orig_skb = skb_clone(skb, GFP_KERNEL);
 
 	skb_pull(skb, HCI_EVENT_HDR_SIZE);
-
-	if (hdev->sent_cmd && bt_cb(hdev->sent_cmd)->req_event == event) {
-		struct hci_command_hdr *cmd_hdr = (void *) hdev->sent_cmd->data;
-		u16 opcode = __le16_to_cpu(cmd_hdr->opcode);
-
-		hci_req_cmd_complete(hdev, opcode, 0);
-	}
 
 	switch (event) {
 	case HCI_EV_INQUIRY_COMPLETE:
@@ -5099,11 +5337,13 @@ void hci_event_packet(struct hci_dev *hdev, struct sk_buff *skb)
 		break;
 
 	case HCI_EV_CMD_COMPLETE:
-		hci_cmd_complete_evt(hdev, skb);
+		hci_cmd_complete_evt(hdev, skb, &opcode, &status,
+				     &req_complete, &req_complete_skb);
 		break;
 
 	case HCI_EV_CMD_STATUS:
-		hci_cmd_status_evt(hdev, skb);
+		hci_cmd_status_evt(hdev, skb, &opcode, &status, &req_complete,
+				   &req_complete_skb);
 		break;
 
 	case HCI_EV_HARDWARE_ERROR:
@@ -5235,6 +5475,17 @@ void hci_event_packet(struct hci_dev *hdev, struct sk_buff *skb)
 		break;
 	}
 
+	if (req_complete) {
+		req_complete(hdev, status, opcode);
+	} else if (req_complete_skb) {
+		if (!hci_get_cmd_complete(hdev, opcode, req_evt, orig_skb)) {
+			kfree_skb(orig_skb);
+			orig_skb = NULL;
+		}
+		req_complete_skb(hdev, status, opcode, orig_skb);
+	}
+
+	kfree_skb(orig_skb);
 	kfree_skb(skb);
 	hdev->stat.evt_rx++;
 }

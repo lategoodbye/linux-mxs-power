@@ -190,7 +190,7 @@ static int rcar_du_load(struct drm_device *dev, unsigned long flags)
 	/* DRM/KMS objects */
 	ret = rcar_du_modeset_init(rcdu);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "failed to initialize DRM/KMS\n");
+		dev_err(&pdev->dev, "failed to initialize DRM/KMS (%d)\n", ret);
 		goto done;
 	}
 
@@ -252,7 +252,8 @@ static const struct file_operations rcar_du_fops = {
 };
 
 static struct drm_driver rcar_du_driver = {
-	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME,
+	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME
+				| DRIVER_ATOMIC,
 	.load			= rcar_du_load,
 	.unload			= rcar_du_unload,
 	.preclose		= rcar_du_preclose,

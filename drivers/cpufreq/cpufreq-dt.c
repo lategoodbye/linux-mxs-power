@@ -12,6 +12,8 @@
  * published by the Free Software Foundation.
  */
 
+#define DEBUG
+
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
 
 #include <linux/clk.h>
@@ -20,6 +22,7 @@
 #include <linux/cpufreq.h>
 #include <linux/cpufreq-dt.h>
 #include <linux/cpumask.h>
+#include <linux/device.h>
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -262,6 +265,8 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 				if (opp_uV > max_uV)
 					max_uV = opp_uV;
 			} else {
+				dev_dbg(cpu_dev, "Voltage unsupported: %ld kHz, %ld uV\n",
+					opp_freq / 1000, opp_uV);
 				dev_pm_opp_disable(cpu_dev, opp_freq);
 			}
 
@@ -416,6 +421,7 @@ static struct platform_driver dt_cpufreq_platdrv = {
 };
 module_platform_driver(dt_cpufreq_platdrv);
 
+MODULE_ALIAS("platform:cpufreq-dt");
 MODULE_AUTHOR("Viresh Kumar <viresh.kumar@linaro.org>");
 MODULE_AUTHOR("Shawn Guo <shawn.guo@linaro.org>");
 MODULE_DESCRIPTION("Generic cpufreq driver");

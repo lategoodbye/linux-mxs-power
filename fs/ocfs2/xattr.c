@@ -499,27 +499,30 @@ static int ocfs2_validate_xattr_block(struct super_block *sb,
 	 */
 
 	if (!OCFS2_IS_VALID_XATTR_BLOCK(xb)) {
-		return ocfs2_error(sb,
+		ocfs2_error(sb,
 			    "Extended attribute block #%llu has bad "
 			    "signature %.*s",
 			    (unsigned long long)bh->b_blocknr, 7,
 			    xb->xb_signature);
+		return -EINVAL;
 	}
 
 	if (le64_to_cpu(xb->xb_blkno) != bh->b_blocknr) {
-		return ocfs2_error(sb,
+		ocfs2_error(sb,
 			    "Extended attribute block #%llu has an "
 			    "invalid xb_blkno of %llu",
 			    (unsigned long long)bh->b_blocknr,
 			    (unsigned long long)le64_to_cpu(xb->xb_blkno));
+		return -EINVAL;
 	}
 
 	if (le32_to_cpu(xb->xb_fs_generation) != OCFS2_SB(sb)->fs_generation) {
-		return ocfs2_error(sb,
+		ocfs2_error(sb,
 			    "Extended attribute block #%llu has an invalid "
 			    "xb_fs_generation of #%u",
 			    (unsigned long long)bh->b_blocknr,
 			    le32_to_cpu(xb->xb_fs_generation));
+		return -EINVAL;
 	}
 
 	return 0;
@@ -1017,7 +1020,7 @@ ssize_t ocfs2_listxattr(struct dentry *dentry,
 	int ret = 0, i_ret = 0, b_ret = 0;
 	struct buffer_head *di_bh = NULL;
 	struct ocfs2_dinode *di = NULL;
-	struct ocfs2_inode_info *oi = OCFS2_I(dentry->d_inode);
+	struct ocfs2_inode_info *oi = OCFS2_I(d_inode(dentry));
 
 	if (!ocfs2_supports_xattr(OCFS2_SB(dentry->d_sb)))
 		return -EOPNOTSUPP;
@@ -1025,7 +1028,7 @@ ssize_t ocfs2_listxattr(struct dentry *dentry,
 	if (!(oi->ip_dyn_features & OCFS2_HAS_XATTR_FL))
 		return ret;
 
-	ret = ocfs2_inode_lock(dentry->d_inode, &di_bh, 0);
+	ret = ocfs2_inode_lock(d_inode(dentry), &di_bh, 0);
 	if (ret < 0) {
 		mlog_errno(ret);
 		return ret;
@@ -1034,7 +1037,7 @@ ssize_t ocfs2_listxattr(struct dentry *dentry,
 	di = (struct ocfs2_dinode *)di_bh->b_data;
 
 	down_read(&oi->ip_xattr_sem);
-	i_ret = ocfs2_xattr_ibody_list(dentry->d_inode, di, buffer, size);
+	i_ret = ocfs2_xattr_ibody_list(d_inode(dentry), di, buffer, size);
 	if (i_ret < 0)
 		b_ret = 0;
 	else {
@@ -1042,13 +1045,13 @@ ssize_t ocfs2_listxattr(struct dentry *dentry,
 			buffer += i_ret;
 			size -= i_ret;
 		}
-		b_ret = ocfs2_xattr_block_list(dentry->d_inode, di,
+		b_ret = ocfs2_xattr_block_list(d_inode(dentry), di,
 					       buffer, size);
 		if (b_ret < 0)
 			i_ret = 0;
 	}
 	up_read(&oi->ip_xattr_sem);
-	ocfs2_inode_unlock(dentry->d_inode, 0);
+	ocfs2_inode_unlock(d_inode(dentry), 0);
 
 	brelse(di_bh);
 
@@ -1235,6 +1238,10 @@ static int ocfs2_xattr_block_get(struct inode *inode,
 								i,
 								&block_off,
 								&name_offset);
+			if (ret) {
+				mlog_errno(ret);
+				goto cleanup;
+			}
 			xs->base = bucket_block(xs->bucket, block_off);
 		}
 		if (ocfs2_xattr_is_local(xs->here)) {
@@ -3687,10 +3694,11 @@ static int ocfs2_xattr_get_rec(struct inode *inode,
 		el = &eb->h_list;
 
 		if (el->l_tree_depth) {
-			ret = ocfs2_error(inode->i_sb,
+			ocfs2_error(inode->i_sb,
 				    "Inode %lu has non zero tree depth in "
 				    "xattr tree block %llu\n", inode->i_ino,
 				    (unsigned long long)eb_bh->b_blocknr);
+			ret = -EROFS;
 			goto out;
 		}
 	}
@@ -3705,10 +3713,11 @@ static int ocfs2_xattr_get_rec(struct inode *inode,
 	}
 
 	if (!e_blkno) {
-		ret = ocfs2_error(inode->i_sb, "Inode %lu has bad extent "
+		ocfs2_error(inode->i_sb, "Inode %lu has bad extent "
 			    "record (%u, %u, 0) in xattr", inode->i_ino,
 			    le32_to_cpu(rec->e_cpos),
 			    ocfs2_rec_clusters(el, rec));
+		ret = -EROFS;
 		goto out;
 	}
 
@@ -5660,6 +5669,10 @@ static int ocfs2_delete_xattr_in_bucket(struct inode *inode,
 
 		ret = ocfs2_get_xattr_tree_value_root(inode->i_sb, bucket,
 						      i, &xv, NULL);
+		if (ret) {
+			mlog_errno(ret);
+			break;
+		}
 
 		ret = ocfs2_lock_xattr_remove_allocators(inode, xv,
 							 args->ref_ci,
@@ -7244,7 +7257,7 @@ static int ocfs2_xattr_security_get(struct dentry *dentry, const char *name,
 {
 	if (strcmp(name, "") == 0)
 		return -EINVAL;
-	return ocfs2_xattr_get(dentry->d_inode, OCFS2_XATTR_INDEX_SECURITY,
+	return ocfs2_xattr_get(d_inode(dentry), OCFS2_XATTR_INDEX_SECURITY,
 			       name, buffer, size);
 }
 
@@ -7254,11 +7267,11 @@ static int ocfs2_xattr_security_set(struct dentry *dentry, const char *name,
 	if (strcmp(name, "") == 0)
 		return -EINVAL;
 
-	return ocfs2_xattr_set(dentry->d_inode, OCFS2_XATTR_INDEX_SECURITY,
+	return ocfs2_xattr_set(d_inode(dentry), OCFS2_XATTR_INDEX_SECURITY,
 			       name, value, size, flags);
 }
 
-int ocfs2_initxattrs(struct inode *inode, const struct xattr *xattr_array,
+static int ocfs2_initxattrs(struct inode *inode, const struct xattr *xattr_array,
 		     void *fs_info)
 {
 	const struct xattr *xattr;
@@ -7334,7 +7347,7 @@ static int ocfs2_xattr_trusted_get(struct dentry *dentry, const char *name,
 {
 	if (strcmp(name, "") == 0)
 		return -EINVAL;
-	return ocfs2_xattr_get(dentry->d_inode, OCFS2_XATTR_INDEX_TRUSTED,
+	return ocfs2_xattr_get(d_inode(dentry), OCFS2_XATTR_INDEX_TRUSTED,
 			       name, buffer, size);
 }
 
@@ -7344,7 +7357,7 @@ static int ocfs2_xattr_trusted_set(struct dentry *dentry, const char *name,
 	if (strcmp(name, "") == 0)
 		return -EINVAL;
 
-	return ocfs2_xattr_set(dentry->d_inode, OCFS2_XATTR_INDEX_TRUSTED,
+	return ocfs2_xattr_set(d_inode(dentry), OCFS2_XATTR_INDEX_TRUSTED,
 			       name, value, size, flags);
 }
 
@@ -7386,7 +7399,7 @@ static int ocfs2_xattr_user_get(struct dentry *dentry, const char *name,
 		return -EINVAL;
 	if (osb->s_mount_opt & OCFS2_MOUNT_NOUSERXATTR)
 		return -EOPNOTSUPP;
-	return ocfs2_xattr_get(dentry->d_inode, OCFS2_XATTR_INDEX_USER, name,
+	return ocfs2_xattr_get(d_inode(dentry), OCFS2_XATTR_INDEX_USER, name,
 			       buffer, size);
 }
 
@@ -7400,7 +7413,7 @@ static int ocfs2_xattr_user_set(struct dentry *dentry, const char *name,
 	if (osb->s_mount_opt & OCFS2_MOUNT_NOUSERXATTR)
 		return -EOPNOTSUPP;
 
-	return ocfs2_xattr_set(dentry->d_inode, OCFS2_XATTR_INDEX_USER,
+	return ocfs2_xattr_set(d_inode(dentry), OCFS2_XATTR_INDEX_USER,
 			       name, value, size, flags);
 }
 

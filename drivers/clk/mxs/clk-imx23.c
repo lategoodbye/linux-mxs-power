@@ -48,6 +48,56 @@ static void __iomem *digctrl;
 #define BP_SAIF_DIV_FRAC_EN	16
 #define BP_FRAC_IOFRAC		24
 
+#define BP_HBUS_ASM_BUSY		31
+#define BP_HBUS_ASM_EMIPORT_AS_ENABLE	27
+#define BP_HBUS_APBHDMA_AS_ENABLE	26
+#define BP_HBUS_TRAFFIC_AS_ENABLE	23
+#define BP_HBUS_CPU_DATA_AS_ENABLE	22
+#define BP_HBUS_CPU_INSTR_AS_ENABLE	21
+#define BP_HBUS_ASM_ENABLE		20
+#define BM_HBUS_SLOW_DIV		(7 << 16)
+#define BM_HBUS_SLOW_DIV_BY8		(3 << 16)
+
+int mx23_hbus_is_autoslow_enabled(void)
+{
+	if (readl_relaxed(HBUS) & (1 << BP_HBUS_ASM_ENABLE))
+		return 1;
+
+	return 0;
+}
+
+int mx23_hbus_set_autoslow(int enable)
+{
+	u32 val;
+	int timeout;
+
+	for (timeout = 0; timeout < 100000; timeout++) {
+		val = readl_relaxed(HBUS);
+		if (!(val & (1 << BP_HBUS_ASM_BUSY)))
+			break;
+	}
+
+	if (timeout == 5)
+		return -ETIMEDOUT;
+
+	if (!enable) {
+		writel_relaxed(1 << BP_HBUS_ASM_ENABLE, HBUS + CLR);
+		return 0;
+	}
+
+	val |= BP_HBUS_ASM_EMIPORT_AS_ENABLE;
+	val |= BP_HBUS_APBHDMA_AS_ENABLE;
+	val |= BP_HBUS_TRAFFIC_AS_ENABLE;
+	val |= BP_HBUS_CPU_DATA_AS_ENABLE;
+	val |= BP_HBUS_CPU_INSTR_AS_ENABLE;
+	val |= BP_HBUS_ASM_ENABLE;
+	val |= BM_HBUS_SLOW_DIV_BY8;
+
+	writel_relaxed(val, HBUS);
+
+	return 0;
+}
+
 static void __init clk_misc_init(void)
 {
 	u32 val;
@@ -73,18 +123,16 @@ static void __init clk_misc_init(void)
 	 * 480 MHz seems too high to be ssp clock source directly,
 	 * so set frac to get a 288 MHz ref_io.
 	 */
-	val = readl_relaxed(FRAC);
-	val &= ~(0x3f << BP_FRAC_IOFRAC);
-	val |= 30 << BP_FRAC_IOFRAC;
-	writel_relaxed(val, FRAC);
+	writel_relaxed(0x3f << BP_FRAC_IOFRAC, FRAC + CLR);
+	writel_relaxed(30 << BP_FRAC_IOFRAC, FRAC + SET);
 }
 
-static const char *sel_pll[]  __initconst = { "pll", "ref_xtal", };
-static const char *sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
-static const char *sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
-static const char *sel_io[]   __initconst = { "ref_io", "ref_xtal", };
-static const char *cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
-static const char *emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
+static const char *const sel_pll[]  __initconst = { "pll", "ref_xtal", };
+static const char *const sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
+static const char *const sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
+static const char *const sel_io[]   __initconst = { "ref_io", "ref_xtal", };
+static const char *const cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
+static const char *const emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
 
 enum imx23_clk {
 	ref_xtal, pll, ref_cpu, ref_emi, ref_pix, ref_io, saif_sel,

@@ -130,7 +130,7 @@ start:
 		.endr
    ARM(		mov	r0, r0		)
    ARM(		b	1f		)
- THUMB(		adr	r12, BSYM(1f)	)
+ THUMB(		badr	r12, 1f		)
  THUMB(		bx	r12		)
 
 		.word	_magic_sig	@ Magic numbers to help the loader
@@ -178,9 +178,26 @@ not_angel:
 		.text
 
 #ifdef CONFIG_AUTO_ZRELADDR
-		@ determine final kernel image address
+		/*
+		 * Find the start of physical memory.  As we are executing
+		 * without the MMU on, we are in the physical address space.
+		 * We just need to get rid of any offset by aligning the
+		 * address.
+		 *
+		 * This alignment is a balance between the requirements of
+		 * different platforms - we have chosen 128MB to allow
+		 * platforms which align the start of their physical memory
+		 * to 128MB to use this feature, while allowing the zImage
+		 * to be placed within the first 128MB of memory on other
+		 * platforms.  Increasing the alignment means we place
+		 * stricter alignment requirements on the start of physical
+		 * memory, but relaxing it means that we break people who
+		 * are already placing their zImage in (eg) the top 64MB
+		 * of this range.
+		 */
 		mov	r4, pc
 		and	r4, r4, #0xf8000000
+		/* Determine final kernel image address. */
 		add	r4, r4, #TEXT_OFFSET
 #else
 		ldr	r4, =zreladdr
@@ -430,7 +447,7 @@ dtb_check_done:
 
 		bl	cache_clean_flush
 
-		adr	r0, BSYM(restart)
+		badr	r0, restart
 		add	r0, r0, r6
 		mov	pc, r0
 

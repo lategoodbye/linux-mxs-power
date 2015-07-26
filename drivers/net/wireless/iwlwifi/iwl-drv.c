@@ -6,7 +6,7 @@
  * GPL LICENSE SUMMARY
  *
  * Copyright(c) 2007 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
+ * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -32,7 +32,7 @@
  * BSD LICENSE
  *
  * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
+ * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -145,7 +145,7 @@ static struct iwlwifi_opmode_table {
 #define IWL_DEFAULT_SCAN_CHANNELS 40
 
 /*
- * struct fw_sec: Just for the image parsing proccess.
+ * struct fw_sec: Just for the image parsing process.
  * For the fw storage we are using struct fw_desc.
  */
 struct fw_sec {
@@ -241,16 +241,10 @@ static int iwl_request_firmware(struct iwl_drv *drv, bool first)
 	 * previous name and uses the new format.
 	 */
 	if (drv->trans->cfg->device_family == IWL_DEVICE_FAMILY_8000) {
-		char rev_step[2] = {
-			'A' + CSR_HW_REV_STEP(drv->trans->hw_rev), 0
-		};
-
-		/* A-step doesn't have an indication */
-		if (CSR_HW_REV_STEP(drv->trans->hw_rev) == SILICON_A_STEP)
-			rev_step[0] = 0;
+		char rev_step = 'A' + CSR_HW_REV_STEP(drv->trans->hw_rev);
 
 		snprintf(drv->firmware_name, sizeof(drv->firmware_name),
-			 "%s%s-%s.ucode", name_pre, rev_step, tag);
+			 "%s%c-%s.ucode", name_pre, rev_step, tag);
 	}
 
 	IWL_DEBUG_INFO(drv, "attempting to load firmware %s'%s'\n",
@@ -429,13 +423,19 @@ static int iwl_set_ucode_api_flags(struct iwl_drv *drv, const u8 *data,
 {
 	const struct iwl_ucode_api *ucode_api = (void *)data;
 	u32 api_index = le32_to_cpu(ucode_api->api_index);
+	u32 api_flags = le32_to_cpu(ucode_api->api_flags);
+	int i;
 
-	if (api_index >= IWL_API_ARRAY_SIZE) {
+	if (api_index >= IWL_API_MAX_BITS / 32) {
 		IWL_ERR(drv, "api_index larger than supported by driver\n");
-		return -EINVAL;
+		/* don't return an error so we can load FW that has more bits */
+		return 0;
 	}
 
-	capa->api[api_index] = le32_to_cpu(ucode_api->api_flags);
+	for (i = 0; i < 32; i++) {
+		if (api_flags & BIT(i))
+			__set_bit(i + 32 * api_index, capa->_api);
+	}
 
 	return 0;
 }
@@ -445,13 +445,19 @@ static int iwl_set_ucode_capabilities(struct iwl_drv *drv, const u8 *data,
 {
 	const struct iwl_ucode_capa *ucode_capa = (void *)data;
 	u32 api_index = le32_to_cpu(ucode_capa->api_index);
+	u32 api_flags = le32_to_cpu(ucode_capa->api_capa);
+	int i;
 
-	if (api_index >= IWL_CAPABILITIES_ARRAY_SIZE) {
+	if (api_index >= IWL_CAPABILITIES_MAX_BITS / 32) {
 		IWL_ERR(drv, "api_index larger than supported by driver\n");
-		return -EINVAL;
+		/* don't return an error so we can load FW that has more bits */
+		return 0;
 	}
 
-	capa->capa[api_index] = le32_to_cpu(ucode_capa->api_capa);
+	for (i = 0; i < 32; i++) {
+		if (api_flags & BIT(i))
+			__set_bit(i + 32 * api_index, capa->_capa);
+	}
 
 	return 0;
 }
@@ -1108,6 +1114,7 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 	const unsigned int api_max = drv->cfg->ucode_api_max;
 	unsigned int api_ok = drv->cfg->ucode_api_ok;
 	const unsigned int api_min = drv->cfg->ucode_api_min;
+	size_t trigger_tlv_sz[FW_DBG_TRIGGER_MAX];
 	u32 api_ver;
 	int i;
 	bool load_module = false;
@@ -1153,7 +1160,7 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 	if (err)
 		goto try_again;
 
-	if (drv->fw.ucode_capa.api[0] & IWL_UCODE_TLV_API_NEW_VERSION)
+	if (fw_has_api(&drv->fw.ucode_capa, IWL_UCODE_TLV_API_NEW_VERSION))
 		api_ver = drv->fw.ucode_ver;
 	else
 		api_ver = IWL_UCODE_API(drv->fw.ucode_ver);
@@ -1227,8 +1234,39 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 		}
 	}
 
+	memset(&trigger_tlv_sz, 0xff, sizeof(trigger_tlv_sz));
+
+	trigger_tlv_sz[FW_DBG_TRIGGER_MISSED_BEACONS] =
+		sizeof(struct iwl_fw_dbg_trigger_missed_bcon);
+	trigger_tlv_sz[FW_DBG_TRIGGER_CHANNEL_SWITCH] = 0;
+	trigger_tlv_sz[FW_DBG_TRIGGER_FW_NOTIF] =
+		sizeof(struct iwl_fw_dbg_trigger_cmd);
+	trigger_tlv_sz[FW_DBG_TRIGGER_MLME] =
+		sizeof(struct iwl_fw_dbg_trigger_mlme);
+	trigger_tlv_sz[FW_DBG_TRIGGER_STATS] =
+		sizeof(struct iwl_fw_dbg_trigger_stats);
+	trigger_tlv_sz[FW_DBG_TRIGGER_RSSI] =
+		sizeof(struct iwl_fw_dbg_trigger_low_rssi);
+	trigger_tlv_sz[FW_DBG_TRIGGER_TXQ_TIMERS] =
+		sizeof(struct iwl_fw_dbg_trigger_txq_timer);
+	trigger_tlv_sz[FW_DBG_TRIGGER_TIME_EVENT] =
+		sizeof(struct iwl_fw_dbg_trigger_time_event);
+	trigger_tlv_sz[FW_DBG_TRIGGER_BA] =
+		sizeof(struct iwl_fw_dbg_trigger_ba);
+
 	for (i = 0; i < ARRAY_SIZE(drv->fw.dbg_trigger_tlv); i++) {
 		if (pieces->dbg_trigger_tlv[i]) {
+			/*
+			 * If the trigger isn't long enough, WARN and exit.
+			 * Someone is trying to debug something and he won't
+			 * be able to catch the bug he is trying to chase.
+			 * We'd better be noisy to be sure he knows what's
+			 * going on.
+			 */
+			if (WARN_ON(pieces->dbg_trigger_tlv_len[i] <
+				    (trigger_tlv_sz[i] +
+				     sizeof(struct iwl_fw_dbg_trigger_tlv))))
+				goto out_free_fw;
 			drv->fw.dbg_trigger_tlv_len[i] =
 				pieces->dbg_trigger_tlv_len[i];
 			drv->fw.dbg_trigger_tlv[i] =
@@ -1319,6 +1357,7 @@ static void iwl_req_fw_callback(const struct firmware *ucode_raw, void *context)
 				op->name, err);
 #endif
 	}
+	kfree(pieces);
 	return;
 
  try_again:

@@ -72,6 +72,7 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/export.h>
+#include <linux/vmalloc.h>
 #include <net/net_namespace.h>
 #include <net/ip.h>
 #include <net/protocol.h>
@@ -324,13 +325,15 @@ static inline void empty_child_dec(struct key_vector *n)
 
 static struct key_vector *leaf_new(t_key key, struct fib_alias *fa)
 {
-	struct tnode *kv = kmem_cache_alloc(trie_leaf_kmem, GFP_KERNEL);
-	struct key_vector *l = kv->kv;
+	struct key_vector *l;
+	struct tnode *kv;
 
+	kv = kmem_cache_alloc(trie_leaf_kmem, GFP_KERNEL);
 	if (!kv)
 		return NULL;
 
 	/* initialize key vector */
+	l = kv->kv;
 	l->key = key;
 	l->pos = 0;
 	l->bits = 0;
@@ -345,24 +348,26 @@ static struct key_vector *leaf_new(t_key key, struct fib_alias *fa)
 
 static struct key_vector *tnode_new(t_key key, int pos, int bits)
 {
-	struct tnode *tnode = tnode_alloc(bits);
 	unsigned int shift = pos + bits;
-	struct key_vector *tn = tnode->kv;
+	struct key_vector *tn;
+	struct tnode *tnode;
 
 	/* verify bits and pos their msb bits clear and values are valid */
 	BUG_ON(!bits || (shift > KEYLENGTH));
 
-	pr_debug("AT %p s=%zu %zu\n", tnode, TNODE_SIZE(0),
-		 sizeof(struct key_vector *) << bits);
-
+	tnode = tnode_alloc(bits);
 	if (!tnode)
 		return NULL;
+
+	pr_debug("AT %p s=%zu %zu\n", tnode, TNODE_SIZE(0),
+		 sizeof(struct key_vector *) << bits);
 
 	if (bits == KEYLENGTH)
 		tnode->full_children = 1;
 	else
 		tnode->empty_children = 1ul << bits;
 
+	tn = tnode->kv;
 	tn->key = (shift < KEYLENGTH) ? (key >> shift) << shift : 0;
 	tn->pos = pos;
 	tn->bits = bits;
@@ -391,9 +396,9 @@ static void put_child(struct key_vector *tn, unsigned long i,
 	BUG_ON(i >= child_length(tn));
 
 	/* update emptyChildren, overflow into fullChildren */
-	if (n == NULL && chi != NULL)
+	if (!n && chi)
 		empty_child_inc(tn);
-	if (n != NULL && chi == NULL)
+	if (n && !chi)
 		empty_child_dec(tn);
 
 	/* update fullChildren */
@@ -528,7 +533,7 @@ static struct key_vector *inflate(struct trie *t,
 		unsigned long j, k;
 
 		/* An empty child */
-		if (inode == NULL)
+		if (!inode)
 			continue;
 
 		/* A leaf or an internal node with skipped bits */
@@ -830,7 +835,7 @@ static struct key_vector *resize(struct trie *t, struct key_vector *tn)
 	/* Double as long as the resulting node has a number of
 	 * nonempty nodes that are above the threshold.
 	 */
-	while (should_inflate(tp, tn) && max_work--) {
+	while (should_inflate(tp, tn) && max_work) {
 		tp = inflate(t, tn);
 		if (!tp) {
 #ifdef CONFIG_IP_FIB_TRIE_STATS
@@ -839,17 +844,21 @@ static struct key_vector *resize(struct trie *t, struct key_vector *tn)
 			break;
 		}
 
+		max_work--;
 		tn = get_child(tp, cindex);
 	}
 
+	/* update parent in case inflate failed */
+	tp = node_parent(tn);
+
 	/* Return if at least one inflate is run */
 	if (max_work != MAX_WORK)
-		return node_parent(tn);
+		return tp;
 
 	/* Halve as long as the number of empty children in this
 	 * node is above threshold.
 	 */
-	while (should_halve(tp, tn) && max_work--) {
+	while (should_halve(tp, tn) && max_work) {
 		tp = halve(t, tn);
 		if (!tp) {
 #ifdef CONFIG_IP_FIB_TRIE_STATS
@@ -858,6 +867,7 @@ static struct key_vector *resize(struct trie *t, struct key_vector *tn)
 			break;
 		}
 
+		max_work--;
 		tn = get_child(tp, cindex);
 	}
 
@@ -865,7 +875,7 @@ static struct key_vector *resize(struct trie *t, struct key_vector *tn)
 	if (should_collapse(tn))
 		return collapse(t, tn);
 
-	/* update parent in case inflate or halve failed */
+	/* update parent in case halve failed */
 	tp = node_parent(tn);
 
 	/* Return if at least one deflate was run */
@@ -1072,6 +1082,7 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 	struct trie *t = (struct trie *)tb->tb_data;
 	struct fib_alias *fa, *new_fa;
 	struct key_vector *l, *tp;
+	unsigned int nlflags = 0;
 	struct fib_info *fi;
 	u8 plen = cfg->fc_dst_len;
 	u8 slen = KEYLENGTH - plen;
@@ -1149,7 +1160,7 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 			}
 			err = -ENOBUFS;
 			new_fa = kmem_cache_alloc(fn_alias_kmem, GFP_KERNEL);
-			if (new_fa == NULL)
+			if (!new_fa)
 				goto out;
 
 			fi_drop = fa->fa_info;
@@ -1159,14 +1170,15 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 			state = fa->fa_state;
 			new_fa->fa_state = state & ~FA_S_ACCESSED;
 			new_fa->fa_slen = fa->fa_slen;
+			new_fa->tb_id = tb->tb_id;
 
-			err = netdev_switch_fib_ipv4_add(key, plen, fi,
-							 new_fa->fa_tos,
-							 cfg->fc_type,
-							 cfg->fc_nlflags,
-							 tb->tb_id);
+			err = switchdev_fib_ipv4_add(key, plen, fi,
+						     new_fa->fa_tos,
+						     cfg->fc_type,
+						     cfg->fc_nlflags,
+						     tb->tb_id);
 			if (err) {
-				netdev_switch_fib_ipv4_abort(fi);
+				switchdev_fib_ipv4_abort(fi);
 				kmem_cache_free(fn_alias_kmem, new_fa);
 				goto out;
 			}
@@ -1190,7 +1202,9 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 		if (fa_match)
 			goto out;
 
-		if (!(cfg->fc_nlflags & NLM_F_APPEND))
+		if (cfg->fc_nlflags & NLM_F_APPEND)
+			nlflags = NLM_F_APPEND;
+		else
 			fa = fa_first;
 	}
 	err = -ENOENT;
@@ -1199,7 +1213,7 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 
 	err = -ENOBUFS;
 	new_fa = kmem_cache_alloc(fn_alias_kmem, GFP_KERNEL);
-	if (new_fa == NULL)
+	if (!new_fa)
 		goto out;
 
 	new_fa->fa_info = fi;
@@ -1210,12 +1224,10 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 	new_fa->tb_id = tb->tb_id;
 
 	/* (Optionally) offload fib entry to switch hardware. */
-	err = netdev_switch_fib_ipv4_add(key, plen, fi, tos,
-					 cfg->fc_type,
-					 cfg->fc_nlflags,
-					 tb->tb_id);
+	err = switchdev_fib_ipv4_add(key, plen, fi, tos, cfg->fc_type,
+				     cfg->fc_nlflags, tb->tb_id);
 	if (err) {
-		netdev_switch_fib_ipv4_abort(fi);
+		switchdev_fib_ipv4_abort(fi);
 		goto out_free_new_fa;
 	}
 
@@ -1229,12 +1241,12 @@ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
 
 	rt_cache_flush(cfg->fc_nlinfo.nl_net);
 	rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen, new_fa->tb_id,
-		  &cfg->fc_nlinfo, 0);
+		  &cfg->fc_nlinfo, nlflags);
 succeeded:
 	return 0;
 
 out_sw_fib_del:
-	netdev_switch_fib_ipv4_del(key, plen, fi, tos, cfg->fc_type, tb->tb_id);
+	switchdev_fib_ipv4_del(key, plen, fi, tos, cfg->fc_type, tb->tb_id);
 out_free_new_fa:
 	kmem_cache_free(fn_alias_kmem, new_fa);
 out:
@@ -1400,8 +1412,14 @@ found:
 			continue;
 		for (nhsel = 0; nhsel < fi->fib_nhs; nhsel++) {
 			const struct fib_nh *nh = &fi->fib_nh[nhsel];
+			struct in_device *in_dev = __in_dev_get_rcu(nh->nh_dev);
 
 			if (nh->nh_flags & RTNH_F_DEAD)
+				continue;
+			if (in_dev &&
+			    IN_DEV_IGNORE_ROUTES_WITH_LINKDOWN(in_dev) &&
+			    nh->nh_flags & RTNH_F_LINKDOWN &&
+			    !(fib_flags & FIB_LOOKUP_IGNORE_LINKSTATE))
 				continue;
 			if (flp->flowi4_oif && flp->flowi4_oif != nh->nh_oif)
 				continue;
@@ -1512,8 +1530,8 @@ int fib_table_delete(struct fib_table *tb, struct fib_config *cfg)
 	if (!fa_to_delete)
 		return -ESRCH;
 
-	netdev_switch_fib_ipv4_del(key, plen, fa_to_delete->fa_info, tos,
-				   cfg->fc_type, tb->tb_id);
+	switchdev_fib_ipv4_del(key, plen, fa_to_delete->fa_info, tos,
+			       cfg->fc_type, tb->tb_id);
 
 	rtmsg_fib(RTM_DELROUTE, htonl(key), fa_to_delete, plen, tb->tb_id,
 		  &cfg->fc_nlinfo, 0);
@@ -1759,13 +1777,12 @@ void fib_table_flush_external(struct fib_table *tb)
 			/* record local slen */
 			slen = fa->fa_slen;
 
-			if (!fi || !(fi->fib_flags & RTNH_F_EXTERNAL))
+			if (!fi || !(fi->fib_flags & RTNH_F_OFFLOAD))
 				continue;
 
-			netdev_switch_fib_ipv4_del(n->key,
-						   KEYLENGTH - fa->fa_slen,
-						   fi, fa->fa_tos,
-						   fa->fa_type, tb->tb_id);
+			switchdev_fib_ipv4_del(n->key, KEYLENGTH - fa->fa_slen,
+					       fi, fa->fa_tos, fa->fa_type,
+					       tb->tb_id);
 		}
 
 		/* update leaf slen */
@@ -1830,10 +1847,9 @@ int fib_table_flush(struct fib_table *tb)
 				continue;
 			}
 
-			netdev_switch_fib_ipv4_del(n->key,
-						   KEYLENGTH - fa->fa_slen,
-						   fi, fa->fa_tos,
-						   fa->fa_type, tb->tb_id);
+			switchdev_fib_ipv4_del(n->key, KEYLENGTH - fa->fa_slen,
+					       fi, fa->fa_tos, fa->fa_type,
+					       tb->tb_id);
 			hlist_del_rcu(&fa->fa_list);
 			fib_release_info(fa->fa_info);
 			alias_free_mem_rcu(fa);
@@ -1970,7 +1986,7 @@ struct fib_table *fib_trie_table(u32 id, struct fib_table *alias)
 		sz += sizeof(struct trie);
 
 	tb = kzalloc(sz, GFP_KERNEL);
-	if (tb == NULL)
+	if (!tb)
 		return NULL;
 
 	tb->tb_id = id;
@@ -2051,11 +2067,12 @@ static struct key_vector *fib_trie_get_next(struct fib_trie_iter *iter)
 static struct key_vector *fib_trie_get_first(struct fib_trie_iter *iter,
 					     struct trie *t)
 {
-	struct key_vector *n, *pn = t->kv;
+	struct key_vector *n, *pn;
 
 	if (!t)
 		return NULL;
 
+	pn = t->kv;
 	n = rcu_dereference(pn->tnode[0]);
 	if (!n)
 		return NULL;

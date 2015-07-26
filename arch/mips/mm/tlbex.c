@@ -35,7 +35,7 @@
 #include <asm/uasm.h>
 #include <asm/setup.h>
 
-static int __cpuinitdata mips_xpa_disabled;
+static int mips_xpa_disabled;
 
 static int __init xpa_disable(char *s)
 {
@@ -513,25 +513,8 @@ static void build_tlb_write_entry(u32 **p, struct uasm_label **l,
 	}
 
 	if (cpu_has_mips_r2_r6) {
-		/*
-		 * The architecture spec says an ehb is required here,
-		 * but a number of cores do not have the hazard and
-		 * using an ehb causes an expensive pipeline stall.
-		 */
-		switch (current_cpu_type()) {
-		case CPU_M14KC:
-		case CPU_74K:
-		case CPU_1074K:
-		case CPU_PROAPTIV:
-		case CPU_P5600:
-		case CPU_M5150:
-		case CPU_QEMU_GENERIC:
-			break;
-
-		default:
+		if (cpu_has_mips_r2_exec_hazard)
 			uasm_i_ehb(p);
-			break;
-		}
 		tlbw(p);
 		return;
 	}
@@ -580,6 +563,7 @@ static void build_tlb_write_entry(u32 **p, struct uasm_label **l,
 	case CPU_R10000:
 	case CPU_R12000:
 	case CPU_R14000:
+	case CPU_R16000:
 	case CPU_4KC:
 	case CPU_4KEC:
 	case CPU_M14KC:
@@ -1624,23 +1608,32 @@ build_pte_present(u32 **p, struct uasm_reloc **r,
 		  int pte, int ptr, int scratch, enum label_id lid)
 {
 	int t = scratch >= 0 ? scratch : pte;
+	int cur = pte;
 
 	if (cpu_has_rixi) {
 		if (use_bbit_insns()) {
 			uasm_il_bbit0(p, r, pte, ilog2(_PAGE_PRESENT), lid);
 			uasm_i_nop(p);
 		} else {
-			uasm_i_srl(p, t, pte, _PAGE_PRESENT_SHIFT);
-			uasm_i_andi(p, t, t, 1);
+			if (_PAGE_PRESENT_SHIFT) {
+				uasm_i_srl(p, t, cur, _PAGE_PRESENT_SHIFT);
+				cur = t;
+			}
+			uasm_i_andi(p, t, cur, 1);
 			uasm_il_beqz(p, r, t, lid);
 			if (pte == t)
 				/* You lose the SMP race :-(*/
 				iPTE_LW(p, pte, ptr);
 		}
 	} else {
-		uasm_i_srl(p, t, pte, _PAGE_PRESENT_SHIFT);
-		uasm_i_andi(p, t, t, 3);
-		uasm_i_xori(p, t, t, 3);
+		if (_PAGE_PRESENT_SHIFT) {
+			uasm_i_srl(p, t, cur, _PAGE_PRESENT_SHIFT);
+			cur = t;
+		}
+		uasm_i_andi(p, t, cur,
+			(_PAGE_PRESENT | _PAGE_READ) >> _PAGE_PRESENT_SHIFT);
+		uasm_i_xori(p, t, t,
+			(_PAGE_PRESENT | _PAGE_READ) >> _PAGE_PRESENT_SHIFT);
 		uasm_il_bnez(p, r, t, lid);
 		if (pte == t)
 			/* You lose the SMP race :-(*/
@@ -1668,10 +1661,16 @@ build_pte_writable(u32 **p, struct uasm_reloc **r,
 		   enum label_id lid)
 {
 	int t = scratch >= 0 ? scratch : pte;
+	int cur = pte;
 
-	uasm_i_srl(p, t, pte, _PAGE_PRESENT_SHIFT);
-	uasm_i_andi(p, t, t, 5);
-	uasm_i_xori(p, t, t, 5);
+	if (_PAGE_PRESENT_SHIFT) {
+		uasm_i_srl(p, t, cur, _PAGE_PRESENT_SHIFT);
+		cur = t;
+	}
+	uasm_i_andi(p, t, cur,
+		    (_PAGE_PRESENT | _PAGE_WRITE) >> _PAGE_PRESENT_SHIFT);
+	uasm_i_xori(p, t, t,
+		    (_PAGE_PRESENT | _PAGE_WRITE) >> _PAGE_PRESENT_SHIFT);
 	uasm_il_bnez(p, r, t, lid);
 	if (pte == t)
 		/* You lose the SMP race :-(*/
@@ -1989,7 +1988,7 @@ static void build_r4000_tlb_load_handler(void)
 
 		switch (current_cpu_type()) {
 		default:
-			if (cpu_has_mips_r2_r6) {
+			if (cpu_has_mips_r2_exec_hazard) {
 				uasm_i_ehb(&p);
 
 		case CPU_CAVIUM_OCTEON:
@@ -2056,7 +2055,7 @@ static void build_r4000_tlb_load_handler(void)
 
 		switch (current_cpu_type()) {
 		default:
-			if (cpu_has_mips_r2_r6) {
+			if (cpu_has_mips_r2_exec_hazard) {
 				uasm_i_ehb(&p);
 
 		case CPU_CAVIUM_OCTEON:

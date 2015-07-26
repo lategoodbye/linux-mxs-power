@@ -1091,7 +1091,7 @@ sl811h_hub_descriptor (
 ) {
 	u16		temp = 0;
 
-	desc->bDescriptorType = 0x29;
+	desc->bDescriptorType = USB_DT_HUB;
 	desc->bHubContrCurrent = 0;
 
 	desc->bNbrPorts = 1;
@@ -1259,7 +1259,7 @@ sl811h_hub_control(
 			sl811_write(sl811, SL11H_CTLREG1, sl811->ctrl1);
 
 			mod_timer(&sl811->timer, jiffies
-					+ msecs_to_jiffies(20));
+					+ msecs_to_jiffies(USB_RESUME_TIMEOUT));
 			break;
 		case USB_PORT_FEAT_POWER:
 			port_power(sl811, 0);
@@ -1801,7 +1801,7 @@ sl811h_resume(struct platform_device *dev)
 
 
 /* this driver is exported so sl811_cs can depend on it */
-static struct platform_driver sl811h_driver = {
+struct platform_driver sl811h_driver = {
 	.probe =	sl811h_probe,
 	.remove =	sl811h_remove,
 
@@ -1809,7 +1809,6 @@ static struct platform_driver sl811h_driver = {
 	.resume =	sl811h_resume,
 	.driver = {
 		.name =	(char *) hcd_name,
-		.owner = THIS_MODULE,
 	},
 };
 EXPORT_SYMBOL(sl811h_driver);

@@ -11,4 +11,10 @@
 
 int mxs_saif_clkmux_select(unsigned int clkmux);
 
+int mx23_hbus_is_autoslow_enabled(void);
+int mx23_hbus_set_autoslow(int enable);
+
+int mx28_hbus_is_autoslow_enabled(void);
+int mx28_hbus_set_autoslow(int enable);
+
 #endif

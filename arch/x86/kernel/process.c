@@ -9,7 +9,7 @@
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/pm.h>
-#include <linux/clockchips.h>
+#include <linux/tick.h>
 #include <linux/random.h>
 #include <linux/user-return-notifier.h>
 #include <linux/dmi.h>
@@ -25,8 +25,7 @@
 #include <asm/idle.h>
 #include <asm/uaccess.h>
 #include <asm/mwait.h>
-#include <asm/i387.h>
-#include <asm/fpu-internal.h>
+#include <asm/fpu/internal.h>
 #include <asm/debugreg.h>
 #include <asm/nmi.h>
 #include <asm/tlbflush.h>
@@ -57,7 +56,7 @@ __visible DEFINE_PER_CPU_SHARED_ALIGNED(struct tss_struct, cpu_tss) = {
 	.io_bitmap		= { [0 ... IO_BITMAP_LONGS] = ~0 },
 #endif
 };
-EXPORT_PER_CPU_SYMBOL_GPL(cpu_tss);
+EXPORT_PER_CPU_SYMBOL(cpu_tss);
 
 #ifdef CONFIG_X86_64
 static DEFINE_PER_CPU(unsigned char, is_idle);
@@ -76,47 +75,15 @@ void idle_notifier_unregister(struct notifier_block *n)
 EXPORT_SYMBOL_GPL(idle_notifier_unregister);
 #endif
 
-struct kmem_cache *task_xstate_cachep;
-EXPORT_SYMBOL_GPL(task_xstate_cachep);
-
 /*
  * this gets called so that we can store lazy state into memory and copy the
  * current task into the new thread.
  */
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
-	*dst = *src;
+	memcpy(dst, src, arch_task_struct_size);
 
-	dst->thread.fpu_counter = 0;
-	dst->thread.fpu.has_fpu = 0;
-	dst->thread.fpu.state = NULL;
-	task_disable_lazy_fpu_restore(dst);
-	if (tsk_used_math(src)) {
-		int err = fpu_alloc(&dst->thread.fpu);
-		if (err)
-			return err;
-		fpu_copy(dst, src);
-	}
-	return 0;
-}
-
-void free_thread_xstate(struct task_struct *tsk)
-{
-	fpu_free(&tsk->thread.fpu);
-}
-
-void arch_release_task_struct(struct task_struct *tsk)
-{
-	free_thread_xstate(tsk);
-}
-
-void arch_task_cache_init(void)
-{
-        task_xstate_cachep =
-        	kmem_cache_create("task_xstate", xstate_size,
-				  __alignof__(union thread_xstate),
-				  SLAB_PANIC | SLAB_NOTRACK, NULL);
-	setup_xstate_comp();
+	return fpu__copy(&dst->thread.fpu, &src->thread.fpu);
 }
 
 /*
@@ -127,6 +94,7 @@ void exit_thread(void)
 	struct task_struct *me = current;
 	struct thread_struct *t = &me->thread;
 	unsigned long *bp = t->io_bitmap_ptr;
+	struct fpu *fpu = &t->fpu;
 
 	if (bp) {
 		struct tss_struct *tss = &per_cpu(cpu_tss, get_cpu());
@@ -142,7 +110,7 @@ void exit_thread(void)
 		kfree(bp);
 	}
 
-	drop_fpu(me);
+	fpu__drop(fpu);
 }
 
 void flush_thread(void)
@@ -152,19 +120,7 @@ void flush_thread(void)
 	flush_ptrace_hw_breakpoint(tsk);
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));
 
-	drop_init_fpu(tsk);
-	/*
-	 * Free the FPU state for non xsave platforms. They get reallocated
-	 * lazily at the first use.
-	 */
-	if (!use_eager_fpu())
-		free_thread_xstate(tsk);
-	else if (!used_math()) {
-		/* kthread execs. TODO: cleanup this horror. */
-		if (WARN_ON(init_fpu(current)))
-			force_sig(SIGKILL, current);
-		math_state_restore();
-	}
+	fpu__clear(&tsk->thread.fpu);
 }
 
 static void hard_disable_TSC(void)
@@ -404,14 +360,11 @@ static void amd_e400_idle(void)
 
 		if (!cpumask_test_cpu(cpu, amd_e400_c1e_mask)) {
 			cpumask_set_cpu(cpu, amd_e400_c1e_mask);
-			/*
-			 * Force broadcast so ACPI can not interfere.
-			 */
-			clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_FORCE,
-					   &cpu);
+			/* Force broadcast so ACPI can not interfere. */
+			tick_broadcast_force();
 			pr_info("Switch to broadcast mode on CPU%d\n", cpu);
 		}
-		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
+		tick_broadcast_enter();
 
 		default_idle();
 
@@ -420,7 +373,7 @@ static void amd_e400_idle(void)
 		 * called with interrupts disabled.
 		 */
 		local_irq_disable();
-		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);
+		tick_broadcast_exit();
 		local_irq_enable();
 	} else
 		default_idle();
@@ -448,11 +401,10 @@ static int prefer_mwait_c1_over_halt(const struct cpuinfo_x86 *c)
 }
 
 /*
- * MONITOR/MWAIT with no hints, used for default default C1 state.
- * This invokes MWAIT with interrutps enabled and no flags,
- * which is backwards compatible with the original MWAIT implementation.
+ * MONITOR/MWAIT with no hints, used for default C1 state. This invokes MWAIT
+ * with interrupts enabled and no flags, which is backwards compatible with the
+ * original MWAIT implementation.
  */
-
 static void mwait_idle(void)
 {
 	if (!current_set_polling_and_test()) {

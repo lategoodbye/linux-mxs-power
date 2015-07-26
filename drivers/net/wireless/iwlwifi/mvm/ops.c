@@ -6,7 +6,7 @@
  * GPL LICENSE SUMMARY
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
+ * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -32,7 +32,7 @@
  * BSD LICENSE
  *
  * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2014 Intel Mobile Communications GmbH
+ * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -194,7 +194,7 @@ static void iwl_mvm_nic_config(struct iwl_op_mode *op_mode)
 	 * (PCIe power is lost before PERST# is asserted), causing ME FW
 	 * to lose ownership and not being able to obtain it back.
 	 */
-	if (mvm->trans->cfg->device_family != IWL_DEVICE_FAMILY_8000)
+	if (!mvm->trans->cfg->apmg_not_supported)
 		iwl_set_bits_mask_prph(mvm->trans, APMG_PS_CTRL_REG,
 				       APMG_PS_CTRL_EARLY_PWR_OFF_RESET_DIS,
 				       ~APMG_PS_CTRL_EARLY_PWR_OFF_RESET_DIS);
@@ -238,15 +238,16 @@ static const struct iwl_rx_handlers iwl_mvm_rx_handlers[] = {
 	RX_HANDLER(EOSP_NOTIFICATION, iwl_mvm_rx_eosp_notif, false),
 
 	RX_HANDLER(SCAN_ITERATION_COMPLETE,
-		   iwl_mvm_rx_scan_offload_iter_complete_notif, false),
+		   iwl_mvm_rx_lmac_scan_iter_complete_notif, false),
 	RX_HANDLER(SCAN_OFFLOAD_COMPLETE,
-		   iwl_mvm_rx_scan_offload_complete_notif, true),
-	RX_HANDLER(MATCH_FOUND_NOTIFICATION, iwl_mvm_rx_scan_offload_results,
+		   iwl_mvm_rx_lmac_scan_complete_notif, true),
+	RX_HANDLER(MATCH_FOUND_NOTIFICATION, iwl_mvm_rx_scan_match_found,
 		   false),
 	RX_HANDLER(SCAN_COMPLETE_UMAC, iwl_mvm_rx_umac_scan_complete_notif,
 		   true),
+	RX_HANDLER(SCAN_ITERATION_COMPLETE_UMAC,
+		   iwl_mvm_rx_umac_scan_iter_complete_notif, false),
 
-	RX_HANDLER(RADIO_VERSION_NOTIFICATION, iwl_mvm_rx_radio_ver, false),
 	RX_HANDLER(CARD_STATE_NOTIFICATION, iwl_mvm_rx_card_state_notif, false),
 
 	RX_HANDLER(MISSED_BEACONS_NOTIFICATION, iwl_mvm_rx_missed_beacons_notif,
@@ -280,17 +281,11 @@ static const char *const iwl_mvm_cmd_strings[REPLY_MAX] = {
 	CMD(BINDING_CONTEXT_CMD),
 	CMD(TIME_QUOTA_CMD),
 	CMD(NON_QOS_TX_COUNTER_CMD),
-	CMD(RADIO_VERSION_NOTIFICATION),
-	CMD(SCAN_REQUEST_CMD),
-	CMD(SCAN_ABORT_CMD),
-	CMD(SCAN_START_NOTIFICATION),
-	CMD(SCAN_RESULTS_NOTIFICATION),
-	CMD(SCAN_COMPLETE_NOTIFICATION),
+	CMD(DC2DC_CONFIG_CMD),
 	CMD(NVM_ACCESS_CMD),
 	CMD(PHY_CONFIGURATION_CMD),
 	CMD(CALIB_RES_NOTIF_PHY_DB),
 	CMD(SET_CALIB_DEFAULT_CMD),
-	CMD(CALIBRATION_COMPLETE_NOTIFICATION),
 	CMD(ADD_STA_KEY),
 	CMD(ADD_STA),
 	CMD(REMOVE_STA),
@@ -359,6 +354,7 @@ static const char *const iwl_mvm_cmd_strings[REPLY_MAX] = {
 	CMD(TDLS_CHANNEL_SWITCH_NOTIFICATION),
 	CMD(TDLS_CONFIG_CMD),
 	CMD(MCC_UPDATE_CMD),
+	CMD(SCAN_ITERATION_COMPLETE_UMAC),
 };
 #undef CMD
 
@@ -488,8 +484,7 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
 	/* Set a short watchdog for the command queue */
 	trans_cfg.cmd_q_wdg_timeout =
-		iwlmvm_mod_params.tfd_q_hang_detect ? IWL_DEF_WD_TIMEOUT :
-						      IWL_WATCHDOG_DISABLED;
+		iwl_mvm_get_wd_timeout(mvm, NULL, false, true);
 
 	snprintf(mvm->hw->wiphy->fw_version,
 		 sizeof(mvm->hw->wiphy->fw_version),
@@ -521,16 +516,12 @@ iwl_op_mode_mvm_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
 	min_backoff = calc_min_backoff(trans, cfg);
 	iwl_mvm_tt_initialize(mvm, min_backoff);
-	/* set the nvm_file_name according to priority */
-	if (iwlwifi_mod_params.nvm_file) {
+
+	if (iwlwifi_mod_params.nvm_file)
 		mvm->nvm_file_name = iwlwifi_mod_params.nvm_file;
-	} else {
-		if ((trans->cfg->device_family == IWL_DEVICE_FAMILY_8000) &&
-		    (CSR_HW_REV_STEP(trans->hw_rev) == SILICON_A_STEP))
-			mvm->nvm_file_name = mvm->cfg->default_nvm_file_8000A;
-		else
-			mvm->nvm_file_name = mvm->cfg->default_nvm_file;
-	}
+	else
+		IWL_DEBUG_EEPROM(mvm->trans->dev,
+				 "working without external nvm file\n");
 
 	if (WARN(cfg->no_power_up_nic_in_init && !mvm->nvm_file_name,
 		 "not allowing power-up and not having nvm_file\n"))
@@ -691,7 +682,6 @@ static inline void iwl_mvm_rx_check_trigger(struct iwl_mvm *mvm,
 {
 	struct iwl_fw_dbg_trigger_tlv *trig;
 	struct iwl_fw_dbg_trigger_cmd *cmds_trig;
-	char buf[32];
 	int i;
 
 	if (!iwl_fw_dbg_trigger_enabled(mvm->fw, FW_DBG_TRIGGER_FW_NOTIF))
@@ -711,9 +701,9 @@ static inline void iwl_mvm_rx_check_trigger(struct iwl_mvm *mvm,
 		if (cmds_trig->cmds[i].cmd_id != pkt->hdr.cmd)
 			continue;
 
-		memset(buf, 0, sizeof(buf));
-		snprintf(buf, sizeof(buf), "CMD 0x%02x received", pkt->hdr.cmd);
-		iwl_mvm_fw_dbg_collect_trig(mvm, trig, buf, sizeof(buf));
+		iwl_mvm_fw_dbg_collect_trig(mvm, trig,
+					    "CMD 0x%02x received",
+					    pkt->hdr.cmd);
 		break;
 	}
 }
@@ -868,6 +858,16 @@ static void iwl_mvm_fw_error_dump_wk(struct work_struct *work)
 		return;
 
 	mutex_lock(&mvm->mutex);
+
+	/* stop recording */
+	if (mvm->cfg->device_family == IWL_DEVICE_FAMILY_7000) {
+		iwl_set_bits_prph(mvm->trans, MON_BUFF_SAMPLE_CTL, 0x100);
+	} else {
+		iwl_write_prph(mvm->trans, DBGC_IN_SAMPLE, 0);
+		/* wait before we collect the data till the DBGC stop */
+		udelay(100);
+	}
+
 	iwl_mvm_fw_error_dump(mvm);
 
 	/* start recording again if the firmware is not crashed */
@@ -894,18 +894,7 @@ void iwl_mvm_nic_restart(struct iwl_mvm *mvm, bool fw_error)
 	 * the next start() call from mac80211. If restart isn't called
 	 * (no fw restart) scan status will stay busy.
 	 */
-	switch (mvm->scan_status) {
-	case IWL_MVM_SCAN_NONE:
-		break;
-	case IWL_MVM_SCAN_OS:
-		ieee80211_scan_completed(mvm->hw, true);
-		break;
-	case IWL_MVM_SCAN_SCHED:
-		/* Sched scan will be restarted by mac80211 in restart_hw. */
-		if (!mvm->restart_fw)
-			ieee80211_sched_scan_stopped(mvm->hw);
-		break;
-	}
+	iwl_mvm_report_scan_aborted(mvm);
 
 	/*
 	 * If we're restarting already, don't cycle restarts.
@@ -1175,7 +1164,7 @@ static void iwl_mvm_d0i3_disconnect_iter(void *data, u8 *mac,
 
 	if (vif->type == NL80211_IFTYPE_STATION && vif->bss_conf.assoc &&
 	    mvm->d0i3_ap_sta_id == mvmvif->ap_sta_id)
-		ieee80211_connection_loss(vif);
+		iwl_mvm_connection_loss(mvm, vif, "D0i3");
 }
 
 void iwl_mvm_d0i3_enable_tx(struct iwl_mvm *mvm, __le16 *qos_seq)
@@ -1267,10 +1256,12 @@ static void iwl_mvm_d0i3_exit_work(struct work_struct *wk)
 		ieee80211_iterate_active_interfaces(
 			mvm->hw, IEEE80211_IFACE_ITER_NORMAL,
 			iwl_mvm_d0i3_disconnect_iter, mvm);
-
-	iwl_free_resp(&get_status_cmd);
 out:
 	iwl_mvm_d0i3_enable_tx(mvm, qos_seq);
+
+	/* qos_seq might point inside resp_pkt, so free it only now */
+	if (get_status_cmd.resp_pkt)
+		iwl_free_resp(&get_status_cmd);
 
 	/* the FW might have updated the regdomain */
 	iwl_mvm_update_changed_regdom(mvm);

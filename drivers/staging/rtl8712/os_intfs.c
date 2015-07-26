@@ -122,13 +122,11 @@ module_param(low_power, int, 0644);
 MODULE_PARM_DESC(ifname, " Net interface name, wlan%d=default");
 MODULE_PARM_DESC(initmac, "MAC-Address, default: use FUSE");
 
-static uint loadparam(struct _adapter *padapter, struct  net_device *pnetdev);
 static int netdev_open(struct net_device *pnetdev);
 static int netdev_close(struct net_device *pnetdev);
 
-static uint loadparam(struct _adapter *padapter, struct  net_device *pnetdev)
+static void loadparam(struct _adapter *padapter, struct  net_device *pnetdev)
 {
-	uint status = _SUCCESS;
 	struct registry_priv  *registry_par = &padapter->registrypriv;
 
 	registry_par->chip_version = (u8)chip_version;
@@ -172,22 +170,21 @@ static uint loadparam(struct _adapter *padapter, struct  net_device *pnetdev)
 	registry_par->low_power = (u8)low_power;
 	registry_par->wifi_test = (u8) wifi_test;
 	r8712_initmac = initmac;
-	return status;
 }
 
 static int r871x_net_set_mac_address(struct net_device *pnetdev, void *p)
 {
-	struct _adapter *padapter = (struct _adapter *)netdev_priv(pnetdev);
+	struct _adapter *padapter = netdev_priv(pnetdev);
 	struct sockaddr *addr = p;
 
 	if (padapter->bup == false)
-		memcpy(pnetdev->dev_addr, addr->sa_data, ETH_ALEN);
+		ether_addr_copy(pnetdev->dev_addr, addr->sa_data);
 	return 0;
 }
 
 static struct net_device_stats *r871x_net_get_stats(struct net_device *pnetdev)
 {
-	struct _adapter *padapter = (struct _adapter *) netdev_priv(pnetdev);
+	struct _adapter *padapter = netdev_priv(pnetdev);
 	struct xmit_priv *pxmitpriv = &(padapter->xmitpriv);
 	struct recv_priv *precvpriv = &(padapter->recvpriv);
 
@@ -221,14 +218,13 @@ struct net_device *r8712_init_netdev(void)
 		strcpy(ifname, "wlan%d");
 		dev_alloc_name(pnetdev, ifname);
 	}
-	padapter = (struct _adapter *) netdev_priv(pnetdev);
+	padapter = netdev_priv(pnetdev);
 	padapter->pnetdev = pnetdev;
 	pr_info("r8712u: register rtl8712_netdev_ops to netdev_ops\n");
 	pnetdev->netdev_ops = &rtl8712_netdev_ops;
 	pnetdev->watchdog_timeo = HZ; /* 1 second timeout */
 	pnetdev->wireless_handlers = (struct iw_handler_def *)
 				     &r871x_handlers_def;
-	/*step 2.*/
 	loadparam(padapter, pnetdev);
 	netif_carrier_off(pnetdev);
 	padapter->pid = 0;  /* Initial the PID value used for HW PBC.*/
@@ -384,7 +380,7 @@ static void enable_video_mode(struct _adapter *padapter, int cbw40_value)
  */
 static int netdev_open(struct net_device *pnetdev)
 {
-	struct _adapter *padapter = (struct _adapter *)netdev_priv(pnetdev);
+	struct _adapter *padapter = netdev_priv(pnetdev);
 
 	mutex_lock(&padapter->mutex_start);
 	if (padapter->bup == false) {
@@ -452,7 +448,7 @@ netdev_open_error:
  */
 static int netdev_close(struct net_device *pnetdev)
 {
-	struct _adapter *padapter = (struct _adapter *) netdev_priv(pnetdev);
+	struct _adapter *padapter = netdev_priv(pnetdev);
 
 	/* Close LED*/
 	padapter->ledpriv.LedControlHandler(padapter, LED_CTL_POWER_OFF);

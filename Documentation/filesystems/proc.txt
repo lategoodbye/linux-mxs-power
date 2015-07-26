@@ -205,7 +205,7 @@ asynchronous manner and the value may not be very precise. To see a precise
 snapshot of a moment, you can see /proc/<pid>/smaps file and scan page table.
 It's slow but very precise.
 
-Table 1-2: Contents of the status files (as of 3.20.0)
+Table 1-2: Contents of the status files (as of 4.1)
 ..............................................................................
  Field                       Content
  Name                        filename of the executable
@@ -235,6 +235,7 @@ Table 1-2: Contents of the status files (as of 3.20.0)
  VmExe                       size of text segment
  VmLib                       size of shared library code
  VmPTE                       size of page table entries
+ VmPMD                       size of second level page tables
  VmSwap                      size of swap usage (the number of referred swapents)
  Threads                     number of threads
  SigQ                        number of signals queued/max. number for queue
@@ -1260,9 +1261,9 @@ Various pieces   of  information about  kernel activity  are  available in the
 since the system first booted.  For a quick look, simply cat the file:
 
   > cat /proc/stat
-  cpu  2255 34 2290 22625563 6290 127 456 0 0
-  cpu0 1132 34 1441 11311718 3675 127 438 0 0
-  cpu1 1123 0 849 11313845 2614 0 18 0 0
+  cpu  2255 34 2290 22625563 6290 127 456 0 0 0
+  cpu0 1132 34 1441 11311718 3675 127 438 0 0 0
+  cpu1 1123 0 849 11313845 2614 0 18 0 0 0
   intr 114930548 113199788 3 0 5 263 0 4 [... lots more numbers ...]
   ctxt 1990473
   btime 1062191376

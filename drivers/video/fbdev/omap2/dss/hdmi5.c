@@ -37,6 +37,7 @@
 #include <linux/clk.h>
 #include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
+#include <linux/component.h>
 #include <video/omapdss.h>
 #include <sound/omap-hdmi-audio.h>
 
@@ -234,26 +235,6 @@ static int hdmi_power_on_full(struct omap_dss_device *dssdev)
 	if (r)
 		goto err_vid_enable;
 
-	/*
-	 * XXX Seems that on we easily get a flood of sync-lost errors when
-	 * enabling the output. This seems to be related to the time between
-	 * HDMI VSYNC and enabling the DISPC output.
-	 *
-	 * Testing shows that the sync-lost errors do not happen if we enable
-	 * the DISPC output very soon after HDMI VBLANK. So wait here for
-	 * VBLANK to reduce the chances of sync-losts.
-	 */
-	hdmi_write_reg(hdmi.wp.base, HDMI_WP_IRQSTATUS, HDMI_IRQ_VIDEO_VSYNC);
-
-	while (true) {
-		u32 v = hdmi_read_reg(hdmi.wp.base, HDMI_WP_IRQSTATUS_RAW);
-
-		if (v & HDMI_IRQ_VIDEO_VSYNC)
-			break;
-
-		usleep_range(500, 1000);
-	}
-
 	r = dss_mgr_enable(mgr);
 	if (r)
 		goto err_mgr_enable;
@@ -279,38 +260,8 @@ err_pll_enable:
 static void hdmi_power_off_full(struct omap_dss_device *dssdev)
 {
 	struct omap_overlay_manager *mgr = hdmi.output.manager;
-	const struct omap_video_timings *t;
-	unsigned vblank;
 
 	hdmi_wp_clear_irqenable(&hdmi.wp, 0xffffffff);
-
-	/*
-	 * XXX Seems that on we easily get a flood of sync-lost errors when
-	 * disabling the output, and sometimes the DISPC seems to get stuck and
-	 * we never get FRAMEDONE. This seems to happen if we disable DISPC
-	 * output during HDMI VBLANK.
-	 *
-	 * To reduce the possibility for sync-lost errors, calculate the time
-	 * for the vertical blanking, wait for VBLANK, then wait until VBLANK
-	 * ends.
-	 */
-	t = &hdmi.cfg.timings;
-	vblank = t->hfp + t->hsw + t->hbp + t->x_res;
-	vblank *= t->vsw + t->vbp;
-	vblank = (vblank * 1000) / (t->pixelclock / 1000);
-
-	hdmi_write_reg(hdmi.wp.base, HDMI_WP_IRQSTATUS, HDMI_IRQ_VIDEO_VSYNC);
-
-	while (true) {
-		u32 v = hdmi_read_reg(hdmi.wp.base, HDMI_WP_IRQSTATUS_RAW);
-
-		if (v & HDMI_IRQ_VIDEO_VSYNC)
-			break;
-
-		usleep_range(500, 1000);
-	}
-
-	usleep_range(vblank, vblank + 1000);
 
 	dss_mgr_disable(mgr);
 
@@ -731,8 +682,9 @@ static int hdmi_audio_register(struct device *dev)
 }
 
 /* HDMI HW IP initialisation */
-static int omapdss_hdmihw_probe(struct platform_device *pdev)
+static int hdmi5_bind(struct device *dev, struct device *master, void *data)
 {
+	struct platform_device *pdev = to_platform_device(dev);
 	int r;
 	int irq;
 
@@ -798,8 +750,10 @@ err:
 	return r;
 }
 
-static int __exit omapdss_hdmihw_remove(struct platform_device *pdev)
+static void hdmi5_unbind(struct device *dev, struct device *master, void *data)
 {
+	struct platform_device *pdev = to_platform_device(dev);
+
 	if (hdmi.audio_pdev)
 		platform_device_unregister(hdmi.audio_pdev);
 
@@ -808,7 +762,21 @@ static int __exit omapdss_hdmihw_remove(struct platform_device *pdev)
 	hdmi_pll_uninit(&hdmi.pll);
 
 	pm_runtime_disable(&pdev->dev);
+}
 
+static const struct component_ops hdmi5_component_ops = {
+	.bind	= hdmi5_bind,
+	.unbind	= hdmi5_unbind,
+};
+
+static int hdmi5_probe(struct platform_device *pdev)
+{
+	return component_add(&pdev->dev, &hdmi5_component_ops);
+}
+
+static int hdmi5_remove(struct platform_device *pdev)
+{
+	component_del(&pdev->dev, &hdmi5_component_ops);
 	return 0;
 }
 
@@ -842,8 +810,8 @@ static const struct of_device_id hdmi_of_match[] = {
 };
 
 static struct platform_driver omapdss_hdmihw_driver = {
-	.probe		= omapdss_hdmihw_probe,
-	.remove         = __exit_p(omapdss_hdmihw_remove),
+	.probe		= hdmi5_probe,
+	.remove		= hdmi5_remove,
 	.driver         = {
 		.name   = "omapdss_hdmi5",
 		.pm	= &hdmi_pm_ops,
@@ -857,7 +825,7 @@ int __init hdmi5_init_platform_driver(void)
 	return platform_driver_register(&omapdss_hdmihw_driver);
 }
 
-void __exit hdmi5_uninit_platform_driver(void)
+void hdmi5_uninit_platform_driver(void)
 {
 	platform_driver_unregister(&omapdss_hdmihw_driver);
 }

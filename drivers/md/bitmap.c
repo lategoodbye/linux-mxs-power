@@ -177,11 +177,16 @@ static struct md_rdev *next_active_rdev(struct md_rdev *rdev, struct mddev *mdde
 	 * nr_pending is 0 and In_sync is clear, the entries we return will
 	 * still be in the same position on the list when we re-enter
 	 * list_for_each_entry_continue_rcu.
+	 *
+	 * Note that if entered with 'rdev == NULL' to start at the
+	 * beginning, we temporarily assign 'rdev' to an address which
+	 * isn't really an rdev, but which can be used by
+	 * list_for_each_entry_continue_rcu() to find the first entry.
 	 */
 	rcu_read_lock();
 	if (rdev == NULL)
 		/* start at the beginning */
-		rdev = list_entry_rcu(&mddev->disks, struct md_rdev, same_set);
+		rdev = list_entry(&mddev->disks, struct md_rdev, same_set);
 	else {
 		/* release the previous rdev and start from there. */
 		rdev_dec_pending(rdev, mddev);
@@ -571,12 +576,13 @@ static int bitmap_read_sb(struct bitmap *bitmap)
 re_read:
 	/* If cluster_slot is set, the cluster is setup */
 	if (bitmap->cluster_slot >= 0) {
-		sector_t bm_blocks;
-		sector_t resync_sectors = bitmap->mddev->resync_max_sectors;
+		sector_t bm_blocks = bitmap->mddev->resync_max_sectors;
 
-		bm_blocks = sector_div(resync_sectors,
-				       bitmap->mddev->bitmap_info.chunksize >> 9);
-		bm_blocks = bm_blocks << 3;
+		sector_div(bm_blocks,
+			   bitmap->mddev->bitmap_info.chunksize >> 9);
+		/* bits to bytes */
+		bm_blocks = ((bm_blocks+7) >> 3) + sizeof(bitmap_super_t);
+		/* to 4k blocks */
 		bm_blocks = DIV_ROUND_UP_SECTOR_T(bm_blocks, 4096);
 		bitmap->mddev->bitmap_info.offset += bitmap->cluster_slot * (bm_blocks << 3);
 		pr_info("%s:%d bm slot: %d offset: %llu\n", __func__, __LINE__,
@@ -673,9 +679,6 @@ out:
 			goto out_no_sb;
 		}
 		bitmap->cluster_slot = md_cluster_ops->slot_number(bitmap->mddev);
-		pr_info("%s:%d bm slot: %d offset: %llu\n", __func__, __LINE__,
-			bitmap->cluster_slot,
-			(unsigned long long)bitmap->mddev->bitmap_info.offset);
 		goto re_read;
 	}
 
@@ -836,7 +839,7 @@ static void bitmap_file_kick(struct bitmap *bitmap)
 		if (bitmap->storage.file) {
 			path = kmalloc(PAGE_SIZE, GFP_KERNEL);
 			if (path)
-				ptr = d_path(&bitmap->storage.file->f_path,
+				ptr = file_path(bitmap->storage.file,
 					     path, PAGE_SIZE);
 
 			printk(KERN_ALERT
@@ -1853,7 +1856,7 @@ EXPORT_SYMBOL_GPL(bitmap_load);
  * to our bitmap
  */
 int bitmap_copy_from_slot(struct mddev *mddev, int slot,
-		sector_t *low, sector_t *high)
+		sector_t *low, sector_t *high, bool clear_bits)
 {
 	int rv = 0, i, j;
 	sector_t block, lo = 0, hi = 0;
@@ -1884,14 +1887,16 @@ int bitmap_copy_from_slot(struct mddev *mddev, int slot,
 		}
 	}
 
-	bitmap_update_sb(bitmap);
-	/* Setting this for the ev_page should be enough.
-	 * And we do not require both write_all and PAGE_DIRT either
-	 */
-	for (i = 0; i < bitmap->storage.file_pages; i++)
-		set_page_attr(bitmap, i, BITMAP_PAGE_DIRTY);
-	bitmap_write_all(bitmap);
-	bitmap_unplug(bitmap);
+	if (clear_bits) {
+		bitmap_update_sb(bitmap);
+		/* Setting this for the ev_page should be enough.
+		 * And we do not require both write_all and PAGE_DIRT either
+		 */
+		for (i = 0; i < bitmap->storage.file_pages; i++)
+			set_page_attr(bitmap, i, BITMAP_PAGE_DIRTY);
+		bitmap_write_all(bitmap);
+		bitmap_unplug(bitmap);
+	}
 	*low = lo;
 	*high = hi;
 err:
@@ -1922,7 +1927,7 @@ void bitmap_status(struct seq_file *seq, struct bitmap *bitmap)
 		   chunk_kb ? "KB" : "B");
 	if (bitmap->storage.file) {
 		seq_printf(seq, ", file: ");
-		seq_path(seq, &bitmap->storage.file->f_path, " \t\n");
+		seq_file_path(seq, bitmap->storage.file, " \t\n");
 	}
 
 	seq_printf(seq, "\n");

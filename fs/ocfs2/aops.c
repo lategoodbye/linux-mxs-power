@@ -523,7 +523,7 @@ static int ocfs2_direct_IO_get_blocks(struct inode *inode, sector_t iblock,
 	unsigned char blocksize_bits = inode->i_sb->s_blocksize_bits;
 	unsigned long max_blocks = bh_result->b_size >> inode->i_blkbits;
 	unsigned long len = bh_result->b_size;
-	unsigned int clusters_to_alloc = 0;
+	unsigned int clusters_to_alloc = 0, contig_clusters = 0;
 
 	cpos = ocfs2_blocks_to_clusters(inode->i_sb, iblock);
 
@@ -560,8 +560,10 @@ static int ocfs2_direct_IO_get_blocks(struct inode *inode, sector_t iblock,
 		/* fill hole, allocate blocks can't be larger than the size
 		 * of the hole */
 		clusters_to_alloc = ocfs2_clusters_for_bytes(inode->i_sb, len);
-		if (clusters_to_alloc > contig_blocks)
-			clusters_to_alloc = contig_blocks;
+		contig_clusters = ocfs2_clusters_for_blocks(inode->i_sb,
+				contig_blocks);
+		if (clusters_to_alloc > contig_clusters)
+			clusters_to_alloc = contig_clusters;
 
 		/* allocate extent and insert them into the extent tree */
 		ret = ocfs2_extend_allocation(inode, cpos,
@@ -618,9 +620,6 @@ static void ocfs2_dio_end_io(struct kiocb *iocb,
 
 	/* this io's submitter should not have unlocked this before we could */
 	BUG_ON(!ocfs2_iocb_is_rw_locked(iocb));
-
-	if (ocfs2_iocb_is_sem_locked(iocb))
-		ocfs2_iocb_clear_sem_locked(iocb);
 
 	if (ocfs2_iocb_is_unaligned_aio(iocb)) {
 		ocfs2_iocb_clear_unaligned_aio(iocb);
@@ -855,10 +854,9 @@ static ssize_t ocfs2_direct_IO_write(struct kiocb *iocb,
 		ocfs2_inode_unlock(inode, 1);
 	}
 
-	written = __blockdev_direct_IO(WRITE, iocb, inode, inode->i_sb->s_bdev,
-			iter, offset,
-			ocfs2_direct_IO_get_blocks,
-			ocfs2_dio_end_io, NULL, 0);
+	written = __blockdev_direct_IO(iocb, inode, inode->i_sb->s_bdev, iter,
+				       offset, ocfs2_direct_IO_get_blocks,
+				       ocfs2_dio_end_io, NULL, 0);
 	if (unlikely(written < 0)) {
 		loff_t i_size = i_size_read(inode);
 
@@ -926,12 +924,22 @@ clean_orphan:
 		int update_isize = written > 0 ? 1 : 0;
 		loff_t end = update_isize ? offset + written : 0;
 
-		tmp_ret = ocfs2_del_inode_from_orphan(osb, inode,
+		tmp_ret = ocfs2_inode_lock(inode, &di_bh, 1);
+		if (tmp_ret < 0) {
+			ret = tmp_ret;
+			mlog_errno(ret);
+			goto out;
+		}
+
+		tmp_ret = ocfs2_del_inode_from_orphan(osb, inode, di_bh,
 				update_isize, end);
 		if (tmp_ret < 0) {
 			ret = tmp_ret;
+			mlog_errno(ret);
 			goto out;
 		}
+
+		ocfs2_inode_unlock(inode, 1);
 
 		tmp_ret = jbd2_journal_force_commit(journal);
 		if (tmp_ret < 0) {
@@ -946,9 +954,7 @@ out:
 	return ret;
 }
 
-static ssize_t ocfs2_direct_IO(int rw,
-			       struct kiocb *iocb,
-			       struct iov_iter *iter,
+static ssize_t ocfs2_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
 			       loff_t offset)
 {
 	struct file *file = iocb->ki_filp;
@@ -970,12 +976,11 @@ static ssize_t ocfs2_direct_IO(int rw,
 	if (i_size_read(inode) <= offset && !full_coherency)
 		return 0;
 
-	if (rw == READ)
-		return __blockdev_direct_IO(rw, iocb, inode,
-				    inode->i_sb->s_bdev,
-				    iter, offset,
-				    ocfs2_direct_IO_get_blocks,
-				    ocfs2_dio_end_io, NULL, 0);
+	if (iov_iter_rw(iter) == READ)
+		return __blockdev_direct_IO(iocb, inode, inode->i_sb->s_bdev,
+					    iter, offset,
+					    ocfs2_direct_IO_get_blocks,
+					    ocfs2_dio_end_io, NULL, 0);
 	else
 		return ocfs2_direct_IO_write(iocb, iter, offset);
 }
@@ -2180,6 +2185,16 @@ try_again:
 		if (ret)
 			goto out_commit;
 	}
+	/*
+	 * We don't want this to fail in ocfs2_write_end(), so do it
+	 * here.
+	 */
+	ret = ocfs2_journal_access_di(handle, INODE_CACHE(inode), wc->w_di_bh,
+				      OCFS2_JOURNAL_ACCESS_WRITE);
+	if (ret) {
+		mlog_errno(ret);
+		goto out_quota;
+	}
 
 	/*
 	 * Fill our page array first. That way we've grabbed enough so
@@ -2330,7 +2345,7 @@ int ocfs2_write_end_nolock(struct address_space *mapping,
 			   loff_t pos, unsigned len, unsigned copied,
 			   struct page *page, void *fsdata)
 {
-	int i, ret;
+	int i;
 	unsigned from, to, start = pos & (PAGE_CACHE_SIZE - 1);
 	struct inode *inode = mapping->host;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
@@ -2380,14 +2395,6 @@ int ocfs2_write_end_nolock(struct address_space *mapping,
 		}
 	}
 
-	ret = ocfs2_journal_access_di(handle, INODE_CACHE(inode), wc->w_di_bh,
-				      OCFS2_JOURNAL_ACCESS_WRITE);
-	if (ret) {
-		copied = ret;
-		mlog_errno(ret);
-		goto out;
-	}
-
 out_write_size:
 	pos += copied;
 	if (pos > i_size_read(inode)) {
@@ -2409,7 +2416,6 @@ out_write_size:
 	 */
 	ocfs2_unlock_pages(wc);
 
-out:
 	ocfs2_commit_trans(osb, handle);
 
 	ocfs2_run_deallocs(osb, &wc->w_dealloc);

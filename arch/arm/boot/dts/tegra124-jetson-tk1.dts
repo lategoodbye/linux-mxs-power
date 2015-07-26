@@ -3,6 +3,8 @@
 #include <dt-bindings/input/input.h>
 #include "tegra124.dtsi"
 
+#include "tegra124-jetson-tk1-emc.dtsi"
+
 / {
 	model = "NVIDIA Tegra124 Jetson TK1";
 	compatible = "nvidia,jetson-tk1", "nvidia,tegra124";
@@ -1643,6 +1645,10 @@
 
 		target-5v-supply = <&vdd_5v0_sata>;
 		target-12v-supply = <&vdd_12v0_sata>;
+	};
+
+	hda@0,70030000 {
+		status = "okay";
 	};
 
 	padctl@0,7009f000 {

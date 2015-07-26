@@ -147,6 +147,7 @@ static struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("rx_hwtstamp_cleared", rx_hwtstamp_cleared),
 	I40E_PF_STAT("fdir_flush_cnt", fd_flush_cnt),
 	I40E_PF_STAT("fdir_atr_match", stats.fd_atr_match),
+	I40E_PF_STAT("fdir_atr_tunnel_match", stats.fd_atr_tunnel_match),
 	I40E_PF_STAT("fdir_sb_match", stats.fd_sb_match),
 
 	/* LPI stats */
@@ -274,6 +275,12 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 	case I40E_PHY_TYPE_40GBASE_LR4:
 		ecmd->supported = SUPPORTED_40000baseLR4_Full;
 		break;
+	case I40E_PHY_TYPE_20GBASE_KR2:
+		ecmd->supported = SUPPORTED_Autoneg |
+				  SUPPORTED_20000baseKR2_Full;
+		ecmd->advertising = ADVERTISED_Autoneg |
+				    ADVERTISED_20000baseKR2_Full;
+		break;
 	case I40E_PHY_TYPE_10GBASE_KX4:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_10000baseKX4_Full;
@@ -350,8 +357,10 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 	/* Set speed and duplex */
 	switch (link_speed) {
 	case I40E_LINK_SPEED_40GB:
-		/* need a SPEED_40000 in ethtool.h */
-		ethtool_cmd_speed_set(ecmd, 40000);
+		ethtool_cmd_speed_set(ecmd, SPEED_40000);
+		break;
+	case I40E_LINK_SPEED_20GB:
+		ethtool_cmd_speed_set(ecmd, SPEED_20000);
 		break;
 	case I40E_LINK_SPEED_10GB:
 		ethtool_cmd_speed_set(ecmd, SPEED_10000);
@@ -417,6 +426,11 @@ static void i40e_get_settings_link_down(struct i40e_hw *hw,
 			ecmd->advertising |= ADVERTISED_1000baseT_Full;
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
 			ecmd->advertising |= ADVERTISED_100baseT_Full;
+		break;
+	case I40E_DEV_ID_20G_KR2:
+		/* backplane 20G */
+		ecmd->supported = SUPPORTED_20000baseKR2_Full;
+		ecmd->advertising = ADVERTISED_20000baseKR2_Full;
 		break;
 	default:
 		/* all the rest are 10G/1G */
@@ -633,6 +647,8 @@ static int i40e_set_settings(struct net_device *netdev,
 	    advertise & ADVERTISED_10000baseKX4_Full ||
 	    advertise & ADVERTISED_10000baseKR_Full)
 		config.link_speed |= I40E_LINK_SPEED_10GB;
+	if (advertise & ADVERTISED_20000baseKR2_Full)
+		config.link_speed |= I40E_LINK_SPEED_20GB;
 	if (advertise & ADVERTISED_40000baseKR4_Full ||
 	    advertise & ADVERTISED_40000baseCR4_Full ||
 	    advertise & ADVERTISED_40000baseSR4_Full ||
@@ -1533,6 +1549,17 @@ static int i40e_loopback_test(struct net_device *netdev, u64 *data)
 	return *data;
 }
 
+static inline bool i40e_active_vfs(struct i40e_pf *pf)
+{
+	struct i40e_vf *vfs = pf->vf;
+	int i;
+
+	for (i = 0; i < pf->num_alloc_vfs; i++)
+		if (vfs[i].vf_states & I40E_VF_STAT_ACTIVE)
+			return true;
+	return false;
+}
+
 static void i40e_diag_test(struct net_device *netdev,
 			   struct ethtool_test *eth_test, u64 *data)
 {
@@ -1545,6 +1572,20 @@ static void i40e_diag_test(struct net_device *netdev,
 		netif_info(pf, drv, netdev, "offline testing starting\n");
 
 		set_bit(__I40E_TESTING, &pf->state);
+
+		if (i40e_active_vfs(pf)) {
+			dev_warn(&pf->pdev->dev,
+				 "Please take active VFS offline and restart the adapter before running NIC diagnostics\n");
+			data[I40E_ETH_TEST_REG]		= 1;
+			data[I40E_ETH_TEST_EEPROM]	= 1;
+			data[I40E_ETH_TEST_INTR]	= 1;
+			data[I40E_ETH_TEST_LOOPBACK]	= 1;
+			data[I40E_ETH_TEST_LINK]	= 1;
+			eth_test->flags |= ETH_TEST_FL_FAILED;
+			clear_bit(__I40E_TESTING, &pf->state);
+			goto skip_ol_tests;
+		}
+
 		/* If the device is online then take it offline */
 		if (if_running)
 			/* indicate we're in test mode */
@@ -1589,6 +1630,8 @@ static void i40e_diag_test(struct net_device *netdev,
 		data[I40E_ETH_TEST_INTR] = 0;
 		data[I40E_ETH_TEST_LOOPBACK] = 0;
 	}
+
+skip_ol_tests:
 
 	netif_info(pf, drv, netdev, "testing finished\n");
 }
@@ -1898,6 +1941,16 @@ static int i40e_get_ethtool_fdir_entry(struct i40e_pf *pf,
 	else
 		fsp->ring_cookie = rule->q_index;
 
+	if (rule->dest_vsi != pf->vsi[pf->lan_vsi]->id) {
+		struct i40e_vsi *vsi;
+
+		vsi = i40e_find_vsi_from_id(pf, rule->dest_vsi);
+		if (vsi && vsi->type == I40E_VSI_SRIOV) {
+			fsp->h_ext.data[1] = htonl(vsi->vf_id);
+			fsp->m_ext.data[1] = htonl(0x1);
+		}
+	}
+
 	return 0;
 }
 
@@ -2191,6 +2244,7 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	struct i40e_fdir_filter *input;
 	struct i40e_pf *pf;
 	int ret = -EINVAL;
+	u16 vf_id;
 
 	if (!vsi)
 		return -EINVAL;
@@ -2239,7 +2293,7 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	input->pctype = 0;
 	input->dest_vsi = vsi->id;
 	input->fd_status = I40E_FILTER_PROGRAM_DESC_FD_STATUS_FD_ID;
-	input->cnt_index  = pf->fd_sb_cnt_idx;
+	input->cnt_index  = I40E_FD_SB_STAT_IDX(pf->hw.pf_id);
 	input->flow_type = fsp->flow_type;
 	input->ip4_proto = fsp->h_u.usr_ip4_spec.proto;
 
@@ -2251,7 +2305,22 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	input->dst_ip[0] = fsp->h_u.tcp_ip4_spec.ip4src;
 	input->src_ip[0] = fsp->h_u.tcp_ip4_spec.ip4dst;
 
+	if (ntohl(fsp->m_ext.data[1])) {
+		if (ntohl(fsp->h_ext.data[1]) >= pf->num_alloc_vfs) {
+			netif_info(pf, drv, vsi->netdev, "Invalid VF id\n");
+			goto free_input;
+		}
+		vf_id = ntohl(fsp->h_ext.data[1]);
+		/* Find vsi id from vf id and override dest vsi */
+		input->dest_vsi = pf->vf[vf_id].lan_vsi_id;
+		if (input->q_index >= pf->vf[vf_id].num_queue_pairs) {
+			netif_info(pf, drv, vsi->netdev, "Invalid queue id\n");
+			goto free_input;
+		}
+	}
+
 	ret = i40e_add_del_fdir(vsi, input, true);
+free_input:
 	if (ret)
 		kfree(input);
 	else

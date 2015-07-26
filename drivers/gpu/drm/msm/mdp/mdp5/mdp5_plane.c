@@ -273,7 +273,7 @@ static void set_scanout_locked(struct drm_plane *plane,
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC2_ADDR(pipe),
 			msm_framebuffer_iova(fb, mdp5_kms->id, 2));
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC3_ADDR(pipe),
-			msm_framebuffer_iova(fb, mdp5_kms->id, 4));
+			msm_framebuffer_iova(fb, mdp5_kms->id, 3));
 
 	plane->fb = fb;
 }
@@ -507,8 +507,8 @@ static int mdp5_plane_mode_set(struct drm_plane *plane,
 	spin_lock_irqsave(&mdp5_plane->pipe_lock, flags);
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_IMG_SIZE(pipe),
-			MDP5_PIPE_SRC_IMG_SIZE_WIDTH(src_w) |
-			MDP5_PIPE_SRC_IMG_SIZE_HEIGHT(src_h));
+			MDP5_PIPE_SRC_IMG_SIZE_WIDTH(fb->width) |
+			MDP5_PIPE_SRC_IMG_SIZE_HEIGHT(fb->height));
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_SIZE(pipe),
 			MDP5_PIPE_SRC_SIZE_WIDTH(src_w) |

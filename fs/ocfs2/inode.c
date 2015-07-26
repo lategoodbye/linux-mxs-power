@@ -1191,19 +1191,17 @@ void ocfs2_evict_inode(struct inode *inode)
 int ocfs2_drop_inode(struct inode *inode)
 {
 	struct ocfs2_inode_info *oi = OCFS2_I(inode);
+	int res;
 
 	trace_ocfs2_drop_inode((unsigned long long)oi->ip_blkno,
 				inode->i_nlink, oi->ip_flags);
 
-	assert_spin_locked(&inode->i_lock);
-	inode->i_state |= I_WILL_FREE;
-	spin_unlock(&inode->i_lock);
-	write_inode_now(inode, 1);
-	spin_lock(&inode->i_lock);
-	WARN_ON(inode->i_state & I_NEW);
-	inode->i_state &= ~I_WILL_FREE;
+	if (oi->ip_flags & OCFS2_INODE_MAYBE_ORPHANED)
+		res = 1;
+	else
+		res = generic_drop_inode(inode);
 
-	return 1;
+	return res;
 }
 
 /*
@@ -1211,7 +1209,7 @@ int ocfs2_drop_inode(struct inode *inode)
  */
 int ocfs2_inode_revalidate(struct dentry *dentry)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 	int status = 0;
 
 	trace_ocfs2_inode_revalidate(inode,
@@ -1352,21 +1350,21 @@ int ocfs2_validate_inode_block(struct super_block *sb,
 	rc = -EINVAL;
 
 	if (!OCFS2_IS_VALID_DINODE(di)) {
-		rc = ocfs2_error(sb, "Invalid dinode #%llu: signature = %.*s\n",
+		ocfs2_error(sb, "Invalid dinode #%llu: signature = %.*s\n",
 			    (unsigned long long)bh->b_blocknr, 7,
 			    di->i_signature);
 		goto bail;
 	}
 
 	if (le64_to_cpu(di->i_blkno) != bh->b_blocknr) {
-		rc = ocfs2_error(sb, "Invalid dinode #%llu: i_blkno is %llu\n",
+		ocfs2_error(sb, "Invalid dinode #%llu: i_blkno is %llu\n",
 			    (unsigned long long)bh->b_blocknr,
 			    (unsigned long long)le64_to_cpu(di->i_blkno));
 		goto bail;
 	}
 
 	if (!(di->i_flags & cpu_to_le32(OCFS2_VALID_FL))) {
-		rc = ocfs2_error(sb,
+		ocfs2_error(sb,
 			    "Invalid dinode #%llu: OCFS2_VALID_FL not set\n",
 			    (unsigned long long)bh->b_blocknr);
 		goto bail;
@@ -1374,7 +1372,7 @@ int ocfs2_validate_inode_block(struct super_block *sb,
 
 	if (le32_to_cpu(di->i_fs_generation) !=
 	    OCFS2_SB(sb)->fs_generation) {
-		rc = ocfs2_error(sb,
+		ocfs2_error(sb,
 			    "Invalid dinode #%llu: fs_generation is %u\n",
 			    (unsigned long long)bh->b_blocknr,
 			    le32_to_cpu(di->i_fs_generation));

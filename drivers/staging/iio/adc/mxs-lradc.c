@@ -243,7 +243,7 @@ struct mxs_lradc {
 	 * be sampled as regular LRADC channels. The driver will refuse any
 	 * attempt to sample these channels.
 	 */
-#define CHAN_MASK_TOUCHBUTTON		(0x3 << 0)
+#define CHAN_MASK_TOUCHBUTTON		(BIT(1) | BIT(0))
 #define CHAN_MASK_TOUCHSCREEN_4WIRE	(0xf << 2)
 #define CHAN_MASK_TOUCHSCREEN_5WIRE	(0x1f << 2)
 	enum mxs_lradc_ts	use_touchscreen;
@@ -268,20 +268,20 @@ struct mxs_lradc {
 };
 
 #define	LRADC_CTRL0				0x00
-# define LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE	(1 << 23)
-# define LRADC_CTRL0_MX28_TOUCH_SCREEN_TYPE	(1 << 22)
-# define LRADC_CTRL0_MX28_YNNSW	/* YM */	(1 << 21)
-# define LRADC_CTRL0_MX28_YPNSW	/* YP */	(1 << 20)
-# define LRADC_CTRL0_MX28_YPPSW	/* YP */	(1 << 19)
-# define LRADC_CTRL0_MX28_XNNSW	/* XM */	(1 << 18)
-# define LRADC_CTRL0_MX28_XNPSW	/* XM */	(1 << 17)
-# define LRADC_CTRL0_MX28_XPPSW	/* XP */	(1 << 16)
+# define LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE	BIT(23)
+# define LRADC_CTRL0_MX28_TOUCH_SCREEN_TYPE	BIT(22)
+# define LRADC_CTRL0_MX28_YNNSW	/* YM */	BIT(21)
+# define LRADC_CTRL0_MX28_YPNSW	/* YP */	BIT(20)
+# define LRADC_CTRL0_MX28_YPPSW	/* YP */	BIT(19)
+# define LRADC_CTRL0_MX28_XNNSW	/* XM */	BIT(18)
+# define LRADC_CTRL0_MX28_XNPSW	/* XM */	BIT(17)
+# define LRADC_CTRL0_MX28_XPPSW	/* XP */	BIT(16)
 
-# define LRADC_CTRL0_MX23_TOUCH_DETECT_ENABLE	(1 << 20)
-# define LRADC_CTRL0_MX23_YM			(1 << 19)
-# define LRADC_CTRL0_MX23_XM			(1 << 18)
-# define LRADC_CTRL0_MX23_YP			(1 << 17)
-# define LRADC_CTRL0_MX23_XP			(1 << 16)
+# define LRADC_CTRL0_MX23_TOUCH_DETECT_ENABLE	BIT(20)
+# define LRADC_CTRL0_MX23_YM			BIT(19)
+# define LRADC_CTRL0_MX23_XM			BIT(18)
+# define LRADC_CTRL0_MX23_YP			BIT(17)
+# define LRADC_CTRL0_MX23_XP			BIT(16)
 
 # define LRADC_CTRL0_MX28_PLATE_MASK \
 		(LRADC_CTRL0_MX28_TOUCH_DETECT_ENABLE | \
@@ -295,12 +295,12 @@ struct mxs_lradc {
 		LRADC_CTRL0_MX23_YP | LRADC_CTRL0_MX23_XP)
 
 #define	LRADC_CTRL1				0x10
-#define	LRADC_CTRL1_TOUCH_DETECT_IRQ_EN		(1 << 24)
+#define	LRADC_CTRL1_TOUCH_DETECT_IRQ_EN		BIT(24)
 #define	LRADC_CTRL1_LRADC_IRQ_EN(n)		(1 << ((n) + 16))
 #define	LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK	(0x1fff << 16)
 #define	LRADC_CTRL1_MX23_LRADC_IRQ_EN_MASK	(0x01ff << 16)
 #define	LRADC_CTRL1_LRADC_IRQ_EN_OFFSET		16
-#define	LRADC_CTRL1_TOUCH_DETECT_IRQ		(1 << 8)
+#define	LRADC_CTRL1_TOUCH_DETECT_IRQ		BIT(8)
 #define	LRADC_CTRL1_LRADC_IRQ(n)		(1 << (n))
 #define	LRADC_CTRL1_MX28_LRADC_IRQ_MASK		0x1fff
 #define	LRADC_CTRL1_MX23_LRADC_IRQ_MASK		0x01ff
@@ -308,13 +308,13 @@ struct mxs_lradc {
 
 #define	LRADC_CTRL2				0x20
 #define	LRADC_CTRL2_DIVIDE_BY_TWO_OFFSET	24
-#define	LRADC_CTRL2_TEMPSENSE_PWD		(1 << 15)
+#define	LRADC_CTRL2_TEMPSENSE_PWD		BIT(15)
 
 #define	LRADC_STATUS				0x40
-#define	LRADC_STATUS_TOUCH_DETECT_RAW		(1 << 0)
+#define	LRADC_STATUS_TOUCH_DETECT_RAW		BIT(0)
 
 #define	LRADC_CH(n)				(0x50 + (0x10 * (n)))
-#define	LRADC_CH_ACCUMULATE			(1 << 29)
+#define	LRADC_CH_ACCUMULATE			BIT(29)
 #define	LRADC_CH_NUM_SAMPLES_MASK		(0x1f << 24)
 #define	LRADC_CH_NUM_SAMPLES_OFFSET		24
 #define	LRADC_CH_NUM_SAMPLES(x) \
@@ -477,7 +477,7 @@ static void mxs_lradc_setup_ts_channel(struct mxs_lradc *lradc, unsigned ch)
 	 */
 	mxs_lradc_reg_wrt(lradc,
 		LRADC_DELAY_TRIGGER(0) | /* don't trigger ADC */
-		LRADC_DELAY_TRIGGER_DELAYS(1 << 3) | /* trigger DELAY unit#3 */
+		LRADC_DELAY_TRIGGER_DELAYS(BIT(3)) | /* trigger DELAY unit#3 */
 		LRADC_DELAY_KICK |
 		LRADC_DELAY_DELAY(lradc->settling_delay),
 			LRADC_DELAY(2));
@@ -532,7 +532,7 @@ static void mxs_lradc_setup_ts_pressure(struct mxs_lradc *lradc, unsigned ch1,
 	 */
 	mxs_lradc_reg_wrt(lradc,
 		LRADC_DELAY_TRIGGER(0) | /* don't trigger ADC */
-		LRADC_DELAY_TRIGGER_DELAYS(1 << 3) | /* trigger DELAY unit#3 */
+		LRADC_DELAY_TRIGGER_DELAYS(BIT(3)) | /* trigger DELAY unit#3 */
 		LRADC_DELAY_KICK |
 		LRADC_DELAY_DELAY(lradc->settling_delay), LRADC_DELAY(2));
 }
@@ -850,7 +850,7 @@ static int mxs_lradc_read_single(struct iio_dev *iio_dev, int chan, int *val)
 
 	/* Enable the IRQ and start sampling the channel. */
 	mxs_lradc_reg_set(lradc, LRADC_CTRL1_LRADC_IRQ_EN(0), LRADC_CTRL1);
-	mxs_lradc_reg_set(lradc, 1 << 0, LRADC_CTRL0);
+	mxs_lradc_reg_set(lradc, BIT(0), LRADC_CTRL0);
 
 	/* Wait for completion on the channel, 1 second max. */
 	ret = wait_for_completion_killable_timeout(&lradc->completion, HZ);
@@ -993,7 +993,7 @@ static ssize_t mxs_lradc_show_scale_available_ch(struct device *dev,
 	int i, len = 0;
 
 	for (i = 0; i < ARRAY_SIZE(lradc->scale_avail[ch]); i++)
-		len += sprintf(buf + len, "%d.%09u ",
+		len += sprintf(buf + len, "%u.%09u ",
 			       lradc->scale_avail[ch][i].integer,
 			       lradc->scale_avail[ch][i].nano);
 
@@ -1369,7 +1369,7 @@ static const struct iio_buffer_setup_ops mxs_lradc_buffer_ops = {
  * Driver initialization
  */
 
-#define MXS_ADC_CHAN(idx, chan_type, name) {			\
+#define MXS_ADC_CHAN(idx, chan_type) {				\
 	.type = (chan_type),					\
 	.indexed = 1,						\
 	.scan_index = (idx),					\
@@ -1382,18 +1382,17 @@ static const struct iio_buffer_setup_ops mxs_lradc_buffer_ops = {
 		.realbits = LRADC_RESOLUTION,			\
 		.storagebits = 32,				\
 	},							\
-	.datasheet_name = (name),				\
 }
 
-static const struct iio_chan_spec mx23_lradc_chan_spec[] = {
-	MXS_ADC_CHAN(0, IIO_VOLTAGE, "LRADC0"),
-	MXS_ADC_CHAN(1, IIO_VOLTAGE, "LRADC1"),
-	MXS_ADC_CHAN(2, IIO_VOLTAGE, "LRADC2"),
-	MXS_ADC_CHAN(3, IIO_VOLTAGE, "LRADC3"),
-	MXS_ADC_CHAN(4, IIO_VOLTAGE, "LRADC4"),
-	MXS_ADC_CHAN(5, IIO_VOLTAGE, "LRADC5"),
-	MXS_ADC_CHAN(6, IIO_VOLTAGE, "VDDIO"),
-	MXS_ADC_CHAN(7, IIO_VOLTAGE, "VBATT"),
+static const struct iio_chan_spec mxs_lradc_chan_spec[] = {
+	MXS_ADC_CHAN(0, IIO_VOLTAGE),
+	MXS_ADC_CHAN(1, IIO_VOLTAGE),
+	MXS_ADC_CHAN(2, IIO_VOLTAGE),
+	MXS_ADC_CHAN(3, IIO_VOLTAGE),
+	MXS_ADC_CHAN(4, IIO_VOLTAGE),
+	MXS_ADC_CHAN(5, IIO_VOLTAGE),
+	MXS_ADC_CHAN(6, IIO_VOLTAGE),
+	MXS_ADC_CHAN(7, IIO_VOLTAGE),	/* VBATT */
 	/* Combined Temperature sensors */
 	{
 		.type = IIO_TEMP,
@@ -1404,7 +1403,6 @@ static const struct iio_chan_spec mx23_lradc_chan_spec[] = {
 				      BIT(IIO_CHAN_INFO_SCALE),
 		.channel = 8,
 		.scan_type = {.sign = 'u', .realbits = 18, .storagebits = 32,},
-		.datasheet_name = "TEMP_DIE",
 	},
 	/* Hidden channel to keep indexes */
 	{
@@ -1413,48 +1411,12 @@ static const struct iio_chan_spec mx23_lradc_chan_spec[] = {
 		.scan_index = -1,
 		.channel = 9,
 	},
-	MXS_ADC_CHAN(10, IIO_VOLTAGE, NULL),
-	MXS_ADC_CHAN(11, IIO_VOLTAGE, NULL),
-	MXS_ADC_CHAN(12, IIO_VOLTAGE, "USB_DP"),
-	MXS_ADC_CHAN(13, IIO_VOLTAGE, "USB_DN"),
-	MXS_ADC_CHAN(14, IIO_VOLTAGE, "VBG"),
-	MXS_ADC_CHAN(15, IIO_VOLTAGE, "VDD5V"),
-};
-
-static const struct iio_chan_spec mx28_lradc_chan_spec[] = {
-	MXS_ADC_CHAN(0, IIO_VOLTAGE, "LRADC0"),
-	MXS_ADC_CHAN(1, IIO_VOLTAGE, "LRADC1"),
-	MXS_ADC_CHAN(2, IIO_VOLTAGE, "LRADC2"),
-	MXS_ADC_CHAN(3, IIO_VOLTAGE, "LRADC3"),
-	MXS_ADC_CHAN(4, IIO_VOLTAGE, "LRADC4"),
-	MXS_ADC_CHAN(5, IIO_VOLTAGE, "LRADC5"),
-	MXS_ADC_CHAN(6, IIO_VOLTAGE, "LRADC6"),
-	MXS_ADC_CHAN(7, IIO_VOLTAGE, "VBATT"),
-	/* Combined Temperature sensors */
-	{
-		.type = IIO_TEMP,
-		.indexed = 1,
-		.scan_index = 8,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
-				      BIT(IIO_CHAN_INFO_OFFSET) |
-				      BIT(IIO_CHAN_INFO_SCALE),
-		.channel = 8,
-		.scan_type = {.sign = 'u', .realbits = 18, .storagebits = 32,},
-		.datasheet_name = "TEMP_DIE",
-	},
-	/* Hidden channel to keep indexes */
-	{
-		.type = IIO_TEMP,
-		.indexed = 1,
-		.scan_index = -1,
-		.channel = 9,
-	},
-	MXS_ADC_CHAN(10, IIO_VOLTAGE, "VDDIO"),
-	MXS_ADC_CHAN(11, IIO_VOLTAGE, "VTH"),
-	MXS_ADC_CHAN(12, IIO_VOLTAGE, "VDDA"),
-	MXS_ADC_CHAN(13, IIO_VOLTAGE, "VDDD"),
-	MXS_ADC_CHAN(14, IIO_VOLTAGE, "VBG"),
-	MXS_ADC_CHAN(15, IIO_VOLTAGE, "VDD5V"),
+	MXS_ADC_CHAN(10, IIO_VOLTAGE),	/* VDDIO */
+	MXS_ADC_CHAN(11, IIO_VOLTAGE),	/* VTH */
+	MXS_ADC_CHAN(12, IIO_VOLTAGE),	/* VDDA */
+	MXS_ADC_CHAN(13, IIO_VOLTAGE),	/* VDDD */
+	MXS_ADC_CHAN(14, IIO_VOLTAGE),	/* VBG */
+	MXS_ADC_CHAN(15, IIO_VOLTAGE),	/* VDD5V */
 };
 
 static int mxs_lradc_hw_init(struct mxs_lradc *lradc)
@@ -1650,15 +1612,9 @@ static int mxs_lradc_probe(struct platform_device *pdev)
 	iio->dev.parent = &pdev->dev;
 	iio->info = &mxs_lradc_iio_info;
 	iio->modes = INDIO_DIRECT_MODE;
+	iio->channels = mxs_lradc_chan_spec;
+	iio->num_channels = ARRAY_SIZE(mxs_lradc_chan_spec);
 	iio->masklength = LRADC_MAX_TOTAL_CHANS;
-
-	if (lradc->soc == IMX23_LRADC) {
-		iio->channels = mx23_lradc_chan_spec;
-		iio->num_channels = ARRAY_SIZE(mx23_lradc_chan_spec);
-	} else {
-		iio->channels = mx28_lradc_chan_spec;
-		iio->num_channels = ARRAY_SIZE(mx28_lradc_chan_spec);
-	}
 
 	ret = iio_triggered_buffer_setup(iio, &iio_pollfunc_store_time,
 				&mxs_lradc_trigger_handler,

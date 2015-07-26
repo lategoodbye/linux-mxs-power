@@ -59,6 +59,7 @@
 #include <linux/netdevice.h>
 #include <linux/workqueue.h>
 #include <linux/byteorder/generic.h>
+#include <linux/etherdevice.h>
 
 #include <linux/io.h>
 #include <linux/delay.h>
@@ -427,7 +428,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 			result = hfa384x_drvr_start(hw);
 			if (result) {
 				netdev_err(wlandev->netdev,
-				       "hfa384x_drvr_start() failed,result=%d\n", (int)result);
+					   "hfa384x_drvr_start() failed,result=%d\n",
+					   (int)result);
 				result =
 				 P80211ENUM_resultcode_implementation_failure;
 				wlandev->msdstate = WLAN_MSD_HWPRESENT;
@@ -470,7 +472,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 			result = hfa384x_drvr_start(hw);
 			if (result) {
 				netdev_err(wlandev->netdev,
-				       "hfa384x_drvr_start() failed,result=%d\n", (int)result);
+					   "hfa384x_drvr_start() failed,result=%d\n",
+					   (int)result);
 				result =
 				  P80211ENUM_resultcode_implementation_failure;
 				wlandev->msdstate = WLAN_MSD_HWPRESENT;
@@ -480,7 +483,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 			result = prism2sta_getcardinfo(wlandev);
 			if (result) {
 				netdev_err(wlandev->netdev,
-				       "prism2sta_getcardinfo() failed,result=%d\n", (int)result);
+					   "prism2sta_getcardinfo() failed,result=%d\n",
+					   (int)result);
 				result =
 				  P80211ENUM_resultcode_implementation_failure;
 				hfa384x_drvr_stop(hw);
@@ -490,7 +494,8 @@ u32 prism2sta_ifstate(wlandevice_t *wlandev, u32 ifstate)
 			result = prism2sta_globalsetup(wlandev);
 			if (result) {
 				netdev_err(wlandev->netdev,
-				       "prism2sta_globalsetup() failed,result=%d\n", (int)result);
+					   "prism2sta_globalsetup() failed,result=%d\n",
+					   (int)result);
 				result =
 				  P80211ENUM_resultcode_implementation_failure;
 				hfa384x_drvr_stop(hw);
@@ -1243,9 +1248,9 @@ void prism2sta_processing_defer(struct work_struct *data)
 				     HFA384x_RID_CURRENTSSID, result);
 				return;
 			}
-			prism2mgmt_bytestr2pstr((struct hfa384x_bytestr *) &ssid,
-						(p80211pstrd_t *) &
-						wlandev->ssid);
+			prism2mgmt_bytestr2pstr(
+					(struct hfa384x_bytestr *) &ssid,
+					(p80211pstrd_t *) &wlandev->ssid);
 
 			/* Collect the port status */
 			result = hfa384x_drvr_getconfig16(hw,
@@ -1544,7 +1549,7 @@ static void prism2sta_inf_authreq_defer(wlandevice_t *wlandev,
 	 ** authentication.
 	 */
 
-	memcpy(rec.address, inf->info.authreq.sta_addr, ETH_ALEN);
+	ether_addr_copy(rec.address, inf->info.authreq.sta_addr);
 	rec.status = P80211ENUM_status_unspec_failure;
 
 	/*
@@ -1657,8 +1662,9 @@ static void prism2sta_inf_authreq_defer(wlandevice_t *wlandev,
 			if (hw->authlist.cnt >= WLAN_AUTH_MAX) {
 				rec.status = P80211ENUM_status_ap_full;
 			} else {
-				memcpy(hw->authlist.addr[hw->authlist.cnt],
-				       rec.address, ETH_ALEN);
+				ether_addr_copy(
+					hw->authlist.addr[hw->authlist.cnt],
+					rec.address);
 				hw->authlist.cnt++;
 				added = 1;
 			}

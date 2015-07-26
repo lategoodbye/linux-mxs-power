@@ -70,11 +70,11 @@ static void __init rcu_bootup_announce_oddness(void)
 {
 	if (IS_ENABLED(CONFIG_RCU_TRACE))
 		pr_info("\tRCU debugfs-based tracing is enabled.\n");
-	if ((IS_ENABLED(CONFIG_64BIT) && CONFIG_RCU_FANOUT != 64) ||
-	    (!IS_ENABLED(CONFIG_64BIT) && CONFIG_RCU_FANOUT != 32))
+	if ((IS_ENABLED(CONFIG_64BIT) && RCU_FANOUT != 64) ||
+	    (!IS_ENABLED(CONFIG_64BIT) && RCU_FANOUT != 32))
 		pr_info("\tCONFIG_RCU_FANOUT set to non-default value of %d\n",
-		       CONFIG_RCU_FANOUT);
-	if (IS_ENABLED(CONFIG_RCU_FANOUT_EXACT))
+		       RCU_FANOUT);
+	if (rcu_fanout_exact)
 		pr_info("\tHierarchical RCU autobalancing is disabled.\n");
 	if (IS_ENABLED(CONFIG_RCU_FAST_NO_HZ))
 		pr_info("\tRCU dyntick-idle grace-period acceleration is enabled.\n");
@@ -84,12 +84,12 @@ static void __init rcu_bootup_announce_oddness(void)
 		pr_info("\tRCU torture testing starts during boot.\n");
 	if (IS_ENABLED(CONFIG_RCU_CPU_STALL_INFO))
 		pr_info("\tAdditional per-CPU info printed with stalls.\n");
-	if (RCU_NUM_LVLS >= 4)
-		pr_info("\tFour(or more)-level hierarchy is enabled.\n");
-	if (CONFIG_RCU_FANOUT_LEAF != 16)
+	if (NUM_RCU_LVL_4 != 0)
+		pr_info("\tFour-level hierarchy is enabled.\n");
+	if (RCU_FANOUT_LEAF != 16)
 		pr_info("\tBuild-time adjustment of leaf fanout to %d.\n",
-			CONFIG_RCU_FANOUT_LEAF);
-	if (rcu_fanout_leaf != CONFIG_RCU_FANOUT_LEAF)
+			RCU_FANOUT_LEAF);
+	if (rcu_fanout_leaf != RCU_FANOUT_LEAF)
 		pr_info("\tBoot-time adjustment of leaf fanout to %d.\n", rcu_fanout_leaf);
 	if (nr_cpu_ids != NR_CPUS)
 		pr_info("\tRCU restricting CPUs from NR_CPUS=%d to nr_cpu_ids=%d.\n", NR_CPUS, nr_cpu_ids);
@@ -398,7 +398,7 @@ static void rcu_print_detail_task_stall_rnp(struct rcu_node *rnp)
 		raw_spin_unlock_irqrestore(&rnp->lock, flags);
 		return;
 	}
-	t = list_entry(rnp->gp_tasks,
+	t = list_entry(rnp->gp_tasks->prev,
 		       struct task_struct, rcu_node_entry);
 	list_for_each_entry_continue(t, &rnp->blkd_tasks, rcu_node_entry)
 		sched_show_task(t);
@@ -455,7 +455,7 @@ static int rcu_print_task_stall(struct rcu_node *rnp)
 	if (!rcu_preempt_blocked_readers_cgp(rnp))
 		return 0;
 	rcu_print_task_stall_begin(rnp);
-	t = list_entry(rnp->gp_tasks,
+	t = list_entry(rnp->gp_tasks->prev,
 		       struct task_struct, rcu_node_entry);
 	list_for_each_entry_continue(t, &rnp->blkd_tasks, rcu_node_entry) {
 		pr_cont(" P%d", t->pid);
@@ -1375,9 +1375,9 @@ static void rcu_prepare_kthreads(int cpu)
  * Because we not have RCU_FAST_NO_HZ, just check whether this CPU needs
  * any flavor of RCU.
  */
-int rcu_needs_cpu(unsigned long *delta_jiffies)
+int rcu_needs_cpu(u64 basemono, u64 *nextevt)
 {
-	*delta_jiffies = ULONG_MAX;
+	*nextevt = KTIME_MAX;
 	return IS_ENABLED(CONFIG_RCU_NOCB_CPU_ALL)
 	       ? 0 : rcu_cpu_has_callbacks(NULL);
 }
@@ -1439,8 +1439,6 @@ module_param(rcu_idle_gp_delay, int, 0644);
 static int rcu_idle_lazy_gp_delay = RCU_IDLE_LAZY_GP_DELAY;
 module_param(rcu_idle_lazy_gp_delay, int, 0644);
 
-extern int tick_nohz_active;
-
 /*
  * Try to advance callbacks for all flavors of RCU on the current CPU, but
  * only if it has been awhile since the last time we did so.  Afterwards,
@@ -1487,12 +1485,13 @@ static bool __maybe_unused rcu_try_advance_all_cbs(void)
  *
  * The caller must have disabled interrupts.
  */
-int rcu_needs_cpu(unsigned long *dj)
+int rcu_needs_cpu(u64 basemono, u64 *nextevt)
 {
 	struct rcu_dynticks *rdtp = this_cpu_ptr(&rcu_dynticks);
+	unsigned long dj;
 
 	if (IS_ENABLED(CONFIG_RCU_NOCB_CPU_ALL)) {
-		*dj = ULONG_MAX;
+		*nextevt = KTIME_MAX;
 		return 0;
 	}
 
@@ -1501,7 +1500,7 @@ int rcu_needs_cpu(unsigned long *dj)
 
 	/* If no callbacks, RCU doesn't need the CPU. */
 	if (!rcu_cpu_has_callbacks(&rdtp->all_lazy)) {
-		*dj = ULONG_MAX;
+		*nextevt = KTIME_MAX;
 		return 0;
 	}
 
@@ -1515,11 +1514,12 @@ int rcu_needs_cpu(unsigned long *dj)
 
 	/* Request timer delay depending on laziness, and round. */
 	if (!rdtp->all_lazy) {
-		*dj = round_up(rcu_idle_gp_delay + jiffies,
+		dj = round_up(rcu_idle_gp_delay + jiffies,
 			       rcu_idle_gp_delay) - jiffies;
 	} else {
-		*dj = round_jiffies(rcu_idle_lazy_gp_delay + jiffies) - jiffies;
+		dj = round_jiffies(rcu_idle_lazy_gp_delay + jiffies) - jiffies;
 	}
+	*nextevt = basemono + dj * TICK_NSEC;
 	return 0;
 }
 
@@ -3059,9 +3059,9 @@ static bool rcu_nohz_full_cpu(struct rcu_state *rsp)
 	if (tick_nohz_full_cpu(smp_processor_id()) &&
 	    (!rcu_gp_in_progress(rsp) ||
 	     ULONG_CMP_LT(jiffies, READ_ONCE(rsp->gp_start) + HZ)))
-		return 1;
+		return true;
 #endif /* #ifdef CONFIG_NO_HZ_FULL */
-	return 0;
+	return false;
 }
 
 /*

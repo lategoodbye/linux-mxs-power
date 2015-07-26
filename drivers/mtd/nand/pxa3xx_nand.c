@@ -22,13 +22,14 @@
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_mtd.h>
 
-#if defined(CONFIG_ARCH_PXA) || defined(CONFIG_ARCH_MMP)
+#if defined(CONFIG_ARM) && (defined(CONFIG_ARCH_PXA) || defined(CONFIG_ARCH_MMP))
 #define ARCH_HAS_DMA
 #endif
 
@@ -38,8 +39,8 @@
 
 #include <linux/platform_data/mtd-nand-pxa3xx.h>
 
-#define	CHIP_DELAY_TIMEOUT	(2 * HZ/10)
-#define NAND_STOP_DELAY		(2 * HZ/50)
+#define	CHIP_DELAY_TIMEOUT	msecs_to_jiffies(200)
+#define NAND_STOP_DELAY		msecs_to_jiffies(40)
 #define PAGE_CHUNK_SIZE		(2048)
 
 /*
@@ -483,7 +484,8 @@ static void disable_int(struct pxa3xx_nand_info *info, uint32_t int_mask)
 static void drain_fifo(struct pxa3xx_nand_info *info, void *data, int len)
 {
 	if (info->ecc_bch) {
-		int timeout;
+		u32 val;
+		int ret;
 
 		/*
 		 * According to the datasheet, when reading from NDDB
@@ -494,18 +496,14 @@ static void drain_fifo(struct pxa3xx_nand_info *info, void *data, int len)
 		 * the polling on the last read.
 		 */
 		while (len > 8) {
-			__raw_readsl(info->mmio_base + NDDB, data, 8);
+			readsl(info->mmio_base + NDDB, data, 8);
 
-			for (timeout = 0;
-			     !(nand_readl(info, NDSR) & NDSR_RDDREQ);
-			     timeout++) {
-				if (timeout >= 5) {
-					dev_err(&info->pdev->dev,
-						"Timeout on RDDREQ while draining the FIFO\n");
-					return;
-				}
-
-				mdelay(1);
+			ret = readl_relaxed_poll_timeout(info->mmio_base + NDSR, val,
+							 val & NDSR_RDDREQ, 1000, 5000);
+			if (ret) {
+				dev_err(&info->pdev->dev,
+					"Timeout on RDDREQ while draining the FIFO\n");
+				return;
 			}
 
 			data += 32;
@@ -513,7 +511,7 @@ static void drain_fifo(struct pxa3xx_nand_info *info, void *data, int len)
 		}
 	}
 
-	__raw_readsl(info->mmio_base + NDDB, data, len);
+	readsl(info->mmio_base + NDDB, data, len);
 }
 
 static void handle_data_pio(struct pxa3xx_nand_info *info)
@@ -522,14 +520,14 @@ static void handle_data_pio(struct pxa3xx_nand_info *info)
 
 	switch (info->state) {
 	case STATE_PIO_WRITING:
-		__raw_writesl(info->mmio_base + NDDB,
-			      info->data_buff + info->data_buff_pos,
-			      DIV_ROUND_UP(do_bytes, 4));
+		writesl(info->mmio_base + NDDB,
+			info->data_buff + info->data_buff_pos,
+			DIV_ROUND_UP(do_bytes, 4));
 
 		if (info->oob_size > 0)
-			__raw_writesl(info->mmio_base + NDDB,
-				      info->oob_buff + info->oob_buff_pos,
-				      DIV_ROUND_UP(info->oob_size, 4));
+			writesl(info->mmio_base + NDDB,
+				info->oob_buff + info->oob_buff_pos,
+				DIV_ROUND_UP(info->oob_size, 4));
 		break;
 	case STATE_PIO_READING:
 		drain_fifo(info,
@@ -965,7 +963,7 @@ static void nand_cmdfunc(struct mtd_info *mtd, unsigned command,
 {
 	struct pxa3xx_nand_host *host = mtd->priv;
 	struct pxa3xx_nand_info *info = host->info_data;
-	int ret, exec_cmd;
+	int exec_cmd;
 
 	/*
 	 * if this is a x16 device ,then convert the input
@@ -997,9 +995,8 @@ static void nand_cmdfunc(struct mtd_info *mtd, unsigned command,
 		info->need_wait = 1;
 		pxa3xx_nand_start(info);
 
-		ret = wait_for_completion_timeout(&info->cmd_complete,
-				CHIP_DELAY_TIMEOUT);
-		if (!ret) {
+		if (!wait_for_completion_timeout(&info->cmd_complete,
+		    CHIP_DELAY_TIMEOUT)) {
 			dev_err(&info->pdev->dev, "Wait time out!!!\n");
 			/* Stop State Machine for next command cycle */
 			pxa3xx_nand_stop(info);
@@ -1014,7 +1011,7 @@ static void nand_cmdfunc_extended(struct mtd_info *mtd,
 {
 	struct pxa3xx_nand_host *host = mtd->priv;
 	struct pxa3xx_nand_info *info = host->info_data;
-	int ret, exec_cmd, ext_cmd_type;
+	int exec_cmd, ext_cmd_type;
 
 	/*
 	 * if this is a x16 device then convert the input
@@ -1077,9 +1074,8 @@ static void nand_cmdfunc_extended(struct mtd_info *mtd,
 		init_completion(&info->cmd_complete);
 		pxa3xx_nand_start(info);
 
-		ret = wait_for_completion_timeout(&info->cmd_complete,
-				CHIP_DELAY_TIMEOUT);
-		if (!ret) {
+		if (!wait_for_completion_timeout(&info->cmd_complete,
+		    CHIP_DELAY_TIMEOUT)) {
 			dev_err(&info->pdev->dev, "Wait time out!!!\n");
 			/* Stop State Machine for next command cycle */
 			pxa3xx_nand_stop(info);
@@ -1212,13 +1208,11 @@ static int pxa3xx_nand_waitfunc(struct mtd_info *mtd, struct nand_chip *this)
 {
 	struct pxa3xx_nand_host *host = mtd->priv;
 	struct pxa3xx_nand_info *info = host->info_data;
-	int ret;
 
 	if (info->need_wait) {
-		ret = wait_for_completion_timeout(&info->dev_ready,
-				CHIP_DELAY_TIMEOUT);
 		info->need_wait = 0;
-		if (!ret) {
+		if (!wait_for_completion_timeout(&info->dev_ready,
+		    CHIP_DELAY_TIMEOUT)) {
 			dev_err(&info->pdev->dev, "Ready time out!!!\n");
 			return NAND_STATUS_FAIL;
 		}
@@ -1634,8 +1628,7 @@ static int alloc_nand_resource(struct platform_device *pdev)
 	info->pdev = pdev;
 	info->variant = pxa3xx_nand_get_variant(pdev);
 	for (cs = 0; cs < pdata->num_cs; cs++) {
-		mtd = (struct mtd_info *)((unsigned int)&info[1] +
-		      (sizeof(*mtd) + sizeof(*host)) * cs);
+		mtd = (void *)&info[1] + (sizeof(*mtd) + sizeof(*host)) * cs;
 		chip = (struct nand_chip *)(&mtd[1]);
 		host = (struct pxa3xx_nand_host *)chip;
 		info->host[cs] = host;

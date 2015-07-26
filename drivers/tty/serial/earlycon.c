@@ -10,6 +10,9 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+
+#define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
+
 #include <linux/console.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -33,6 +36,10 @@ static struct console early_con = {
 static struct earlycon_device early_console_dev = {
 	.con = &early_con,
 };
+
+extern struct earlycon_id __earlycon_table[];
+static const struct earlycon_id __earlycon_table_sentinel
+	__used __section(__earlycon_table_end);
 
 static const struct of_device_id __earlycon_of_table_sentinel
 	__used __section(__earlycon_of_table_end);
@@ -65,6 +72,7 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 
 	switch (port->iotype) {
 	case UPIO_MEM32:
+	case UPIO_MEM32BE:
 		port->regshift = 2;	/* fall-through */
 	case UPIO_MEM:
 		port->mapbase = addr;
@@ -76,8 +84,6 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 		return -EINVAL;
 	}
 
-	port->uartclk = BASE_BAUD * 16;
-
 	if (options) {
 		device->baud = simple_strtoul(options, NULL, 0);
 		length = min(strcspn(options, " ") + 1,
@@ -85,9 +91,11 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 		strlcpy(device->options, options, length);
 	}
 
-	if (port->iotype == UPIO_MEM || port->iotype == UPIO_MEM32)
+	if (port->iotype == UPIO_MEM || port->iotype == UPIO_MEM32 ||
+	    port->iotype == UPIO_MEM32BE)
 		pr_info("Early serial console at MMIO%s 0x%llx (options '%s')\n",
-			(port->iotype == UPIO_MEM32) ? "32" : "",
+			(port->iotype == UPIO_MEM) ? "" :
+			(port->iotype == UPIO_MEM32) ? "32" : "32be",
 			(unsigned long long)port->mapbase,
 			device->options);
 	else
@@ -98,34 +106,21 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 	return 0;
 }
 
-int __init setup_earlycon(char *buf, const char *match,
-			  int (*setup)(struct earlycon_device *, const char *))
+static int __init register_earlycon(char *buf, const struct earlycon_id *match)
 {
 	int err;
-	size_t len;
 	struct uart_port *port = &early_console_dev.port;
 
-	if (!buf || !match || !setup)
-		return 0;
-
-	len = strlen(match);
-	if (strncmp(buf, match, len))
-		return 0;
-	if (buf[len] && (buf[len] != ','))
-		return 0;
-
-	buf += len + 1;
-
-	err = parse_options(&early_console_dev, buf);
 	/* On parsing error, pass the options buf to the setup function */
-	if (!err)
+	if (buf && !parse_options(&early_console_dev, buf))
 		buf = NULL;
 
+	port->uartclk = BASE_BAUD * 16;
 	if (port->mapbase)
 		port->membase = earlycon_map(port->mapbase, 64);
 
 	early_console_dev.con->data = &early_console_dev;
-	err = setup(&early_console_dev, buf);
+	err = match->setup(&early_console_dev, buf);
 	if (err < 0)
 		return err;
 	if (!early_console_dev.con->write)
@@ -134,6 +129,72 @@ int __init setup_earlycon(char *buf, const char *match,
 	register_console(early_console_dev.con);
 	return 0;
 }
+
+/**
+ *	setup_earlycon - match and register earlycon console
+ *	@buf:	earlycon param string
+ *
+ *	Registers the earlycon console matching the earlycon specified
+ *	in the param string @buf. Acceptable param strings are of the form
+ *	   <name>,io|mmio|mmio32|mmio32be,<addr>,<options>
+ *	   <name>,0x<addr>,<options>
+ *	   <name>,<options>
+ *	   <name>
+ *
+ *	Only for the third form does the earlycon setup() method receive the
+ *	<options> string in the 'options' parameter; all other forms set
+ *	the parameter to NULL.
+ *
+ *	Returns 0 if an attempt to register the earlycon was made,
+ *	otherwise negative error code
+ */
+int __init setup_earlycon(char *buf)
+{
+	const struct earlycon_id *match;
+
+	if (!buf || !buf[0])
+		return -EINVAL;
+
+	if (early_con.flags & CON_ENABLED)
+		return -EALREADY;
+
+	for (match = __earlycon_table; match->name[0]; match++) {
+		size_t len = strlen(match->name);
+
+		if (strncmp(buf, match->name, len))
+			continue;
+
+		if (buf[len]) {
+			if (buf[len] != ',')
+				continue;
+			buf += len + 1;
+		} else
+			buf = NULL;
+
+		return register_earlycon(buf, match);
+	}
+
+	return -ENOENT;
+}
+
+/* early_param wrapper for setup_earlycon() */
+static int __init param_setup_earlycon(char *buf)
+{
+	int err;
+
+	/*
+	 * Just 'earlycon' is a valid param for devicetree earlycons;
+	 * don't generate a warning from parse_early_params() in that case
+	 */
+	if (!buf || !buf[0])
+		return 0;
+
+	err = setup_earlycon(buf);
+	if (err == -ENOENT || err == -EALREADY)
+		return 0;
+	return err;
+}
+early_param("earlycon", param_setup_earlycon);
 
 int __init of_setup_earlycon(unsigned long addr,
 			     int (*setup)(struct earlycon_device *, const char *))

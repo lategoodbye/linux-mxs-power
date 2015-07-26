@@ -58,14 +58,14 @@ int reqsk_queue_alloc(struct request_sock_queue *queue,
 		return -ENOMEM;
 
 	get_random_bytes(&lopt->hash_rnd, sizeof(lopt->hash_rnd));
-	rwlock_init(&queue->syn_wait_lock);
+	spin_lock_init(&queue->syn_wait_lock);
 	queue->rskq_accept_head = NULL;
 	lopt->nr_table_entries = nr_table_entries;
 	lopt->max_qlen_log = ilog2(nr_table_entries);
 
-	write_lock_bh(&queue->syn_wait_lock);
+	spin_lock_bh(&queue->syn_wait_lock);
 	queue->listen_opt = lopt;
-	write_unlock_bh(&queue->syn_wait_lock);
+	spin_unlock_bh(&queue->syn_wait_lock);
 
 	return 0;
 }
@@ -81,10 +81,10 @@ static inline struct listen_sock *reqsk_queue_yank_listen_sk(
 {
 	struct listen_sock *lopt;
 
-	write_lock_bh(&queue->syn_wait_lock);
+	spin_lock_bh(&queue->syn_wait_lock);
 	lopt = queue->listen_opt;
 	queue->listen_opt = NULL;
-	write_unlock_bh(&queue->syn_wait_lock);
+	spin_unlock_bh(&queue->syn_wait_lock);
 
 	return lopt;
 }
@@ -94,21 +94,26 @@ void reqsk_queue_destroy(struct request_sock_queue *queue)
 	/* make all the listen_opt local to us */
 	struct listen_sock *lopt = reqsk_queue_yank_listen_sk(queue);
 
-	if (lopt->qlen != 0) {
+	if (listen_sock_qlen(lopt) != 0) {
 		unsigned int i;
 
 		for (i = 0; i < lopt->nr_table_entries; i++) {
 			struct request_sock *req;
 
+			spin_lock_bh(&queue->syn_wait_lock);
 			while ((req = lopt->syn_table[i]) != NULL) {
 				lopt->syn_table[i] = req->dl_next;
-				lopt->qlen--;
+				atomic_inc(&lopt->qlen_dec);
+				if (del_timer(&req->rsk_timer))
+					reqsk_put(req);
 				reqsk_put(req);
 			}
+			spin_unlock_bh(&queue->syn_wait_lock);
 		}
 	}
 
-	WARN_ON(lopt->qlen != 0);
+	if (WARN_ON(listen_sock_qlen(lopt) != 0))
+		pr_err("qlen %u\n", listen_sock_qlen(lopt));
 	kvfree(lopt);
 }
 
@@ -187,7 +192,7 @@ void reqsk_fastopen_remove(struct sock *sk, struct request_sock *req,
 	 *
 	 * For more details see CoNext'11 "TCP Fast Open" paper.
 	 */
-	req->expires = jiffies + 60*HZ;
+	req->rsk_timer.expires = jiffies + 60*HZ;
 	if (fastopenq->rskq_rst_head == NULL)
 		fastopenq->rskq_rst_head = req;
 	else

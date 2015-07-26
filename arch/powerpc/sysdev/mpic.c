@@ -655,7 +655,6 @@ static inline struct mpic * mpic_from_irq_data(struct irq_data *d)
 static inline void mpic_eoi(struct mpic *mpic)
 {
 	mpic_cpu_write(MPIC_INFO(CPU_EOI), 0);
-	(void)mpic_cpu_read(MPIC_INFO(CPU_WHOAMI));
 }
 
 /*
@@ -1196,7 +1195,7 @@ static void mpic_cascade(unsigned int irq, struct irq_desc *desc)
 	chip->irq_eoi(&desc->irq_data);
 }
 
-static struct irq_domain_ops mpic_host_ops = {
+static const struct irq_domain_ops mpic_host_ops = {
 	.match = mpic_host_match,
 	.map = mpic_host_map,
 	.xlate = mpic_host_xlate,
@@ -1218,6 +1217,16 @@ static u32 fsl_mpic_get_version(struct mpic *mpic)
 /*
  * Exported functions
  */
+
+u32 fsl_mpic_primary_get_version(void)
+{
+	struct mpic *mpic = mpic_primary;
+
+	if (mpic)
+		return fsl_mpic_get_version(mpic);
+
+	return 0;
+}
 
 struct mpic * __init mpic_alloc(struct device_node *node,
 				phys_addr_t phys_addr,
@@ -1888,7 +1897,7 @@ void smp_mpic_message_pass(int cpu, int msg)
 		       msg * MPIC_INFO(CPU_IPI_DISPATCH_STRIDE), physmask);
 }
 
-int __init smp_mpic_probe(void)
+void __init smp_mpic_probe(void)
 {
 	int nr_cpus;
 
@@ -1900,8 +1909,6 @@ int __init smp_mpic_probe(void)
 
 	if (nr_cpus > 1)
 		mpic_request_ipis();
-
-	return nr_cpus;
 }
 
 void smp_mpic_setup_cpu(int cpu)

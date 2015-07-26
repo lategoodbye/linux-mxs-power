@@ -19,6 +19,7 @@
 #define _LINUX_IO_H
 
 #include <linux/types.h>
+#include <linux/init.h>
 #include <asm/io.h>
 #include <asm/page.h>
 
@@ -72,6 +73,8 @@ void __iomem *devm_ioremap(struct device *dev, resource_size_t offset,
 			   resource_size_t size);
 void __iomem *devm_ioremap_nocache(struct device *dev, resource_size_t offset,
 				   resource_size_t size);
+void __iomem *devm_ioremap_wc(struct device *dev, resource_size_t offset,
+				   resource_size_t size);
 void devm_iounmap(struct device *dev, void __iomem *addr);
 int check_signature(const volatile void __iomem *io_addr,
 			const unsigned char *signature, int length);
@@ -109,6 +112,13 @@ static inline void arch_phys_wc_del(int handle)
 }
 
 #define arch_phys_wc_add arch_phys_wc_add
+#ifndef arch_phys_wc_index
+static inline int arch_phys_wc_index(int handle)
+{
+	return -1;
+}
+#define arch_phys_wc_index arch_phys_wc_index
+#endif
 #endif
 
 #endif /* _LINUX_IO_H */

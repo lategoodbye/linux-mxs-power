@@ -56,6 +56,16 @@ static void __iomem *clkctrl;
 #define BP_FRAC0_IO1FRAC	16
 #define BP_FRAC0_IO0FRAC	24
 
+#define BP_HBUS_ASM_BUSY		31
+#define BP_HBUS_ASM_EMIPORT_AS_ENABLE	27
+#define BP_HBUS_APBHDMA_AS_ENABLE	26
+#define BP_HBUS_TRAFFIC_AS_ENABLE	23
+#define BP_HBUS_CPU_DATA_AS_ENABLE	22
+#define BP_HBUS_CPU_INSTR_AS_ENABLE	21
+#define BP_HBUS_ASM_ENABLE		20
+#define BM_HBUS_SLOW_DIV		(7 << 16)
+#define BM_HBUS_SLOW_DIV_BY8		(3 << 16)
+
 static void __iomem *digctrl;
 #define DIGCTRL digctrl
 #define BP_SAIF_CLKMUX		10
@@ -78,6 +88,46 @@ int mxs_saif_clkmux_select(unsigned int clkmux)
 
 	writel_relaxed(0x3 << BP_SAIF_CLKMUX, DIGCTRL + CLR);
 	writel_relaxed(clkmux << BP_SAIF_CLKMUX, DIGCTRL + SET);
+
+	return 0;
+}
+
+int mx28_hbus_is_autoslow_enabled(void)
+{
+	if (readl_relaxed(HBUS) & (1 << BP_HBUS_ASM_ENABLE))
+		return 1;
+
+	return 0;
+}
+
+int mx28_hbus_set_autoslow(int enable)
+{
+	u32 val;
+	int timeout;
+
+	for (timeout = 0; timeout < 100000; timeout++) {
+		val = readl_relaxed(HBUS);
+		if (!(val & (1 << BP_HBUS_ASM_BUSY)))
+			break;
+	}
+
+	if (timeout == 5)
+		return -ETIMEDOUT;
+
+	if (!enable) {
+		writel_relaxed(1 << BP_HBUS_ASM_ENABLE, HBUS + CLR);
+		return 0;
+	}
+
+	val |= BP_HBUS_ASM_EMIPORT_AS_ENABLE;
+	val |= BP_HBUS_APBHDMA_AS_ENABLE;
+	val |= BP_HBUS_TRAFFIC_AS_ENABLE;
+	val |= BP_HBUS_CPU_DATA_AS_ENABLE;
+	val |= BP_HBUS_CPU_INSTR_AS_ENABLE;
+	val |= BP_HBUS_ASM_ENABLE;
+	val |= BM_HBUS_SLOW_DIV_BY8;
+
+	writel_relaxed(val, HBUS);
 
 	return 0;
 }
@@ -118,27 +168,22 @@ static void __init clk_misc_init(void)
 	/*
 	 * 480 MHz seems too high to be ssp clock source directly,
 	 * so set frac0 to get a 288 MHz ref_io0 and ref_io1.
-	 * According to reference manual we must modify frac bytewise.
 	 */
 	val = readl_relaxed(FRAC0);
-	val &= ~(0x3f << BP_FRAC0_IO0FRAC);
-	val |= 30 << BP_FRAC0_IO0FRAC;
-	writel_relaxed(val, FRAC0);
-	val = readl_relaxed(FRAC0);
-	val &= ~(0x3f << BP_FRAC0_IO1FRAC);
-	val |= 30 << BP_FRAC0_IO1FRAC;
+	val &= ~((0x3f << BP_FRAC0_IO0FRAC) | (0x3f << BP_FRAC0_IO1FRAC));
+	val |= (30 << BP_FRAC0_IO0FRAC) | (30 << BP_FRAC0_IO1FRAC);
 	writel_relaxed(val, FRAC0);
 }
 
-static const char *sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
-static const char *sel_io0[]  __initconst = { "ref_io0", "ref_xtal", };
-static const char *sel_io1[]  __initconst = { "ref_io1", "ref_xtal", };
-static const char *sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
-static const char *sel_gpmi[] __initconst = { "ref_gpmi", "ref_xtal", };
-static const char *sel_pll0[] __initconst = { "pll0", "ref_xtal", };
-static const char *cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
-static const char *emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
-static const char *ptp_sels[] __initconst = { "ref_xtal", "pll0", };
+static const char *const sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
+static const char *const sel_io0[]  __initconst = { "ref_io0", "ref_xtal", };
+static const char *const sel_io1[]  __initconst = { "ref_io1", "ref_xtal", };
+static const char *const sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
+static const char *const sel_gpmi[] __initconst = { "ref_gpmi", "ref_xtal", };
+static const char *const sel_pll0[] __initconst = { "pll0", "ref_xtal", };
+static const char *const cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
+static const char *const emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
+static const char *const ptp_sels[] __initconst = { "ref_xtal", "pll0", };
 
 enum imx28_clk {
 	ref_xtal, pll0, pll1, pll2, ref_cpu, ref_emi, ref_io0, ref_io1,

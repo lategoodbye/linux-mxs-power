@@ -44,6 +44,8 @@
 #include <linux/debugobjects.h>
 #include <linux/bug.h>
 #include <linux/compiler.h>
+#include <linux/ktime.h>
+
 #include <asm/barrier.h>
 
 extern int rcu_expedited; /* for sysctl */
@@ -292,10 +294,6 @@ void rcu_sched_qs(void);
 void rcu_bh_qs(void);
 void rcu_check_callbacks(int user);
 struct notifier_block;
-void rcu_idle_enter(void);
-void rcu_idle_exit(void);
-void rcu_irq_enter(void);
-void rcu_irq_exit(void);
 int rcu_cpu_notify(struct notifier_block *self,
 		   unsigned long action, void *hcpu);
 
@@ -628,41 +626,11 @@ static inline void rcu_preempt_sleep_check(void)
 	((typeof(*p) __force __kernel *)(p)); \
 })
 
-#define __rcu_access_index(p, space) \
-({ \
-	typeof(p) _________p1 = READ_ONCE(p); \
-	rcu_dereference_sparse(p, space); \
-	(_________p1); \
-})
-#define __rcu_dereference_index_check(p, c) \
-({ \
-	/* Dependency order vs. p above. */ \
-	typeof(p) _________p1 = lockless_dereference(p); \
-	rcu_lockdep_assert(c, \
-			   "suspicious rcu_dereference_index_check() usage"); \
-	(_________p1); \
-})
-
 /**
  * RCU_INITIALIZER() - statically initialize an RCU-protected global variable
  * @v: The value to statically initialize with.
  */
 #define RCU_INITIALIZER(v) (typeof(*(v)) __force __rcu *)(v)
-
-/**
- * lockless_dereference() - safely load a pointer for later dereference
- * @p: The pointer to load
- *
- * Similar to rcu_dereference(), but for situations where the pointed-to
- * object's lifetime is managed by something other than RCU.  That
- * "something other" might be reference counting or simple immortality.
- */
-#define lockless_dereference(p) \
-({ \
-	typeof(p) _________p1 = READ_ONCE(p); \
-	smp_read_barrier_depends(); /* Dependency order vs. p above. */ \
-	(_________p1); \
-})
 
 /**
  * rcu_assign_pointer() - assign to RCU-protected pointer
@@ -785,41 +753,6 @@ static inline void rcu_preempt_sleep_check(void)
  * rcu_read_lock_held().
  */
 #define rcu_dereference_raw_notrace(p) __rcu_dereference_check((p), 1, __rcu)
-
-/**
- * rcu_access_index() - fetch RCU index with no dereferencing
- * @p: The index to read
- *
- * Return the value of the specified RCU-protected index, but omit the
- * smp_read_barrier_depends() and keep the READ_ONCE().  This is useful
- * when the value of this index is accessed, but the index is not
- * dereferenced, for example, when testing an RCU-protected index against
- * -1.  Although rcu_access_index() may also be used in cases where
- * update-side locks prevent the value of the index from changing, you
- * should instead use rcu_dereference_index_protected() for this use case.
- */
-#define rcu_access_index(p) __rcu_access_index((p), __rcu)
-
-/**
- * rcu_dereference_index_check() - rcu_dereference for indices with debug checking
- * @p: The pointer to read, prior to dereferencing
- * @c: The conditions under which the dereference will take place
- *
- * Similar to rcu_dereference_check(), but omits the sparse checking.
- * This allows rcu_dereference_index_check() to be used on integers,
- * which can then be used as array indices.  Attempting to use
- * rcu_dereference_check() on an integer will give compiler warnings
- * because the sparse address-space mechanism relies on dereferencing
- * the RCU-protected pointer.  Dereferencing integers is not something
- * that even gcc will put up with.
- *
- * Note that this function does not implicitly check for RCU read-side
- * critical sections.  If this function gains lots of uses, it might
- * make sense to provide versions for each flavor of RCU, but it does
- * not make sense as of early 2010.
- */
-#define rcu_dereference_index_check(p, c) \
-	__rcu_dereference_index_check((p), (c))
 
 /**
  * rcu_dereference_protected() - fetch RCU pointer when updates prevented
@@ -1154,9 +1087,9 @@ static inline notrace void rcu_read_unlock_sched_notrace(void)
 	__kfree_rcu(&((ptr)->rcu_head), offsetof(typeof(*(ptr)), rcu_head))
 
 #ifdef CONFIG_TINY_RCU
-static inline int rcu_needs_cpu(unsigned long *delta_jiffies)
+static inline int rcu_needs_cpu(u64 basemono, u64 *nextevt)
 {
-	*delta_jiffies = ULONG_MAX;
+	*nextevt = KTIME_MAX;
 	return 0;
 }
 #endif /* #ifdef CONFIG_TINY_RCU */

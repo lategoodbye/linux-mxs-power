@@ -109,10 +109,18 @@ NETDEVICE_SHOW_RO(dev_id, fmt_hex);
 NETDEVICE_SHOW_RO(dev_port, fmt_dec);
 NETDEVICE_SHOW_RO(addr_assign_type, fmt_dec);
 NETDEVICE_SHOW_RO(addr_len, fmt_dec);
-NETDEVICE_SHOW_RO(iflink, fmt_dec);
 NETDEVICE_SHOW_RO(ifindex, fmt_dec);
 NETDEVICE_SHOW_RO(type, fmt_dec);
 NETDEVICE_SHOW_RO(link_mode, fmt_dec);
+
+static ssize_t iflink_show(struct device *dev, struct device_attribute *attr,
+			   char *buf)
+{
+	struct net_device *ndev = to_net_dev(dev);
+
+	return sprintf(buf, fmt_dec, dev_get_iflink(ndev));
+}
+static DEVICE_ATTR_RO(iflink);
 
 static ssize_t format_name_assign_type(const struct net_device *dev, char *buf)
 {
@@ -450,11 +458,15 @@ static ssize_t phys_switch_id_show(struct device *dev,
 		return restart_syscall();
 
 	if (dev_isalive(netdev)) {
-		struct netdev_phys_item_id ppid;
+		struct switchdev_attr attr = {
+			.id = SWITCHDEV_ATTR_PORT_PARENT_ID,
+			.flags = SWITCHDEV_F_NO_RECURSE,
+		};
 
-		ret = netdev_switch_parent_id_get(netdev, &ppid);
+		ret = switchdev_port_attr_get(netdev, &attr);
 		if (!ret)
-			ret = sprintf(buf, "%*phN\n", ppid.id_len, ppid.id);
+			ret = sprintf(buf, "%*phN\n", attr.u.ppid.id_len,
+				      attr.u.ppid.id);
 	}
 	rtnl_unlock();
 

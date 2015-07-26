@@ -16,7 +16,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/kmod.h>
 #include <linux/device.h>
 #include <linux/init.h>
 #include <linux/cache.h>
@@ -572,7 +571,7 @@ static int __spi_map_msg(struct spi_master *master, struct spi_message *msg)
 	return 0;
 }
 
-static int spi_unmap_msg(struct spi_master *master, struct spi_message *msg)
+static int __spi_unmap_msg(struct spi_master *master, struct spi_message *msg)
 {
 	struct spi_transfer *xfer;
 	struct device *tx_dev, *rx_dev;
@@ -600,12 +599,31 @@ static inline int __spi_map_msg(struct spi_master *master,
 	return 0;
 }
 
-static inline int spi_unmap_msg(struct spi_master *master,
-				struct spi_message *msg)
+static inline int __spi_unmap_msg(struct spi_master *master,
+				  struct spi_message *msg)
 {
 	return 0;
 }
 #endif /* !CONFIG_HAS_DMA */
+
+static inline int spi_unmap_msg(struct spi_master *master,
+				struct spi_message *msg)
+{
+	struct spi_transfer *xfer;
+
+	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+		/*
+		 * Restore the original value of tx_buf or rx_buf if they are
+		 * NULL.
+		 */
+		if (xfer->tx_buf == master->dummy_tx)
+			xfer->tx_buf = NULL;
+		if (xfer->rx_buf == master->dummy_rx)
+			xfer->rx_buf = NULL;
+	}
+
+	return __spi_unmap_msg(master, msg);
+}
 
 static int spi_map_msg(struct spi_master *master, struct spi_message *msg)
 {
@@ -737,7 +755,7 @@ out:
 	if (msg->status == -EINPROGRESS)
 		msg->status = ret;
 
-	if (msg->status)
+	if (msg->status && master->handle_err)
 		master->handle_err(master, msg);
 
 	spi_finalize_current_message(master);
@@ -980,9 +998,6 @@ void spi_finalize_current_message(struct spi_master *master)
 
 	spin_lock_irqsave(&master->queue_lock, flags);
 	mesg = master->cur_msg;
-	master->cur_msg = NULL;
-
-	queue_kthread_work(&master->kworker, &master->pump_messages);
 	spin_unlock_irqrestore(&master->queue_lock, flags);
 
 	spi_unmap_msg(master, mesg);
@@ -995,9 +1010,13 @@ void spi_finalize_current_message(struct spi_master *master)
 		}
 	}
 
-	trace_spi_message_done(mesg);
-
+	spin_lock_irqsave(&master->queue_lock, flags);
+	master->cur_msg = NULL;
 	master->cur_msg_prepared = false;
+	queue_kthread_work(&master->kworker, &master->pump_messages);
+	spin_unlock_irqrestore(&master->queue_lock, flags);
+
+	trace_spi_message_done(mesg);
 
 	mesg->state = NULL;
 	if (mesg->complete)
@@ -1249,7 +1268,6 @@ of_register_spi_device(struct spi_master *master, struct device_node *nc)
 	spi->dev.of_node = nc;
 
 	/* Register the new device */
-	request_module("%s%s", SPI_MODULE_PREFIX, spi->modalias);
 	rc = spi_add_device(spi);
 	if (rc) {
 		dev_err(&master->dev, "spi_device register error %s\n",

@@ -5,7 +5,6 @@
  *
  * Copyright (C) 2007 Ralf Baechle (ralf@linux-mips.org)
  */
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/serial_8250.h>
@@ -108,7 +107,6 @@ static struct resource ip32_rtc_resources[] = {
 	}
 };
 
-
 /* RTC registers on IP32 are each padded by 256 bytes (0x100). */
 static struct ds1685_rtc_platform_data
 ip32_rtc_platform_data[] = {
@@ -132,14 +130,9 @@ struct platform_device ip32_rtc_device = {
 	.resource		= ip32_rtc_resources,
 };
 
-static int __init sgio2_rtc_devinit(void)
+static __init int sgio2_rtc_devinit(void)
 {
 	return platform_device_register(&ip32_rtc_device);
-
 }
 
 device_initcall(sgio2_rtc_devinit);
-
-MODULE_AUTHOR("Ralf Baechle <ralf@linux-mips.org>");
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("IP32 platform setup for SGI IP32 aka O2");

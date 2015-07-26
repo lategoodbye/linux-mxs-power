@@ -124,7 +124,7 @@ static ssize_t temp1_max_store(struct device *dev,
 
 	return count;
 }
-static DEVICE_ATTR(temp1_max, S_IRUGO, temp1_max_show, temp1_max_store);
+static DEVICE_ATTR_RW(temp1_max);
 
 static ssize_t temp1_max_alarm_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
@@ -159,8 +159,8 @@ static umode_t dsa_hwmon_attrs_visible(struct kobject *kobj,
 	if (index == 1) {
 		if (!drv->get_temp_limit)
 			mode = 0;
-		else if (drv->set_temp_limit)
-			mode |= S_IWUSR;
+		else if (!drv->set_temp_limit)
+			mode &= ~S_IWUSR;
 	} else if (index == 2 && !drv->get_temp_alarm) {
 		mode = 0;
 	}
@@ -359,7 +359,7 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 	 */
 	ds = kzalloc(sizeof(*ds) + drv->priv_size, GFP_KERNEL);
 	if (ds == NULL)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	ds->dst = dst;
 	ds->index = index;
@@ -370,7 +370,7 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 
 	ret = dsa_switch_setup_one(ds, parent);
 	if (ret)
-		return NULL;
+		return ERR_PTR(ret);
 
 	return ds;
 }
@@ -513,12 +513,10 @@ static struct net_device *dev_to_net_device(struct device *dev)
 #ifdef CONFIG_OF
 static int dsa_of_setup_routing_table(struct dsa_platform_data *pd,
 					struct dsa_chip_data *cd,
-					int chip_index,
+					int chip_index, int port_index,
 					struct device_node *link)
 {
-	int ret;
 	const __be32 *reg;
-	int link_port_addr;
 	int link_sw_addr;
 	struct device_node *parent_sw;
 	int len;
@@ -531,6 +529,10 @@ static int dsa_of_setup_routing_table(struct dsa_platform_data *pd,
 	if (!reg || (len != sizeof(*reg) * 2))
 		return -EINVAL;
 
+	/*
+	 * Get the destination switch number from the second field of its 'reg'
+	 * property, i.e. for "reg = <0x19 1>" sw_addr is '1'.
+	 */
 	link_sw_addr = be32_to_cpup(reg + 1);
 
 	if (link_sw_addr >= pd->nr_chips)
@@ -547,20 +549,9 @@ static int dsa_of_setup_routing_table(struct dsa_platform_data *pd,
 		memset(cd->rtable, -1, pd->nr_chips * sizeof(s8));
 	}
 
-	reg = of_get_property(link, "reg", NULL);
-	if (!reg) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	link_port_addr = be32_to_cpup(reg);
-
-	cd->rtable[link_sw_addr] = link_port_addr;
+	cd->rtable[link_sw_addr] = port_index;
 
 	return 0;
-out:
-	kfree(cd->rtable);
-	return ret;
 }
 
 static void dsa_of_free_platform_data(struct dsa_platform_data *pd)
@@ -639,10 +630,10 @@ static int dsa_of_probe(struct device *dev)
 			continue;
 
 		cd->sw_addr = be32_to_cpup(sw_addr);
-		if (cd->sw_addr > PHY_MAX_ADDR)
+		if (cd->sw_addr >= PHY_MAX_ADDR)
 			continue;
 
-		if (!of_property_read_u32(np, "eeprom-length", &eeprom_len))
+		if (!of_property_read_u32(child, "eeprom-length", &eeprom_len))
 			cd->eeprom_len = eeprom_len;
 
 		for_each_available_child_of_node(child, port) {
@@ -651,6 +642,8 @@ static int dsa_of_probe(struct device *dev)
 				continue;
 
 			port_index = be32_to_cpup(port_reg);
+			if (port_index >= DSA_MAX_PORTS)
+				break;
 
 			port_name = of_get_property(port, "label", NULL);
 			if (!port_name)
@@ -670,13 +663,11 @@ static int dsa_of_probe(struct device *dev)
 			if (!strcmp(port_name, "dsa") && link &&
 					pd->nr_chips > 1) {
 				ret = dsa_of_setup_routing_table(pd, cd,
-						chip_index, link);
+						chip_index, port_index, link);
 				if (ret)
 					goto out_free_chip;
 			}
 
-			if (port_index == DSA_MAX_PORTS)
-				break;
 		}
 	}
 

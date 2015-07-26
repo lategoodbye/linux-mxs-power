@@ -13,7 +13,7 @@ struct blk_mq_cpu_notifier {
 };
 
 struct blk_mq_ctxmap {
-	unsigned int map_size;
+	unsigned int size;
 	unsigned int bits_per_word;
 	struct blk_align_bitmap *map;
 };
@@ -96,6 +96,7 @@ typedef void (exit_request_fn)(void *, struct request *, unsigned int,
 
 typedef void (busy_iter_fn)(struct blk_mq_hw_ctx *, struct request *, void *,
 		bool);
+typedef void (busy_tag_iter_fn)(struct request *, void *, bool);
 
 struct blk_mq_ops {
 	/*
@@ -182,6 +183,7 @@ bool blk_mq_can_queue(struct blk_mq_hw_ctx *);
 struct request *blk_mq_alloc_request(struct request_queue *q, int rw,
 		gfp_t gfp, bool reserved);
 struct request *blk_mq_tag_to_rq(struct blk_mq_tags *tags, unsigned int tag);
+struct cpumask *blk_mq_tags_cpumask(struct blk_mq_tags *tags);
 
 enum {
 	BLK_MQ_UNIQUE_TAG_BITS = 16,
@@ -224,13 +226,15 @@ void blk_mq_run_hw_queues(struct request_queue *q, bool async);
 void blk_mq_delay_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs);
 void blk_mq_tag_busy_iter(struct blk_mq_hw_ctx *hctx, busy_iter_fn *fn,
 		void *priv);
+void blk_mq_all_tag_busy_iter(struct blk_mq_tags *tags, busy_tag_iter_fn *fn,
+		void *priv);
 void blk_mq_freeze_queue(struct request_queue *q);
 void blk_mq_unfreeze_queue(struct request_queue *q);
 void blk_mq_freeze_queue_start(struct request_queue *q);
 
 /*
  * Driver command data is immediately after the request. So subtract request
- * size to get back to the original request.
+ * size to get back to the original request, add request size to get the PDU.
  */
 static inline struct request *blk_mq_rq_from_pdu(void *pdu)
 {
@@ -238,7 +242,7 @@ static inline struct request *blk_mq_rq_from_pdu(void *pdu)
 }
 static inline void *blk_mq_rq_to_pdu(struct request *rq)
 {
-	return (void *) rq + sizeof(*rq);
+	return rq + 1;
 }
 
 #define queue_for_each_hw_ctx(q, hctx, i)				\

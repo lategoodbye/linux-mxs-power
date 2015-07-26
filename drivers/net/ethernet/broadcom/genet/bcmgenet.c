@@ -847,9 +847,10 @@ static struct ethtool_ops bcmgenet_ethtool_ops = {
 };
 
 /* Power down the unimac, based on mode. */
-static void bcmgenet_power_down(struct bcmgenet_priv *priv,
+static int bcmgenet_power_down(struct bcmgenet_priv *priv,
 				enum bcmgenet_power_mode mode)
 {
+	int ret = 0;
 	u32 reg;
 
 	switch (mode) {
@@ -858,7 +859,7 @@ static void bcmgenet_power_down(struct bcmgenet_priv *priv,
 		break;
 
 	case GENET_POWER_WOL_MAGIC:
-		bcmgenet_wol_power_down_cfg(priv, mode);
+		ret = bcmgenet_wol_power_down_cfg(priv, mode);
 		break;
 
 	case GENET_POWER_PASSIVE:
@@ -868,11 +869,15 @@ static void bcmgenet_power_down(struct bcmgenet_priv *priv,
 			reg |= (EXT_PWR_DOWN_PHY |
 				EXT_PWR_DOWN_DLL | EXT_PWR_DOWN_BIAS);
 			bcmgenet_ext_writel(priv, reg, EXT_EXT_PWR_MGMT);
+
+			bcmgenet_phy_power_set(priv->dev, false);
 		}
 		break;
 	default:
 		break;
 	}
+
+	return 0;
 }
 
 static void bcmgenet_power_up(struct bcmgenet_priv *priv,
@@ -959,36 +964,54 @@ static void bcmgenet_free_cb(struct enet_cb *cb)
 	dma_unmap_addr_set(cb, dma_addr, 0);
 }
 
-static inline void bcmgenet_tx_ring16_int_disable(struct bcmgenet_priv *priv,
-						  struct bcmgenet_tx_ring *ring)
+static inline void bcmgenet_rx_ring16_int_disable(struct bcmgenet_rx_ring *ring)
 {
-	bcmgenet_intrl2_0_writel(priv,
-				 UMAC_IRQ_TXDMA_BDONE | UMAC_IRQ_TXDMA_PDONE,
+	bcmgenet_intrl2_0_writel(ring->priv, UMAC_IRQ_RXDMA_DONE,
 				 INTRL2_CPU_MASK_SET);
 }
 
-static inline void bcmgenet_tx_ring16_int_enable(struct bcmgenet_priv *priv,
-						 struct bcmgenet_tx_ring *ring)
+static inline void bcmgenet_rx_ring16_int_enable(struct bcmgenet_rx_ring *ring)
 {
-	bcmgenet_intrl2_0_writel(priv,
-				 UMAC_IRQ_TXDMA_BDONE | UMAC_IRQ_TXDMA_PDONE,
+	bcmgenet_intrl2_0_writel(ring->priv, UMAC_IRQ_RXDMA_DONE,
 				 INTRL2_CPU_MASK_CLEAR);
 }
 
-static inline void bcmgenet_tx_ring_int_enable(struct bcmgenet_priv *priv,
-					       struct bcmgenet_tx_ring *ring)
+static inline void bcmgenet_rx_ring_int_disable(struct bcmgenet_rx_ring *ring)
 {
-	bcmgenet_intrl2_1_writel(priv, (1 << ring->index),
-				 INTRL2_CPU_MASK_CLEAR);
-	priv->int1_mask &= ~(1 << ring->index);
-}
-
-static inline void bcmgenet_tx_ring_int_disable(struct bcmgenet_priv *priv,
-						struct bcmgenet_tx_ring *ring)
-{
-	bcmgenet_intrl2_1_writel(priv, (1 << ring->index),
+	bcmgenet_intrl2_1_writel(ring->priv,
+				 1 << (UMAC_IRQ1_RX_INTR_SHIFT + ring->index),
 				 INTRL2_CPU_MASK_SET);
-	priv->int1_mask |= (1 << ring->index);
+}
+
+static inline void bcmgenet_rx_ring_int_enable(struct bcmgenet_rx_ring *ring)
+{
+	bcmgenet_intrl2_1_writel(ring->priv,
+				 1 << (UMAC_IRQ1_RX_INTR_SHIFT + ring->index),
+				 INTRL2_CPU_MASK_CLEAR);
+}
+
+static inline void bcmgenet_tx_ring16_int_disable(struct bcmgenet_tx_ring *ring)
+{
+	bcmgenet_intrl2_0_writel(ring->priv, UMAC_IRQ_TXDMA_DONE,
+				 INTRL2_CPU_MASK_SET);
+}
+
+static inline void bcmgenet_tx_ring16_int_enable(struct bcmgenet_tx_ring *ring)
+{
+	bcmgenet_intrl2_0_writel(ring->priv, UMAC_IRQ_TXDMA_DONE,
+				 INTRL2_CPU_MASK_CLEAR);
+}
+
+static inline void bcmgenet_tx_ring_int_enable(struct bcmgenet_tx_ring *ring)
+{
+	bcmgenet_intrl2_1_writel(ring->priv, 1 << ring->index,
+				 INTRL2_CPU_MASK_CLEAR);
+}
+
+static inline void bcmgenet_tx_ring_int_disable(struct bcmgenet_tx_ring *ring)
+{
+	bcmgenet_intrl2_1_writel(ring->priv, 1 << ring->index,
+				 INTRL2_CPU_MASK_SET);
 }
 
 /* Unlocked version of the reclaim routine */
@@ -1080,7 +1103,7 @@ static int bcmgenet_tx_poll(struct napi_struct *napi, int budget)
 
 	if (work_done == 0) {
 		napi_complete(napi);
-		ring->int_enable(ring->priv, ring);
+		ring->int_enable(ring);
 
 		return 0;
 	}
@@ -1207,7 +1230,6 @@ static struct sk_buff *bcmgenet_put_tx_csum(struct net_device *dev,
 		new_skb = skb_realloc_headroom(skb, sizeof(*status));
 		dev_kfree_skb(skb);
 		if (!new_skb) {
-			dev->stats.tx_errors++;
 			dev->stats.tx_dropped++;
 			return NULL;
 		}
@@ -1391,11 +1413,10 @@ static struct sk_buff *bcmgenet_rx_refill(struct bcmgenet_priv *priv,
 /* bcmgenet_desc_rx - descriptor based rx process.
  * this could be called from bottom half, or from NAPI polling method.
  */
-static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
-				     unsigned int index,
+static unsigned int bcmgenet_desc_rx(struct bcmgenet_rx_ring *ring,
 				     unsigned int budget)
 {
-	struct bcmgenet_rx_ring *ring = &priv->rx_rings[index];
+	struct bcmgenet_priv *priv = ring->priv;
 	struct net_device *dev = priv->dev;
 	struct enet_cb *cb;
 	struct sk_buff *skb;
@@ -1407,7 +1428,7 @@ static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
 	unsigned int discards;
 	unsigned int chksum_ok = 0;
 
-	p_index = bcmgenet_rdma_ring_readl(priv, index, RDMA_PROD_INDEX);
+	p_index = bcmgenet_rdma_ring_readl(priv, ring->index, RDMA_PROD_INDEX);
 
 	discards = (p_index >> DMA_P_INDEX_DISCARD_CNT_SHIFT) &
 		   DMA_P_INDEX_DISCARD_CNT_MASK;
@@ -1420,7 +1441,7 @@ static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
 		/* Clear HW register when we reach 75% of maximum 0xFFFF */
 		if (ring->old_discards >= 0xC000) {
 			ring->old_discards = 0;
-			bcmgenet_rdma_ring_writel(priv, index, 0,
+			bcmgenet_rdma_ring_writel(priv, ring->index, 0,
 						  RDMA_PROD_INDEX);
 		}
 	}
@@ -1443,7 +1464,6 @@ static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
 
 		if (unlikely(!skb)) {
 			dev->stats.rx_dropped++;
-			dev->stats.rx_errors++;
 			goto next;
 		}
 
@@ -1471,7 +1491,6 @@ static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
 		if (unlikely(!(dma_flag & DMA_EOP) || !(dma_flag & DMA_SOP))) {
 			netif_err(priv, rx_status, dev,
 				  "dropping fragmented packet!\n");
-			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
 			dev_kfree_skb_any(skb);
 			goto next;
@@ -1493,7 +1512,6 @@ static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
 				dev->stats.rx_frame_errors++;
 			if (dma_flag & DMA_RX_LG)
 				dev->stats.rx_length_errors++;
-			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
 			dev_kfree_skb_any(skb);
 			goto next;
@@ -1528,7 +1546,7 @@ static unsigned int bcmgenet_desc_rx(struct bcmgenet_priv *priv,
 			dev->stats.multicast++;
 
 		/* Notify kernel */
-		napi_gro_receive(&priv->napi, skb);
+		napi_gro_receive(&ring->napi, skb);
 		netif_dbg(priv, rx_status, dev, "pushed up to kernel\n");
 
 next:
@@ -1539,10 +1557,27 @@ next:
 			ring->read_ptr = ring->cb_ptr;
 
 		ring->c_index = (ring->c_index + 1) & DMA_C_INDEX_MASK;
-		bcmgenet_rdma_ring_writel(priv, index, ring->c_index, RDMA_CONS_INDEX);
+		bcmgenet_rdma_ring_writel(priv, ring->index, ring->c_index, RDMA_CONS_INDEX);
 	}
 
 	return rxpktprocessed;
+}
+
+/* Rx NAPI polling method */
+static int bcmgenet_rx_poll(struct napi_struct *napi, int budget)
+{
+	struct bcmgenet_rx_ring *ring = container_of(napi,
+			struct bcmgenet_rx_ring, napi);
+	unsigned int work_done;
+
+	work_done = bcmgenet_desc_rx(ring, budget);
+
+	if (work_done < budget) {
+		napi_complete(napi);
+		ring->int_enable(ring);
+	}
+
+	return work_done;
 }
 
 /* Assign skb to RX DMA descriptor. */
@@ -1653,8 +1688,10 @@ static int init_umac(struct bcmgenet_priv *priv)
 {
 	struct device *kdev = &priv->pdev->dev;
 	int ret;
-	u32 reg, cpu_mask_clear;
-	int index;
+	u32 reg;
+	u32 int0_enable = 0;
+	u32 int1_enable = 0;
+	int i;
 
 	dev_dbg(&priv->pdev->dev, "bcmgenet: init_umac\n");
 
@@ -1681,16 +1718,21 @@ static int init_umac(struct bcmgenet_priv *priv)
 
 	bcmgenet_intr_disable(priv);
 
-	cpu_mask_clear = UMAC_IRQ_RXDMA_BDONE | UMAC_IRQ_TXDMA_BDONE;
+	/* Enable Rx default queue 16 interrupts */
+	int0_enable |= UMAC_IRQ_RXDMA_DONE;
 
-	dev_dbg(kdev, "%s:Enabling RXDMA_BDONE interrupt\n", __func__);
+	/* Enable Tx default queue 16 interrupts */
+	int0_enable |= UMAC_IRQ_TXDMA_DONE;
 
 	/* Monitor cable plug/unplugged event for internal PHY */
 	if (phy_is_internal(priv->phydev)) {
-		cpu_mask_clear |= (UMAC_IRQ_LINK_DOWN | UMAC_IRQ_LINK_UP);
+		int0_enable |= UMAC_IRQ_LINK_EVENT;
 	} else if (priv->ext_phy) {
-		cpu_mask_clear |= (UMAC_IRQ_LINK_DOWN | UMAC_IRQ_LINK_UP);
+		int0_enable |= UMAC_IRQ_LINK_EVENT;
 	} else if (priv->phy_interface == PHY_INTERFACE_MODE_MOCA) {
+		if (priv->hw_params->flags & GENET_HAS_MOCA_LINK_DET)
+			int0_enable |= UMAC_IRQ_LINK_EVENT;
+
 		reg = bcmgenet_bp_mc_get(priv);
 		reg |= BIT(priv->hw_params->bp_in_en_shift);
 
@@ -1704,13 +1746,18 @@ static int init_umac(struct bcmgenet_priv *priv)
 
 	/* Enable MDIO interrupts on GENET v3+ */
 	if (priv->hw_params->flags & GENET_HAS_MDIO_INTR)
-		cpu_mask_clear |= UMAC_IRQ_MDIO_DONE | UMAC_IRQ_MDIO_ERROR;
+		int0_enable |= (UMAC_IRQ_MDIO_DONE | UMAC_IRQ_MDIO_ERROR);
 
-	bcmgenet_intrl2_0_writel(priv, cpu_mask_clear, INTRL2_CPU_MASK_CLEAR);
+	/* Enable Rx priority queue interrupts */
+	for (i = 0; i < priv->hw_params->rx_queues; ++i)
+		int1_enable |= (1 << (UMAC_IRQ1_RX_INTR_SHIFT + i));
 
-	for (index = 0; index < priv->hw_params->tx_queues; index++)
-		bcmgenet_intrl2_1_writel(priv, (1 << index),
-					 INTRL2_CPU_MASK_CLEAR);
+	/* Enable Tx priority queue interrupts */
+	for (i = 0; i < priv->hw_params->tx_queues; ++i)
+		int1_enable |= (1 << i);
+
+	bcmgenet_intrl2_0_writel(priv, int0_enable, INTRL2_CPU_MASK_CLEAR);
+	bcmgenet_intrl2_1_writel(priv, int1_enable, INTRL2_CPU_MASK_CLEAR);
 
 	/* Enable rx/tx engine.*/
 	dev_dbg(kdev, "done init umac\n");
@@ -1729,7 +1776,6 @@ static void bcmgenet_init_tx_ring(struct bcmgenet_priv *priv,
 
 	spin_lock_init(&ring->lock);
 	ring->priv = priv;
-	netif_napi_add(priv->dev, &ring->napi, bcmgenet_tx_poll, 64);
 	ring->index = index;
 	if (index == DESC_INDEX) {
 		ring->queue = 0;
@@ -1773,17 +1819,6 @@ static void bcmgenet_init_tx_ring(struct bcmgenet_priv *priv,
 				  TDMA_WRITE_PTR);
 	bcmgenet_tdma_ring_writel(priv, index, end_ptr * words_per_bd - 1,
 				  DMA_END_ADDR);
-
-	napi_enable(&ring->napi);
-}
-
-static void bcmgenet_fini_tx_ring(struct bcmgenet_priv *priv,
-				  unsigned int index)
-{
-	struct bcmgenet_tx_ring *ring = &priv->tx_rings[index];
-
-	napi_disable(&ring->napi);
-	netif_napi_del(&ring->napi);
 }
 
 /* Initialize a RDMA ring */
@@ -1795,7 +1830,15 @@ static int bcmgenet_init_rx_ring(struct bcmgenet_priv *priv,
 	u32 words_per_bd = WORDS_PER_BD(priv);
 	int ret;
 
+	ring->priv = priv;
 	ring->index = index;
+	if (index == DESC_INDEX) {
+		ring->int_enable = bcmgenet_rx_ring16_int_enable;
+		ring->int_disable = bcmgenet_rx_ring16_int_disable;
+	} else {
+		ring->int_enable = bcmgenet_rx_ring_int_enable;
+		ring->int_disable = bcmgenet_rx_ring_int_disable;
+	}
 	ring->cbs = priv->rx_cbs + start_ptr;
 	ring->size = size;
 	ring->c_index = 0;
@@ -1829,6 +1872,62 @@ static int bcmgenet_init_rx_ring(struct bcmgenet_priv *priv,
 				  DMA_END_ADDR);
 
 	return ret;
+}
+
+static void bcmgenet_init_tx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_tx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->tx_queues; ++i) {
+		ring = &priv->tx_rings[i];
+		netif_napi_add(priv->dev, &ring->napi, bcmgenet_tx_poll, 64);
+	}
+
+	ring = &priv->tx_rings[DESC_INDEX];
+	netif_napi_add(priv->dev, &ring->napi, bcmgenet_tx_poll, 64);
+}
+
+static void bcmgenet_enable_tx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_tx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->tx_queues; ++i) {
+		ring = &priv->tx_rings[i];
+		napi_enable(&ring->napi);
+	}
+
+	ring = &priv->tx_rings[DESC_INDEX];
+	napi_enable(&ring->napi);
+}
+
+static void bcmgenet_disable_tx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_tx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->tx_queues; ++i) {
+		ring = &priv->tx_rings[i];
+		napi_disable(&ring->napi);
+	}
+
+	ring = &priv->tx_rings[DESC_INDEX];
+	napi_disable(&ring->napi);
+}
+
+static void bcmgenet_fini_tx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_tx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->tx_queues; ++i) {
+		ring = &priv->tx_rings[i];
+		netif_napi_del(&ring->napi);
+	}
+
+	ring = &priv->tx_rings[DESC_INDEX];
+	netif_napi_del(&ring->napi);
 }
 
 /* Initialize Tx queues
@@ -1891,6 +1990,9 @@ static void bcmgenet_init_tx_queues(struct net_device *dev)
 	bcmgenet_tdma_writel(priv, dma_priority[1], DMA_PRIORITY_1);
 	bcmgenet_tdma_writel(priv, dma_priority[2], DMA_PRIORITY_2);
 
+	/* Initialize Tx NAPI */
+	bcmgenet_init_tx_napi(priv);
+
 	/* Enable Tx queues */
 	bcmgenet_tdma_writel(priv, ring_cfg, DMA_RING_CFG);
 
@@ -1898,6 +2000,62 @@ static void bcmgenet_init_tx_queues(struct net_device *dev)
 	if (dma_enable)
 		dma_ctrl |= DMA_EN;
 	bcmgenet_tdma_writel(priv, dma_ctrl, DMA_CTRL);
+}
+
+static void bcmgenet_init_rx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_rx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->rx_queues; ++i) {
+		ring = &priv->rx_rings[i];
+		netif_napi_add(priv->dev, &ring->napi, bcmgenet_rx_poll, 64);
+	}
+
+	ring = &priv->rx_rings[DESC_INDEX];
+	netif_napi_add(priv->dev, &ring->napi, bcmgenet_rx_poll, 64);
+}
+
+static void bcmgenet_enable_rx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_rx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->rx_queues; ++i) {
+		ring = &priv->rx_rings[i];
+		napi_enable(&ring->napi);
+	}
+
+	ring = &priv->rx_rings[DESC_INDEX];
+	napi_enable(&ring->napi);
+}
+
+static void bcmgenet_disable_rx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_rx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->rx_queues; ++i) {
+		ring = &priv->rx_rings[i];
+		napi_disable(&ring->napi);
+	}
+
+	ring = &priv->rx_rings[DESC_INDEX];
+	napi_disable(&ring->napi);
+}
+
+static void bcmgenet_fini_rx_napi(struct bcmgenet_priv *priv)
+{
+	unsigned int i;
+	struct bcmgenet_rx_ring *ring;
+
+	for (i = 0; i < priv->hw_params->rx_queues; ++i) {
+		ring = &priv->rx_rings[i];
+		netif_napi_del(&ring->napi);
+	}
+
+	ring = &priv->rx_rings[DESC_INDEX];
+	netif_napi_del(&ring->napi);
 }
 
 /* Initialize Rx queues
@@ -1948,6 +2106,9 @@ static int bcmgenet_init_rx_queues(struct net_device *dev)
 
 	ring_cfg |= (1 << DESC_INDEX);
 	dma_ctrl |= (1 << (DESC_INDEX + DMA_RING_BUF_EN_SHIFT));
+
+	/* Initialize Rx NAPI */
+	bcmgenet_init_rx_napi(priv);
 
 	/* Enable rings */
 	bcmgenet_rdma_writel(priv, ring_cfg, DMA_RING_CFG);
@@ -2011,9 +2172,12 @@ static int bcmgenet_dma_teardown(struct bcmgenet_priv *priv)
 	return ret;
 }
 
-static void __bcmgenet_fini_dma(struct bcmgenet_priv *priv)
+static void bcmgenet_fini_dma(struct bcmgenet_priv *priv)
 {
 	int i;
+
+	bcmgenet_fini_rx_napi(priv);
+	bcmgenet_fini_tx_napi(priv);
 
 	/* disable DMA */
 	bcmgenet_dma_teardown(priv);
@@ -2030,18 +2194,6 @@ static void __bcmgenet_fini_dma(struct bcmgenet_priv *priv)
 	kfree(priv->tx_cbs);
 }
 
-static void bcmgenet_fini_dma(struct bcmgenet_priv *priv)
-{
-	int i;
-
-	bcmgenet_fini_tx_ring(priv, DESC_INDEX);
-
-	for (i = 0; i < priv->hw_params->tx_queues; i++)
-		bcmgenet_fini_tx_ring(priv, i);
-
-	__bcmgenet_fini_dma(priv);
-}
-
 /* init_edma: Initialize DMA control register */
 static int bcmgenet_init_dma(struct bcmgenet_priv *priv)
 {
@@ -2050,9 +2202,6 @@ static int bcmgenet_init_dma(struct bcmgenet_priv *priv)
 	struct enet_cb *cb;
 
 	netif_dbg(priv, hw, priv->dev, "%s\n", __func__);
-
-	/* Init rDma */
-	bcmgenet_rdma_writel(priv, DMA_MAX_BURST_LENGTH, DMA_SCB_BURST_SIZE);
 
 	/* Initialize common Rx ring structures */
 	priv->rx_bds = priv->base + priv->hw_params->rdma_offset;
@@ -2067,25 +2216,13 @@ static int bcmgenet_init_dma(struct bcmgenet_priv *priv)
 		cb->bd_addr = priv->rx_bds + i * DMA_DESC_SIZE;
 	}
 
-	/* Initialize Rx queues */
-	ret = bcmgenet_init_rx_queues(priv->dev);
-	if (ret) {
-		netdev_err(priv->dev, "failed to initialize Rx queues\n");
-		bcmgenet_free_rx_buffers(priv);
-		kfree(priv->rx_cbs);
-		return ret;
-	}
-
-	/* Init tDma */
-	bcmgenet_tdma_writel(priv, DMA_MAX_BURST_LENGTH, DMA_SCB_BURST_SIZE);
-
 	/* Initialize common TX ring structures */
 	priv->tx_bds = priv->base + priv->hw_params->tdma_offset;
 	priv->num_tx_bds = TOTAL_DESC;
 	priv->tx_cbs = kcalloc(priv->num_tx_bds, sizeof(struct enet_cb),
 			       GFP_KERNEL);
 	if (!priv->tx_cbs) {
-		__bcmgenet_fini_dma(priv);
+		kfree(priv->rx_cbs);
 		return -ENOMEM;
 	}
 
@@ -2094,28 +2231,26 @@ static int bcmgenet_init_dma(struct bcmgenet_priv *priv)
 		cb->bd_addr = priv->tx_bds + i * DMA_DESC_SIZE;
 	}
 
+	/* Init rDma */
+	bcmgenet_rdma_writel(priv, DMA_MAX_BURST_LENGTH, DMA_SCB_BURST_SIZE);
+
+	/* Initialize Rx queues */
+	ret = bcmgenet_init_rx_queues(priv->dev);
+	if (ret) {
+		netdev_err(priv->dev, "failed to initialize Rx queues\n");
+		bcmgenet_free_rx_buffers(priv);
+		kfree(priv->rx_cbs);
+		kfree(priv->tx_cbs);
+		return ret;
+	}
+
+	/* Init tDma */
+	bcmgenet_tdma_writel(priv, DMA_MAX_BURST_LENGTH, DMA_SCB_BURST_SIZE);
+
 	/* Initialize Tx queues */
 	bcmgenet_init_tx_queues(priv->dev);
 
 	return 0;
-}
-
-/* NAPI polling method*/
-static int bcmgenet_poll(struct napi_struct *napi, int budget)
-{
-	struct bcmgenet_priv *priv = container_of(napi,
-			struct bcmgenet_priv, napi);
-	unsigned int work_done;
-
-	work_done = bcmgenet_desc_rx(priv, DESC_INDEX, budget);
-
-	if (work_done < budget) {
-		napi_complete(napi);
-		bcmgenet_intrl2_0_writel(priv, UMAC_IRQ_RXDMA_BDONE,
-					 INTRL2_CPU_MASK_CLEAR);
-	}
-
-	return work_done;
 }
 
 /* Interrupt bottom half */
@@ -2135,87 +2270,100 @@ static void bcmgenet_irq_task(struct work_struct *work)
 
 	/* Link UP/DOWN event */
 	if ((priv->hw_params->flags & GENET_HAS_MDIO_INTR) &&
-	    (priv->irq0_stat & (UMAC_IRQ_LINK_UP|UMAC_IRQ_LINK_DOWN))) {
+	    (priv->irq0_stat & UMAC_IRQ_LINK_EVENT)) {
 		phy_mac_interrupt(priv->phydev,
-				  priv->irq0_stat & UMAC_IRQ_LINK_UP);
-		priv->irq0_stat &= ~(UMAC_IRQ_LINK_UP|UMAC_IRQ_LINK_DOWN);
+				  !!(priv->irq0_stat & UMAC_IRQ_LINK_UP));
+		priv->irq0_stat &= ~UMAC_IRQ_LINK_EVENT;
 	}
 }
 
-/* bcmgenet_isr1: interrupt handler for ring buffer. */
+/* bcmgenet_isr1: handle Rx and Tx priority queues */
 static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 {
 	struct bcmgenet_priv *priv = dev_id;
-	struct bcmgenet_tx_ring *ring;
+	struct bcmgenet_rx_ring *rx_ring;
+	struct bcmgenet_tx_ring *tx_ring;
 	unsigned int index;
 
 	/* Save irq status for bottom-half processing. */
 	priv->irq1_stat =
 		bcmgenet_intrl2_1_readl(priv, INTRL2_CPU_STAT) &
 		~bcmgenet_intrl2_1_readl(priv, INTRL2_CPU_MASK_STATUS);
+
 	/* clear interrupts */
 	bcmgenet_intrl2_1_writel(priv, priv->irq1_stat, INTRL2_CPU_CLEAR);
 
 	netif_dbg(priv, intr, priv->dev,
 		  "%s: IRQ=0x%x\n", __func__, priv->irq1_stat);
 
-	/* Check the MBDONE interrupts.
-	 * packet is done, reclaim descriptors
-	 */
+	/* Check Rx priority queue interrupts */
+	for (index = 0; index < priv->hw_params->rx_queues; index++) {
+		if (!(priv->irq1_stat & BIT(UMAC_IRQ1_RX_INTR_SHIFT + index)))
+			continue;
+
+		rx_ring = &priv->rx_rings[index];
+
+		if (likely(napi_schedule_prep(&rx_ring->napi))) {
+			rx_ring->int_disable(rx_ring);
+			__napi_schedule(&rx_ring->napi);
+		}
+	}
+
+	/* Check Tx priority queue interrupts */
 	for (index = 0; index < priv->hw_params->tx_queues; index++) {
 		if (!(priv->irq1_stat & BIT(index)))
 			continue;
 
-		ring = &priv->tx_rings[index];
+		tx_ring = &priv->tx_rings[index];
 
-		if (likely(napi_schedule_prep(&ring->napi))) {
-			ring->int_disable(priv, ring);
-			__napi_schedule(&ring->napi);
+		if (likely(napi_schedule_prep(&tx_ring->napi))) {
+			tx_ring->int_disable(tx_ring);
+			__napi_schedule(&tx_ring->napi);
 		}
 	}
 
 	return IRQ_HANDLED;
 }
 
-/* bcmgenet_isr0: Handle various interrupts. */
+/* bcmgenet_isr0: handle Rx and Tx default queues + other stuff */
 static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 {
 	struct bcmgenet_priv *priv = dev_id;
+	struct bcmgenet_rx_ring *rx_ring;
+	struct bcmgenet_tx_ring *tx_ring;
 
 	/* Save irq status for bottom-half processing. */
 	priv->irq0_stat =
 		bcmgenet_intrl2_0_readl(priv, INTRL2_CPU_STAT) &
 		~bcmgenet_intrl2_0_readl(priv, INTRL2_CPU_MASK_STATUS);
+
 	/* clear interrupts */
 	bcmgenet_intrl2_0_writel(priv, priv->irq0_stat, INTRL2_CPU_CLEAR);
 
 	netif_dbg(priv, intr, priv->dev,
 		  "IRQ=0x%x\n", priv->irq0_stat);
 
-	if (priv->irq0_stat & (UMAC_IRQ_RXDMA_BDONE | UMAC_IRQ_RXDMA_PDONE)) {
-		/* We use NAPI(software interrupt throttling, if
-		 * Rx Descriptor throttling is not used.
-		 * Disable interrupt, will be enabled in the poll method.
-		 */
-		if (likely(napi_schedule_prep(&priv->napi))) {
-			bcmgenet_intrl2_0_writel(priv, UMAC_IRQ_RXDMA_BDONE,
-						 INTRL2_CPU_MASK_SET);
-			__napi_schedule(&priv->napi);
-		}
-	}
-	if (priv->irq0_stat &
-			(UMAC_IRQ_TXDMA_BDONE | UMAC_IRQ_TXDMA_PDONE)) {
-		struct bcmgenet_tx_ring *ring = &priv->tx_rings[DESC_INDEX];
+	if (priv->irq0_stat & UMAC_IRQ_RXDMA_DONE) {
+		rx_ring = &priv->rx_rings[DESC_INDEX];
 
-		if (likely(napi_schedule_prep(&ring->napi))) {
-			ring->int_disable(priv, ring);
-			__napi_schedule(&ring->napi);
+		if (likely(napi_schedule_prep(&rx_ring->napi))) {
+			rx_ring->int_disable(rx_ring);
+			__napi_schedule(&rx_ring->napi);
 		}
 	}
+
+	if (priv->irq0_stat & UMAC_IRQ_TXDMA_DONE) {
+		tx_ring = &priv->tx_rings[DESC_INDEX];
+
+		if (likely(napi_schedule_prep(&tx_ring->napi))) {
+			tx_ring->int_disable(tx_ring);
+			__napi_schedule(&tx_ring->napi);
+		}
+	}
+
 	if (priv->irq0_stat & (UMAC_IRQ_PHY_DET_R |
 				UMAC_IRQ_PHY_DET_F |
-				UMAC_IRQ_LINK_UP |
-				UMAC_IRQ_LINK_DOWN |
+				UMAC_IRQ_LINK_EVENT |
 				UMAC_IRQ_HFB_SM |
 				UMAC_IRQ_HFB_MM |
 				UMAC_IRQ_MPD_R)) {
@@ -2458,12 +2606,10 @@ static void bcmgenet_netif_start(struct net_device *dev)
 	struct bcmgenet_priv *priv = netdev_priv(dev);
 
 	/* Start the network engine */
-	napi_enable(&priv->napi);
+	bcmgenet_enable_rx_napi(priv);
+	bcmgenet_enable_tx_napi(priv);
 
 	umac_enable_set(priv, CMD_TX_EN | CMD_RX_EN, true);
-
-	if (phy_is_internal(priv->phydev))
-		bcmgenet_power_up(priv, GENET_POWER_PASSIVE);
 
 	netif_tx_start_all_queues(dev);
 
@@ -2482,6 +2628,12 @@ static int bcmgenet_open(struct net_device *dev)
 	/* Turn on the clock */
 	if (!IS_ERR(priv->clk))
 		clk_prepare_enable(priv->clk);
+
+	/* If this is an internal GPHY, power it back on now, before UniMAC is
+	 * brought out of reset as absolutely no UniMAC activity is allowed
+	 */
+	if (phy_is_internal(priv->phydev))
+		bcmgenet_power_up(priv, GENET_POWER_PASSIVE);
 
 	/* take MAC out of reset */
 	bcmgenet_umac_reset(priv);
@@ -2512,7 +2664,7 @@ static int bcmgenet_open(struct net_device *dev)
 	ret = bcmgenet_init_dma(priv);
 	if (ret) {
 		netdev_err(dev, "failed to initialize DMA\n");
-		goto err_fini_dma;
+		goto err_clk_disable;
 	}
 
 	/* Always enable ring 16 - descriptor ring */
@@ -2560,10 +2712,10 @@ static void bcmgenet_netif_stop(struct net_device *dev)
 	struct bcmgenet_priv *priv = netdev_priv(dev);
 
 	netif_tx_stop_all_queues(dev);
-	napi_disable(&priv->napi);
 	phy_stop(priv->phydev);
-
 	bcmgenet_intr_disable(priv);
+	bcmgenet_disable_rx_napi(priv);
+	bcmgenet_disable_tx_napi(priv);
 
 	/* Wait for pending work items to complete. Since interrupts are
 	 * disabled no new work will be scheduled.
@@ -2606,19 +2758,86 @@ static int bcmgenet_close(struct net_device *dev)
 	free_irq(priv->irq1, priv);
 
 	if (phy_is_internal(priv->phydev))
-		bcmgenet_power_down(priv, GENET_POWER_PASSIVE);
+		ret = bcmgenet_power_down(priv, GENET_POWER_PASSIVE);
 
 	if (!IS_ERR(priv->clk))
 		clk_disable_unprepare(priv->clk);
 
-	return 0;
+	return ret;
+}
+
+static void bcmgenet_dump_tx_queue(struct bcmgenet_tx_ring *ring)
+{
+	struct bcmgenet_priv *priv = ring->priv;
+	u32 p_index, c_index, intsts, intmsk;
+	struct netdev_queue *txq;
+	unsigned int free_bds;
+	unsigned long flags;
+	bool txq_stopped;
+
+	if (!netif_msg_tx_err(priv))
+		return;
+
+	txq = netdev_get_tx_queue(priv->dev, ring->queue);
+
+	spin_lock_irqsave(&ring->lock, flags);
+	if (ring->index == DESC_INDEX) {
+		intsts = ~bcmgenet_intrl2_0_readl(priv, INTRL2_CPU_MASK_STATUS);
+		intmsk = UMAC_IRQ_TXDMA_DONE | UMAC_IRQ_TXDMA_MBDONE;
+	} else {
+		intsts = ~bcmgenet_intrl2_1_readl(priv, INTRL2_CPU_MASK_STATUS);
+		intmsk = 1 << ring->index;
+	}
+	c_index = bcmgenet_tdma_ring_readl(priv, ring->index, TDMA_CONS_INDEX);
+	p_index = bcmgenet_tdma_ring_readl(priv, ring->index, TDMA_PROD_INDEX);
+	txq_stopped = netif_tx_queue_stopped(txq);
+	free_bds = ring->free_bds;
+	spin_unlock_irqrestore(&ring->lock, flags);
+
+	netif_err(priv, tx_err, priv->dev, "Ring %d queue %d status summary\n"
+		  "TX queue status: %s, interrupts: %s\n"
+		  "(sw)free_bds: %d (sw)size: %d\n"
+		  "(sw)p_index: %d (hw)p_index: %d\n"
+		  "(sw)c_index: %d (hw)c_index: %d\n"
+		  "(sw)clean_p: %d (sw)write_p: %d\n"
+		  "(sw)cb_ptr: %d (sw)end_ptr: %d\n",
+		  ring->index, ring->queue,
+		  txq_stopped ? "stopped" : "active",
+		  intsts & intmsk ? "enabled" : "disabled",
+		  free_bds, ring->size,
+		  ring->prod_index, p_index & DMA_P_INDEX_MASK,
+		  ring->c_index, c_index & DMA_C_INDEX_MASK,
+		  ring->clean_ptr, ring->write_ptr,
+		  ring->cb_ptr, ring->end_ptr);
 }
 
 static void bcmgenet_timeout(struct net_device *dev)
 {
 	struct bcmgenet_priv *priv = netdev_priv(dev);
+	u32 int0_enable = 0;
+	u32 int1_enable = 0;
+	unsigned int q;
 
 	netif_dbg(priv, tx_err, dev, "bcmgenet_timeout\n");
+
+	bcmgenet_disable_tx_napi(priv);
+
+	for (q = 0; q < priv->hw_params->tx_queues; q++)
+		bcmgenet_dump_tx_queue(&priv->tx_rings[q]);
+	bcmgenet_dump_tx_queue(&priv->tx_rings[DESC_INDEX]);
+
+	bcmgenet_tx_reclaim_all(dev);
+
+	for (q = 0; q < priv->hw_params->tx_queues; q++)
+		int1_enable |= (1 << q);
+
+	int0_enable = UMAC_IRQ_TXDMA_DONE;
+
+	/* Re-enable TX interrupts if disabled */
+	bcmgenet_intrl2_0_writel(priv, int0_enable, INTRL2_CPU_MASK_CLEAR);
+	bcmgenet_intrl2_1_writel(priv, int1_enable, INTRL2_CPU_MASK_CLEAR);
+
+	bcmgenet_enable_tx_napi(priv);
 
 	dev->trans_start = jiffies;
 
@@ -2773,7 +2992,8 @@ static struct bcmgenet_hw_params bcmgenet_hw_params[] = {
 		.rdma_offset = 0x10000,
 		.tdma_offset = 0x11000,
 		.words_per_bd = 2,
-		.flags = GENET_HAS_EXT | GENET_HAS_MDIO_INTR,
+		.flags = GENET_HAS_EXT | GENET_HAS_MDIO_INTR |
+			 GENET_HAS_MOCA_LINK_DET,
 	},
 	[GENET_V4] = {
 		.tx_queues = 4,
@@ -2791,7 +3011,8 @@ static struct bcmgenet_hw_params bcmgenet_hw_params[] = {
 		.rdma_offset = 0x2000,
 		.tdma_offset = 0x4000,
 		.words_per_bd = 3,
-		.flags = GENET_HAS_40BITS | GENET_HAS_EXT | GENET_HAS_MDIO_INTR,
+		.flags = GENET_HAS_40BITS | GENET_HAS_EXT |
+			 GENET_HAS_MDIO_INTR | GENET_HAS_MOCA_LINK_DET,
 	},
 };
 
@@ -2964,7 +3185,6 @@ static int bcmgenet_probe(struct platform_device *pdev)
 	dev->watchdog_timeo = 2 * HZ;
 	dev->ethtool_ops = &bcmgenet_ethtool_ops;
 	dev->netdev_ops = &bcmgenet_netdev_ops;
-	netif_napi_add(dev, &priv->napi, bcmgenet_poll, 64);
 
 	priv->msg_enable = netif_msg_init(-1, GENET_MSG_DEFAULT);
 
@@ -3097,14 +3317,16 @@ static int bcmgenet_suspend(struct device *d)
 
 	/* Prepare the device for Wake-on-LAN and switch to the slow clock */
 	if (device_may_wakeup(d) && priv->wolopts) {
-		bcmgenet_power_down(priv, GENET_POWER_WOL_MAGIC);
+		ret = bcmgenet_power_down(priv, GENET_POWER_WOL_MAGIC);
 		clk_prepare_enable(priv->clk_wol);
+	} else if (phy_is_internal(priv->phydev)) {
+		ret = bcmgenet_power_down(priv, GENET_POWER_PASSIVE);
 	}
 
 	/* Turn off the clocks */
 	clk_disable_unprepare(priv->clk);
 
-	return 0;
+	return ret;
 }
 
 static int bcmgenet_resume(struct device *d)
@@ -3122,6 +3344,12 @@ static int bcmgenet_resume(struct device *d)
 	ret = clk_prepare_enable(priv->clk);
 	if (ret)
 		return ret;
+
+	/* If this is an internal GPHY, power it back on now, before UniMAC is
+	 * brought out of reset as absolutely no UniMAC activity is allowed
+	 */
+	if (phy_is_internal(priv->phydev))
+		bcmgenet_power_up(priv, GENET_POWER_PASSIVE);
 
 	bcmgenet_umac_reset(priv);
 

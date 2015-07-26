@@ -186,6 +186,7 @@ int64_t opal_handle_hmi(void);
 int64_t opal_register_dump_region(uint32_t id, uint64_t start, uint64_t end);
 int64_t opal_unregister_dump_region(uint32_t id);
 int64_t opal_slw_set_reg(uint64_t cpu_pir, uint64_t sprn, uint64_t val);
+int64_t opal_config_cpu_idle_state(uint64_t state, uint64_t flag);
 int64_t opal_pci_set_phb_cxl_mode(uint64_t phb_id, uint64_t mode, uint64_t pe_number);
 int64_t opal_ipmi_send(uint64_t interface, struct opal_ipmi_msg *msg,
 		uint64_t msg_len);
@@ -193,6 +194,14 @@ int64_t opal_ipmi_recv(uint64_t interface, struct opal_ipmi_msg *msg,
 		uint64_t *msg_len);
 int64_t opal_i2c_request(uint64_t async_token, uint32_t bus_id,
 			 struct opal_i2c_request *oreq);
+int64_t opal_prd_msg(struct opal_prd_msg *msg);
+
+int64_t opal_flash_read(uint64_t id, uint64_t offset, uint64_t buf,
+		uint64_t size, uint64_t token);
+int64_t opal_flash_write(uint64_t id, uint64_t offset, uint64_t buf,
+		uint64_t size, uint64_t token);
+int64_t opal_flash_erase(uint64_t id, uint64_t offset, uint64_t size,
+		uint64_t token);
 
 /* Internal functions */
 extern int early_init_dt_scan_opal(unsigned long node, const char *uname,
@@ -210,6 +219,8 @@ extern int opal_notifier_unregister(struct notifier_block *nb);
 
 extern int opal_message_notifier_register(enum opal_msg_type msg_type,
 						struct notifier_block *nb);
+extern int opal_message_notifier_unregister(enum opal_msg_type msg_type,
+					    struct notifier_block *nb);
 extern void opal_notifier_enable(void);
 extern void opal_notifier_disable(void);
 extern void opal_notifier_update_evt(uint64_t evt_mask, uint64_t evt_val);
@@ -224,12 +235,16 @@ extern int opal_get_sensor_data(u32 sensor_hndl, u32 *sensor_data);
 struct rtc_time;
 extern unsigned long opal_get_boot_time(void);
 extern void opal_nvram_init(void);
-extern void opal_flash_init(void);
+extern void opal_flash_update_init(void);
 extern void opal_flash_term_callback(void);
 extern int opal_elog_init(void);
 extern void opal_platform_dump_init(void);
 extern void opal_sys_param_init(void);
 extern void opal_msglog_init(void);
+extern int opal_async_comp_init(void);
+extern int opal_sensor_init(void);
+extern int opal_hmi_handler_init(void);
+extern int opal_event_init(void);
 
 extern int opal_machine_check(struct pt_regs *regs);
 extern bool opal_mce_check_early_recovery(struct pt_regs *regs);
@@ -241,9 +256,13 @@ extern int opal_resync_timebase(void);
 
 extern void opal_lpc_init(void);
 
+extern int opal_event_request(unsigned int opal_event_nr);
+
 struct opal_sg_list *opal_vmalloc_to_sg_list(void *vmalloc_addr,
 					     unsigned long vmalloc_size);
 void opal_free_sg_list(struct opal_sg_list *sg);
+
+extern int opal_error_code(int rc);
 
 #endif /* __ASSEMBLY__ */
 

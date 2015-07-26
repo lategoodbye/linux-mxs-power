@@ -233,7 +233,7 @@ static void tc3589x_irq_unmap(struct irq_domain *d, unsigned int virq)
 	irq_set_chip_data(virq, NULL);
 }
 
-static struct irq_domain_ops tc3589x_irq_ops = {
+static const struct irq_domain_ops tc3589x_irq_ops = {
 	.map    = tc3589x_irq_map,
 	.unmap  = tc3589x_irq_unmap,
 	.xlate  = irq_domain_xlate_onecell,
@@ -318,7 +318,6 @@ static int tc3589x_device_init(struct tc3589x *tc3589x)
 	return ret;
 }
 
-#ifdef CONFIG_OF
 static const struct of_device_id tc3589x_match[] = {
 	/* Legacy compatible string */
 	{ .compatible = "tc3589x", .data = (void *) TC3589X_UNKNOWN },
@@ -359,14 +358,6 @@ tc3589x_of_probe(struct device *dev, enum tc3589x_version *version)
 
 	return pdata;
 }
-#else
-static inline struct tc3589x_platform_data *
-tc3589x_of_probe(struct device *dev, enum tc3589x_version *version)
-{
-	dev_err(dev, "no device tree support\n");
-	return ERR_PTR(-ENODEV);
-}
-#endif
 
 static int tc3589x_probe(struct i2c_client *i2c,
 				   const struct i2c_device_id *id)

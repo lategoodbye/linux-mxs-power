@@ -144,7 +144,7 @@ static int ll_xattr_cache_add(struct list_head *cache,
 
 	return 0;
 err_value:
-	OBD_FREE(xattr->xe_name, xattr->xe_namelen);
+	kfree(xattr->xe_name);
 err_name:
 	OBD_SLAB_FREE_PTR(xattr, xattr_kmem);
 
@@ -170,8 +170,8 @@ static int ll_xattr_cache_del(struct list_head *cache,
 
 	if (ll_xattr_cache_find(cache, xattr_name, &xattr) == 0) {
 		list_del(&xattr->xe_list);
-		OBD_FREE(xattr->xe_name, xattr->xe_namelen);
-		OBD_FREE(xattr->xe_value, xattr->xe_vallen);
+		kfree(xattr->xe_name);
+		kfree(xattr->xe_value);
 		OBD_SLAB_FREE_PTR(xattr, xattr_kmem);
 
 		return 0;
@@ -295,13 +295,18 @@ static int ll_xattr_find_get_lock(struct inode *inode,
 
 
 	mutex_lock(&lli->lli_xattrs_enq_lock);
-	/* Try matching first. */
-	mode = ll_take_md_lock(inode, MDS_INODELOCK_XATTR, &lockh, 0, LCK_PR);
-	if (mode != 0) {
-		/* fake oit in mdc_revalidate_lock() manner */
-		oit->d.lustre.it_lock_handle = lockh.cookie;
-		oit->d.lustre.it_lock_mode = mode;
-		goto out;
+	/* inode may have been shrunk and recreated, so data is gone, match lock
+	 * only when data exists. */
+	if (ll_xattr_cache_valid(lli)) {
+		/* Try matching first. */
+		mode = ll_take_md_lock(inode, MDS_INODELOCK_XATTR, &lockh, 0,
+				       LCK_PR);
+		if (mode != 0) {
+			/* fake oit in mdc_revalidate_lock() manner */
+			oit->d.lustre.it_lock_handle = lockh.cookie;
+			oit->d.lustre.it_lock_mode = mode;
+			goto out;
+		}
 	}
 
 	/* Enqueue if the lock isn't cached locally. */

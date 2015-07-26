@@ -110,9 +110,6 @@ static void intel_mark_fb_busy(struct drm_device *dev,
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	enum pipe pipe;
 
-	if (!i915.powersave)
-		return;
-
 	for_each_pipe(dev_priv, pipe) {
 		if (!(frontbuffer_bits & INTEL_FRONTBUFFER_ALL_MASK(pipe)))
 			continue;
@@ -246,6 +243,8 @@ void intel_frontbuffer_flip_prepare(struct drm_device *dev,
 	/* Remove stale busy bits due to the old buffer. */
 	dev_priv->fb_tracking.busy_bits &= ~frontbuffer_bits;
 	mutex_unlock(&dev_priv->fb_tracking.lock);
+
+	intel_psr_single_frame_update(dev);
 }
 
 /**

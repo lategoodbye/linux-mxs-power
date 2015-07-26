@@ -257,8 +257,8 @@ static void nft_reject_br_send_v6_unreach(struct net *net,
 }
 
 static void nft_reject_bridge_eval(const struct nft_expr *expr,
-				 struct nft_data data[NFT_REG_MAX + 1],
-				 const struct nft_pktinfo *pkt)
+				   struct nft_regs *regs,
+				   const struct nft_pktinfo *pkt)
 {
 	struct nft_reject *priv = nft_expr_priv(expr);
 	struct net *net = dev_net((pkt->in != NULL) ? pkt->in : pkt->out);
@@ -310,7 +310,7 @@ static void nft_reject_bridge_eval(const struct nft_expr *expr,
 		break;
 	}
 out:
-	data[NFT_REG_VERDICT].verdict = NF_DROP;
+	regs->verdict.code = NF_DROP;
 }
 
 static int nft_reject_bridge_validate(const struct nft_ctx *ctx,
@@ -370,6 +370,8 @@ static int nft_reject_bridge_dump(struct sk_buff *skb,
 	case NFT_REJECT_ICMPX_UNREACH:
 		if (nla_put_u8(skb, NFTA_REJECT_ICMP_CODE, priv->icmp_code))
 			goto nla_put_failure;
+		break;
+	default:
 		break;
 	}
 

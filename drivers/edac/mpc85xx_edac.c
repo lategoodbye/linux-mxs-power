@@ -670,7 +670,7 @@ static int mpc85xx_l2_err_remove(struct platform_device *op)
 	return 0;
 }
 
-static struct of_device_id mpc85xx_l2_err_of_match[] = {
+static const struct of_device_id mpc85xx_l2_err_of_match[] = {
 /* deprecate the fsl,85.. forms in the future, 2.6.30? */
 	{ .compatible = "fsl,8540-l2-cache-controller", },
 	{ .compatible = "fsl,8541-l2-cache-controller", },
@@ -811,6 +811,8 @@ static void sbe_ecc_decode(u32 cap_high, u32 cap_low, u32 cap_ecc,
 	}
 }
 
+#define make64(high, low) (((u64)(high) << 32) | (low))
+
 static void mpc85xx_mc_check(struct mem_ctl_info *mci)
 {
 	struct mpc85xx_mc_pdata *pdata = mci->pvt_info;
@@ -818,7 +820,7 @@ static void mpc85xx_mc_check(struct mem_ctl_info *mci)
 	u32 bus_width;
 	u32 err_detect;
 	u32 syndrome;
-	u32 err_addr;
+	u64 err_addr;
 	u32 pfn;
 	int row_index;
 	u32 cap_high;
@@ -849,7 +851,9 @@ static void mpc85xx_mc_check(struct mem_ctl_info *mci)
 	else
 		syndrome &= 0xffff;
 
-	err_addr = in_be32(pdata->mc_vbase + MPC85XX_MC_CAPTURE_ADDRESS);
+	err_addr = make64(
+		in_be32(pdata->mc_vbase + MPC85XX_MC_CAPTURE_EXT_ADDRESS),
+		in_be32(pdata->mc_vbase + MPC85XX_MC_CAPTURE_ADDRESS));
 	pfn = err_addr >> PAGE_SHIFT;
 
 	for (row_index = 0; row_index < mci->nr_csrows; row_index++) {
@@ -886,7 +890,7 @@ static void mpc85xx_mc_check(struct mem_ctl_info *mci)
 	mpc85xx_mc_printk(mci, KERN_ERR,
 			"Captured Data / ECC:\t%#8.8x_%08x / %#2.2x\n",
 			cap_high, cap_low, syndrome);
-	mpc85xx_mc_printk(mci, KERN_ERR, "Err addr: %#8.8x\n", err_addr);
+	mpc85xx_mc_printk(mci, KERN_ERR, "Err addr: %#8.8llx\n", err_addr);
 	mpc85xx_mc_printk(mci, KERN_ERR, "PFN: %#8.8x\n", pfn);
 
 	/* we are out of range */
@@ -1160,7 +1164,7 @@ static int mpc85xx_mc_err_remove(struct platform_device *op)
 	return 0;
 }
 
-static struct of_device_id mpc85xx_mc_err_of_match[] = {
+static const struct of_device_id mpc85xx_mc_err_of_match[] = {
 /* deprecate the fsl,85.. forms in the future, 2.6.30? */
 	{ .compatible = "fsl,8540-memory-controller", },
 	{ .compatible = "fsl,8541-memory-controller", },

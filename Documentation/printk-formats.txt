@@ -244,14 +244,6 @@ dentry names:
 
 	Passed by reference.
 
-task_struct comm name:
-
-        %pT
-
-        For printing task_struct->comm.
-
-	Passed by reference (NULL for "current").
-
 struct va_format:
 
 	%pV
@@ -291,7 +283,6 @@ bitmap and its derivatives such as cpumask and nodemask:
 	output the bitmap as range list with field width as the number of bits.
 
 	Passed by reference.
-
 
 Thank you for your cooperation and attention.
 

@@ -12,6 +12,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/clk/mxs.h>
 #include <linux/kernel.h>
 #include <linux/suspend.h>
 #include <linux/io.h>
@@ -25,6 +26,8 @@ static int mxs_suspend_enter(suspend_state_t state)
 {
 	switch (state) {
 	case PM_SUSPEND_MEM:
+		pr_info("enable hbus auto slow ...\n");
+		mx28_hbus_set_autoslow(1);
 		cpu_do_idle();
 		break;
 
@@ -34,8 +37,15 @@ static int mxs_suspend_enter(suspend_state_t state)
 	return 0;
 }
 
+static void mxs_suspend_wake(void)
+{	
+	mx28_hbus_set_autoslow(0);
+	pr_info("disabled hbus auto slow ...\n");
+}
+
 static struct platform_suspend_ops mxs_suspend_ops = {
 	.enter = mxs_suspend_enter,
+	.wake = mxs_suspend_wake,
 	.valid = suspend_valid_only_mem,
 };
 
@@ -61,9 +71,19 @@ static struct platform_device userspace_consumer_device = {
 	},
 };
 
+static struct platform_device virt_consumer_device = {
+	.name = "reg-virt-consumer",
+	.id = 1,
+	.dev = {
+		.platform_data = "dcdc",
+	},
+};
+
 void __init mxs_pm_init(void)
 {
+	platform_device_register(&userspace_consumer_device);
+	platform_device_register(&virt_consumer_device);
+	
 	suspend_set_ops(&mxs_suspend_ops);
 	platform_device_register(&mxs_cpufreq_pdev);
-	platform_device_register(&userspace_consumer_device);
 }

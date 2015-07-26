@@ -52,7 +52,8 @@ config PMIC_ADP5520
 config MFD_AAT2870_CORE
 	bool "AnalogicTech AAT2870"
 	select MFD_CORE
-	depends on I2C=y && GPIOLIB
+	depends on I2C=y
+	depends on GPIOLIB || COMPILE_TEST
 	help
 	  If you say yes here you get support for the AAT2870.
 	  This driver provides common support for accessing the device,
@@ -94,6 +95,8 @@ config MFD_AXP20X
 config MFD_CROS_EC
 	tristate "ChromeOS Embedded Controller"
 	select MFD_CORE
+	select CHROME_PLATFORMS
+	select CROS_EC_PROTO
 	help
 	  If you say Y here you get support for the ChromeOS Embedded
 	  Controller (EC) providing keyboard, battery and power services.
@@ -102,7 +105,7 @@ config MFD_CROS_EC
 
 config MFD_CROS_EC_I2C
 	tristate "ChromeOS Embedded Controller (I2C)"
-	depends on MFD_CROS_EC && I2C
+	depends on MFD_CROS_EC && CROS_EC_PROTO && I2C
 
 	help
 	  If you say Y here, you get support for talking to the ChromeOS
@@ -112,7 +115,7 @@ config MFD_CROS_EC_I2C
 
 config MFD_CROS_EC_SPI
 	tristate "ChromeOS Embedded Controller (SPI)"
-	depends on MFD_CROS_EC && SPI && OF
+	depends on MFD_CROS_EC && CROS_EC_PROTO && SPI && OF
 
 	---help---
 	  If you say Y here, you get support for talking to the ChromeOS EC
@@ -1115,7 +1118,8 @@ config MFD_TPS6586X
 
 config MFD_TPS65910
 	bool "TI TPS65910 Power Management chip"
-	depends on I2C=y && GPIOLIB
+	depends on I2C=y
+	depends on GPIOLIB || COMPILE_TEST
 	select MFD_CORE
 	select REGMAP_I2C
 	select REGMAP_IRQ
@@ -1260,6 +1264,7 @@ config MFD_TIMBERDALE
 config MFD_TC3589X
 	bool "Toshiba TC35892 and variants"
 	depends on I2C=y
+	depends on OF
 	select MFD_CORE
 	help
 	  Support for the Toshiba TC35892 and variants I/O Expander.
@@ -1413,7 +1418,7 @@ config MFD_WM8994
 	depends on I2C
 	help
 	  The WM8994 is a highly integrated hi-fi CODEC designed for
-	  smartphone applicatiosn.  As well as audio functionality it
+	  smartphone applications.  As well as audio functionality it
 	  has on board GPIO and regulator functionality which is
 	  supported via the relevant subsystems.  This driver provides
 	  core support for the WM8994, in order to use the actual

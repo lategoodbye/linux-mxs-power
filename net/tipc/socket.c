@@ -35,13 +35,13 @@
  */
 
 #include <linux/rhashtable.h>
-#include <linux/jhash.h>
 #include "core.h"
 #include "name_table.h"
 #include "node.h"
 #include "link.h"
 #include "name_distr.h"
 #include "socket.h"
+#include "bcast.h"
 
 #define SS_LISTENING		-1	/* socket is listening */
 #define SS_READY		-2	/* socket is connectionless */
@@ -132,6 +132,8 @@ static const struct nla_policy tipc_nl_sock_policy[TIPC_NLA_SOCK_MAX + 1] = {
 	[TIPC_NLA_SOCK_CON]		= { .type = NLA_NESTED },
 	[TIPC_NLA_SOCK_HAS_PUBL]	= { .type = NLA_FLAG }
 };
+
+static const struct rhashtable_params tsk_rht_params;
 
 /*
  * Revised TIPC socket locking policy:
@@ -341,7 +343,7 @@ static int tipc_sk_create(struct net *net, struct socket *sock,
 	}
 
 	/* Allocate socket's protocol area */
-	sk = sk_alloc(net, AF_TIPC, GFP_KERNEL, &tipc_proto);
+	sk = sk_alloc(net, AF_TIPC, GFP_KERNEL, &tipc_proto, kern);
 	if (sk == NULL)
 		return -ENOMEM;
 
@@ -408,7 +410,7 @@ static int tipc_release(struct socket *sock)
 	struct net *net;
 	struct tipc_sock *tsk;
 	struct sk_buff *skb;
-	u32 dnode, probing_state;
+	u32 dnode;
 
 	/*
 	 * Exit if socket isn't fully initialized (occurs when a failed accept()
@@ -446,10 +448,7 @@ static int tipc_release(struct socket *sock)
 	}
 
 	tipc_sk_withdraw(tsk, 0, NULL);
-	probing_state = tsk->probing_state;
-	if (del_timer_sync(&sk->sk_timer) &&
-	    probing_state != TIPC_CONN_PROBING)
-		sock_put(sk);
+	sk_stop_timer(sk, &sk->sk_timer);
 	tipc_sk_remove(tsk);
 	if (tsk->connected) {
 		skb = tipc_msg_create(TIPC_CRITICAL_IMPORTANCE,
@@ -1763,13 +1762,14 @@ static int tipc_sk_enqueue(struct sk_buff_head *inputq, struct sock *sk,
 int tipc_sk_rcv(struct net *net, struct sk_buff_head *inputq)
 {
 	u32 dnode, dport = 0;
-	int err = -TIPC_ERR_NO_PORT;
+	int err;
 	struct sk_buff *skb;
 	struct tipc_sock *tsk;
 	struct tipc_net *tn;
 	struct sock *sk;
 
 	while (skb_queue_len(inputq)) {
+		err = -TIPC_ERR_NO_PORT;
 		skb = NULL;
 		dport = tipc_skb_peek_port(inputq, dport);
 		tsk = tipc_sk_lookup(net, dport);
@@ -1850,6 +1850,8 @@ static int tipc_connect(struct socket *sock, struct sockaddr *dest,
 		if (dst->family == AF_UNSPEC) {
 			memset(&tsk->remote, 0, sizeof(struct sockaddr_tipc));
 			tsk->connected = 0;
+		} else if (destlen != sizeof(struct sockaddr_tipc)) {
+			res = -EINVAL;
 		} else {
 			memcpy(&tsk->remote, dest, destlen);
 			tsk->connected = 1;
@@ -2005,6 +2007,7 @@ static int tipc_accept(struct socket *sock, struct socket *new_sock, int flags)
 	res = tipc_sk_create(sock_net(sock->sk), new_sock, 0, 1);
 	if (res)
 		goto exit;
+	security_sk_clone(sock->sk, new_sock->sk);
 
 	new_sk = new_sock->sk;
 	new_tsock = tipc_sk(new_sk);
@@ -2138,11 +2141,17 @@ static void tipc_sk_timeout(unsigned long data)
 	peer_node = tsk_peer_node(tsk);
 
 	if (tsk->probing_state == TIPC_CONN_PROBING) {
-		/* Previous probe not answered -> self abort */
-		skb = tipc_msg_create(TIPC_CRITICAL_IMPORTANCE,
-				      TIPC_CONN_MSG, SHORT_H_SIZE, 0,
-				      own_node, peer_node, tsk->portid,
-				      peer_port, TIPC_ERR_NO_PORT);
+		if (!sock_owned_by_user(sk)) {
+			sk->sk_socket->state = SS_DISCONNECTING;
+			tsk->connected = 0;
+			tipc_node_remove_conn(sock_net(sk), tsk_peer_node(tsk),
+					      tsk_peer_port(tsk));
+			sk->sk_state_change(sk);
+		} else {
+			/* Try again later */
+			sk_reset_timer(sk, &sk->sk_timer, (HZ / 20));
+		}
+
 	} else {
 		skb = tipc_msg_create(CONN_MANAGER, CONN_PROBE,
 				      INT_H_SIZE, 0, peer_node, own_node,
@@ -2245,7 +2254,7 @@ static struct tipc_sock *tipc_sk_lookup(struct net *net, u32 portid)
 	struct tipc_sock *tsk;
 
 	rcu_read_lock();
-	tsk = rhashtable_lookup(&tn->sk_rht, &portid);
+	tsk = rhashtable_lookup_fast(&tn->sk_rht, &portid, tsk_rht_params);
 	if (tsk)
 		sock_hold(&tsk->sk);
 	rcu_read_unlock();
@@ -2267,7 +2276,8 @@ static int tipc_sk_insert(struct tipc_sock *tsk)
 			portid = TIPC_MIN_PORT;
 		tsk->portid = portid;
 		sock_hold(&tsk->sk);
-		if (rhashtable_lookup_insert(&tn->sk_rht, &tsk->node))
+		if (!rhashtable_lookup_insert_fast(&tn->sk_rht, &tsk->node,
+						   tsk_rht_params))
 			return 0;
 		sock_put(&tsk->sk);
 	}
@@ -2280,26 +2290,27 @@ static void tipc_sk_remove(struct tipc_sock *tsk)
 	struct sock *sk = &tsk->sk;
 	struct tipc_net *tn = net_generic(sock_net(sk), tipc_net_id);
 
-	if (rhashtable_remove(&tn->sk_rht, &tsk->node)) {
+	if (!rhashtable_remove_fast(&tn->sk_rht, &tsk->node, tsk_rht_params)) {
 		WARN_ON(atomic_read(&sk->sk_refcnt) == 1);
 		__sock_put(sk);
 	}
 }
 
+static const struct rhashtable_params tsk_rht_params = {
+	.nelem_hint = 192,
+	.head_offset = offsetof(struct tipc_sock, node),
+	.key_offset = offsetof(struct tipc_sock, portid),
+	.key_len = sizeof(u32), /* portid */
+	.max_size = 1048576,
+	.min_size = 256,
+	.automatic_shrinking = true,
+};
+
 int tipc_sk_rht_init(struct net *net)
 {
 	struct tipc_net *tn = net_generic(net, tipc_net_id);
-	struct rhashtable_params rht_params = {
-		.nelem_hint = 192,
-		.head_offset = offsetof(struct tipc_sock, node),
-		.key_offset = offsetof(struct tipc_sock, portid),
-		.key_len = sizeof(u32), /* portid */
-		.hashfn = jhash,
-		.max_size = 1048576,
-		.min_size = 256,
-	};
 
-	return rhashtable_init(&tn->sk_rht, &rht_params);
+	return rhashtable_init(&tn->sk_rht, &tsk_rht_params);
 }
 
 void tipc_sk_rht_destroy(struct net *net)

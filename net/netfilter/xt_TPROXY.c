@@ -272,7 +272,7 @@ tproxy_handle_time_wait4(struct sk_buff *skb, __be32 laddr, __be16 lport,
 					    hp->source, lport ? lport : hp->dest,
 					    skb->dev, NFT_LOOKUP_LISTENER);
 		if (sk2) {
-			inet_twsk_deschedule(inet_twsk(sk), &tcp_death_row);
+			inet_twsk_deschedule(inet_twsk(sk));
 			inet_twsk_put(inet_twsk(sk));
 			sk = sk2;
 		}
@@ -437,7 +437,7 @@ tproxy_handle_time_wait6(struct sk_buff *skb, int tproto, int thoff,
 					    tgi->lport ? tgi->lport : hp->dest,
 					    skb->dev, NFT_LOOKUP_LISTENER);
 		if (sk2) {
-			inet_twsk_deschedule(inet_twsk(sk), &tcp_death_row);
+			inet_twsk_deschedule(inet_twsk(sk));
 			inet_twsk_put(inet_twsk(sk));
 			sk = sk2;
 		}
@@ -519,8 +519,8 @@ static int tproxy_tg6_check(const struct xt_tgchk_param *par)
 {
 	const struct ip6t_ip6 *i = par->entryinfo;
 
-	if ((i->proto == IPPROTO_TCP || i->proto == IPPROTO_UDP)
-	    && !(i->flags & IP6T_INV_PROTO))
+	if ((i->proto == IPPROTO_TCP || i->proto == IPPROTO_UDP) &&
+	    !(i->invflags & IP6T_INV_PROTO))
 		return 0;
 
 	pr_info("Can be used only in combination with "

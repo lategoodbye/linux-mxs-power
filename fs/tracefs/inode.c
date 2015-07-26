@@ -381,6 +381,9 @@ static struct dentry *end_creating(struct dentry *dentry)
  * pointer must be passed to the tracefs_remove() function when the file is
  * to be removed (no automatic cleanup happens if your module is unloaded,
  * you are responsible here.)  If an error occurs, %NULL will be returned.
+ *
+ * If tracefs is not enabled in the kernel, the value -%ENODEV will be
+ * returned.
  */
 struct dentry *tracefs_create_file(const char *name, umode_t mode,
 				   struct dentry *parent, void *data,
@@ -447,6 +450,9 @@ static struct dentry *__create_dir(const char *name, struct dentry *parent,
  * This function will return a pointer to a dentry if it succeeds.  This
  * pointer must be passed to the tracefs_remove() function when the file is
  * to be removed. If an error occurs, %NULL will be returned.
+ *
+ * If tracing is not enabled in the kernel, the value -%ENODEV will be
+ * returned.
  */
 struct dentry *tracefs_create_dir(const char *name, struct dentry *parent)
 {
@@ -464,7 +470,7 @@ struct dentry *tracefs_create_dir(const char *name, struct dentry *parent)
  *
  * The instances directory is special as it allows for mkdir and rmdir to
  * to be done by userspace. When a mkdir or rmdir is performed, the inode
- * locks are released and the methods passed in (@mkdir and @rmdir) are
+ * locks are released and the methhods passed in (@mkdir and @rmdir) are
  * called without locks and with the name of the directory being created
  * within the instances directory.
  *
@@ -490,16 +496,11 @@ struct dentry *tracefs_create_instance_dir(const char *name, struct dentry *pare
 	return dentry;
 }
 
-static inline int tracefs_positive(struct dentry *dentry)
-{
-	return dentry->d_inode && !d_unhashed(dentry);
-}
-
 static int __tracefs_remove(struct dentry *dentry, struct dentry *parent)
 {
 	int ret = 0;
 
-	if (tracefs_positive(dentry)) {
+	if (simple_positive(dentry)) {
 		if (dentry->d_inode) {
 			dget(dentry);
 			switch (dentry->d_inode->i_mode & S_IFMT) {
@@ -576,7 +577,7 @@ void tracefs_remove_recursive(struct dentry *dentry)
 	 */
 	spin_lock(&parent->d_lock);
 	list_for_each_entry(child, &parent->d_subdirs, d_child) {
-		if (!tracefs_positive(child))
+		if (!simple_positive(child))
 			continue;
 
 		/* perhaps simple_empty(child) makes more sense */
@@ -597,7 +598,7 @@ void tracefs_remove_recursive(struct dentry *dentry)
 		 * from d_subdirs. When releasing the parent->d_lock we can
 		 * no longer trust that the next pointer is valid.
 		 * Restart the loop. We'll skip this one with the
-		 * tracefs_positive() check.
+		 * simple_positive() check.
 		 */
 		goto loop;
 	}
@@ -625,14 +626,12 @@ bool tracefs_initialized(void)
 	return tracefs_registered;
 }
 
-static struct kobject *trace_kobj;
-
 static int __init tracefs_init(void)
 {
 	int retval;
 
-	trace_kobj = kobject_create_and_add("tracing", kernel_kobj);
-	if (!trace_kobj)
+	retval = sysfs_create_mount_point(kernel_kobj, "tracing");
+	if (retval)
 		return -EINVAL;
 
 	retval = register_filesystem(&trace_fs_type);

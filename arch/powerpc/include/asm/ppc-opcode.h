@@ -136,6 +136,8 @@
 #define PPC_INST_DCBAL			0x7c2005ec
 #define PPC_INST_DCBZL			0x7c2007ec
 #define PPC_INST_ICBT			0x7c00002c
+#define PPC_INST_ICSWX			0x7c00032d
+#define PPC_INST_ICSWEPX		0x7c00076d
 #define PPC_INST_ISEL			0x7c00001e
 #define PPC_INST_ISEL_MASK		0xfc00003e
 #define PPC_INST_LDARX			0x7c0000a8
@@ -153,6 +155,7 @@
 #define PPC_INST_MFSPR_PVR_MASK		0xfc1fffff
 #define PPC_INST_MFTMR			0x7c0002dc
 #define PPC_INST_MSGSND			0x7c00019c
+#define PPC_INST_MSGCLR			0x7c0001dc
 #define PPC_INST_MSGSNDP		0x7c00011c
 #define PPC_INST_MTTMR			0x7c0003dc
 #define PPC_INST_NOP			0x60000000
@@ -311,6 +314,8 @@
 					___PPC_RB(b) | __PPC_EH(eh))
 #define PPC_MSGSND(b)		stringify_in_c(.long PPC_INST_MSGSND | \
 					___PPC_RB(b))
+#define PPC_MSGCLR(b)		stringify_in_c(.long PPC_INST_MSGCLR | \
+					___PPC_RB(b))
 #define PPC_MSGSNDP(b)		stringify_in_c(.long PPC_INST_MSGSNDP | \
 					___PPC_RB(b))
 #define PPC_POPCNTB(a, s)	stringify_in_c(.long PPC_INST_POPCNTB | \
@@ -399,5 +404,16 @@
 					       TMRN(tmr) | ___PPC_RS(r))
 #define MFTMR(tmr, r)		stringify_in_c(.long PPC_INST_MFTMR | \
 					       TMRN(tmr) | ___PPC_RT(r))
+
+/* Coprocessor instructions */
+#define PPC_ICSWX(s, a, b)	stringify_in_c(.long PPC_INST_ICSWX |	\
+					       ___PPC_RS(s) |		\
+					       ___PPC_RA(a) |		\
+					       ___PPC_RB(b))
+#define PPC_ICSWEPX(s, a, b)	stringify_in_c(.long PPC_INST_ICSWEPX | \
+					       ___PPC_RS(s) |		\
+					       ___PPC_RA(a) |		\
+					       ___PPC_RB(b))
+
 
 #endif /* _ASM_POWERPC_PPC_OPCODE_H */

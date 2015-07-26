@@ -661,18 +661,29 @@ int vfio_add_group_dev(struct device *dev,
 EXPORT_SYMBOL_GPL(vfio_add_group_dev);
 
 /**
- * Get a reference to the vfio_device for a device that is known to
- * be bound to a vfio driver.  The driver implicitly holds a
- * vfio_device reference between vfio_add_group_dev and
- * vfio_del_group_dev.  We can therefore use drvdata to increment
- * that reference from the struct device.  This additional
- * reference must be released by calling vfio_device_put.
+ * Get a reference to the vfio_device for a device.  Even if the
+ * caller thinks they own the device, they could be racing with a
+ * release call path, so we can't trust drvdata for the shortcut.
+ * Go the long way around, from the iommu_group to the vfio_group
+ * to the vfio_device.
  */
 struct vfio_device *vfio_device_get_from_dev(struct device *dev)
 {
-	struct vfio_device *device = dev_get_drvdata(dev);
+	struct iommu_group *iommu_group;
+	struct vfio_group *group;
+	struct vfio_device *device;
 
-	vfio_device_get(device);
+	iommu_group = iommu_group_get(dev);
+	if (!iommu_group)
+		return NULL;
+
+	group = vfio_group_get_from_iommu(iommu_group);
+	iommu_group_put(iommu_group);
+	if (!group)
+		return NULL;
+
+	device = vfio_group_get_device(group, dev);
+	vfio_group_put(group);
 
 	return device;
 }
@@ -710,6 +721,8 @@ void *vfio_del_group_dev(struct device *dev)
 	void *device_data = device->device_data;
 	struct vfio_unbound_dev *unbound;
 	unsigned int i = 0;
+	long ret;
+	bool interrupted = false;
 
 	/*
 	 * The group exists so long as we have a device reference.  Get
@@ -755,9 +768,22 @@ void *vfio_del_group_dev(struct device *dev)
 
 		vfio_device_put(device);
 
-	} while (wait_event_interruptible_timeout(vfio.release_q,
-						  !vfio_dev_present(group, dev),
-						  HZ * 10) <= 0);
+		if (interrupted) {
+			ret = wait_event_timeout(vfio.release_q,
+					!vfio_dev_present(group, dev), HZ * 10);
+		} else {
+			ret = wait_event_interruptible_timeout(vfio.release_q,
+					!vfio_dev_present(group, dev), HZ * 10);
+			if (ret == -ERESTARTSYS) {
+				interrupted = true;
+				dev_warn(dev,
+					 "Device is currently in use, task"
+					 " \"%s\" (%d) "
+					 "blocked until device is released",
+					 current->comm, task_pid_nr(current));
+			}
+		}
+	} while (ret <= 0);
 
 	vfio_group_put(group);
 
@@ -1552,11 +1578,6 @@ static int __init vfio_init(void)
 	if (ret)
 		goto err_cdev_add;
 
-	/* Start the virqfd cleanup handler used by some VFIO bus drivers */
-	ret = vfio_virqfd_init();
-	if (ret)
-		goto err_virqfd;
-
 	pr_info(DRIVER_DESC " version: " DRIVER_VERSION "\n");
 
 	/*
@@ -1569,8 +1590,6 @@ static int __init vfio_init(void)
 
 	return 0;
 
-err_virqfd:
-	cdev_del(&vfio.group_cdev);
 err_cdev_add:
 	unregister_chrdev_region(vfio.group_devt, MINORMASK);
 err_alloc_chrdev:
@@ -1585,7 +1604,6 @@ static void __exit vfio_cleanup(void)
 {
 	WARN_ON(!list_empty(&vfio.group_list));
 
-	vfio_virqfd_exit();
 	idr_destroy(&vfio.group_idr);
 	cdev_del(&vfio.group_cdev);
 	unregister_chrdev_region(vfio.group_devt, MINORMASK);

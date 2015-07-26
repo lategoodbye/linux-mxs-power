@@ -26,12 +26,12 @@
 #include <linux/of_irq.h>
 #include <linux/uaccess.h>
 
-#include <linux/irqchip/arm-gic.h>
-
 #include <asm/kvm_emulate.h>
 #include <asm/kvm_arm.h>
 #include <asm/kvm_mmu.h>
 #include <trace/events/kvm.h>
+#include <asm/kvm.h>
+#include <kvm/iodev.h>
 
 /*
  * How the whole thing works (courtesy of Christoffer Dall):
@@ -712,24 +712,21 @@ void vgic_unqueue_irqs(struct kvm_vcpu *vcpu)
 }
 
 const
-struct kvm_mmio_range *vgic_find_range(const struct kvm_mmio_range *ranges,
-				       struct kvm_exit_mmio *mmio,
-				       phys_addr_t offset)
+struct vgic_io_range *vgic_find_range(const struct vgic_io_range *ranges,
+				      int len, gpa_t offset)
 {
-	const struct kvm_mmio_range *r = ranges;
-
-	while (r->len) {
-		if (offset >= r->base &&
-		    (offset + mmio->len) <= (r->base + r->len))
-			return r;
-		r++;
+	while (ranges->len) {
+		if (offset >= ranges->base &&
+		    (offset + len) <= (ranges->base + ranges->len))
+			return ranges;
+		ranges++;
 	}
 
 	return NULL;
 }
 
 static bool vgic_validate_access(const struct vgic_dist *dist,
-				 const struct kvm_mmio_range *range,
+				 const struct vgic_io_range *range,
 				 unsigned long offset)
 {
 	int irq;
@@ -757,9 +754,8 @@ static bool vgic_validate_access(const struct vgic_dist *dist,
 static bool call_range_handler(struct kvm_vcpu *vcpu,
 			       struct kvm_exit_mmio *mmio,
 			       unsigned long offset,
-			       const struct kvm_mmio_range *range)
+			       const struct vgic_io_range *range)
 {
-	u32 *data32 = (void *)mmio->data;
 	struct kvm_exit_mmio mmio32;
 	bool ret;
 
@@ -776,91 +772,142 @@ static bool call_range_handler(struct kvm_vcpu *vcpu,
 	mmio32.private = mmio->private;
 
 	mmio32.phys_addr = mmio->phys_addr + 4;
-	if (mmio->is_write)
-		*(u32 *)mmio32.data = data32[1];
+	mmio32.data = &((u32 *)mmio->data)[1];
 	ret = range->handle_mmio(vcpu, &mmio32, offset + 4);
-	if (!mmio->is_write)
-		data32[1] = *(u32 *)mmio32.data;
 
 	mmio32.phys_addr = mmio->phys_addr;
-	if (mmio->is_write)
-		*(u32 *)mmio32.data = data32[0];
+	mmio32.data = &((u32 *)mmio->data)[0];
 	ret |= range->handle_mmio(vcpu, &mmio32, offset);
-	if (!mmio->is_write)
-		data32[0] = *(u32 *)mmio32.data;
 
 	return ret;
 }
 
 /**
- * vgic_handle_mmio_range - handle an in-kernel MMIO access
+ * vgic_handle_mmio_access - handle an in-kernel MMIO access
+ * This is called by the read/write KVM IO device wrappers below.
  * @vcpu:	pointer to the vcpu performing the access
- * @run:	pointer to the kvm_run structure
- * @mmio:	pointer to the data describing the access
- * @ranges:	array of MMIO ranges in a given region
- * @mmio_base:	base address of that region
+ * @this:	pointer to the KVM IO device in charge
+ * @addr:	guest physical address of the access
+ * @len:	size of the access
+ * @val:	pointer to the data region
+ * @is_write:	read or write access
  *
  * returns true if the MMIO access could be performed
  */
-bool vgic_handle_mmio_range(struct kvm_vcpu *vcpu, struct kvm_run *run,
-			    struct kvm_exit_mmio *mmio,
-			    const struct kvm_mmio_range *ranges,
-			    unsigned long mmio_base)
+static int vgic_handle_mmio_access(struct kvm_vcpu *vcpu,
+				   struct kvm_io_device *this, gpa_t addr,
+				   int len, void *val, bool is_write)
 {
-	const struct kvm_mmio_range *range;
 	struct vgic_dist *dist = &vcpu->kvm->arch.vgic;
+	struct vgic_io_device *iodev = container_of(this,
+						    struct vgic_io_device, dev);
+	struct kvm_run *run = vcpu->run;
+	const struct vgic_io_range *range;
+	struct kvm_exit_mmio mmio;
 	bool updated_state;
-	unsigned long offset;
+	gpa_t offset;
 
-	offset = mmio->phys_addr - mmio_base;
-	range = vgic_find_range(ranges, mmio, offset);
+	offset = addr - iodev->addr;
+	range = vgic_find_range(iodev->reg_ranges, len, offset);
 	if (unlikely(!range || !range->handle_mmio)) {
-		pr_warn("Unhandled access %d %08llx %d\n",
-			mmio->is_write, mmio->phys_addr, mmio->len);
-		return false;
+		pr_warn("Unhandled access %d %08llx %d\n", is_write, addr, len);
+		return -ENXIO;
 	}
 
-	spin_lock(&vcpu->kvm->arch.vgic.lock);
+	mmio.phys_addr = addr;
+	mmio.len = len;
+	mmio.is_write = is_write;
+	mmio.data = val;
+	mmio.private = iodev->redist_vcpu;
+
+	spin_lock(&dist->lock);
 	offset -= range->base;
 	if (vgic_validate_access(dist, range, offset)) {
-		updated_state = call_range_handler(vcpu, mmio, offset, range);
+		updated_state = call_range_handler(vcpu, &mmio, offset, range);
 	} else {
-		if (!mmio->is_write)
-			memset(mmio->data, 0, mmio->len);
+		if (!is_write)
+			memset(val, 0, len);
 		updated_state = false;
 	}
-	spin_unlock(&vcpu->kvm->arch.vgic.lock);
-	kvm_prepare_mmio(run, mmio);
+	spin_unlock(&dist->lock);
+	run->mmio.is_write	= is_write;
+	run->mmio.len		= len;
+	run->mmio.phys_addr	= addr;
+	memcpy(run->mmio.data, val, len);
+
 	kvm_handle_mmio_return(vcpu, run);
 
 	if (updated_state)
 		vgic_kick_vcpus(vcpu->kvm);
 
-	return true;
+	return 0;
 }
 
-/**
- * vgic_handle_mmio - handle an in-kernel MMIO access for the GIC emulation
- * @vcpu:      pointer to the vcpu performing the access
- * @run:       pointer to the kvm_run structure
- * @mmio:      pointer to the data describing the access
- *
- * returns true if the MMIO access has been performed in kernel space,
- * and false if it needs to be emulated in user space.
- * Calls the actual handling routine for the selected VGIC model.
- */
-bool vgic_handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *run,
-		      struct kvm_exit_mmio *mmio)
+static int vgic_handle_mmio_read(struct kvm_vcpu *vcpu,
+				 struct kvm_io_device *this,
+				 gpa_t addr, int len, void *val)
 {
-	if (!irqchip_in_kernel(vcpu->kvm))
-		return false;
+	return vgic_handle_mmio_access(vcpu, this, addr, len, val, false);
+}
 
-	/*
-	 * This will currently call either vgic_v2_handle_mmio() or
-	 * vgic_v3_handle_mmio(), which in turn will call
-	 * vgic_handle_mmio_range() defined above.
-	 */
-	return vcpu->kvm->arch.vgic.vm_ops.handle_mmio(vcpu, run, mmio);
+static int vgic_handle_mmio_write(struct kvm_vcpu *vcpu,
+				  struct kvm_io_device *this,
+				  gpa_t addr, int len, const void *val)
+{
+	return vgic_handle_mmio_access(vcpu, this, addr, len, (void *)val,
+				       true);
+}
+
+struct kvm_io_device_ops vgic_io_ops = {
+	.read	= vgic_handle_mmio_read,
+	.write	= vgic_handle_mmio_write,
+};
+
+/**
+ * vgic_register_kvm_io_dev - register VGIC register frame on the KVM I/O bus
+ * @kvm:            The VM structure pointer
+ * @base:           The (guest) base address for the register frame
+ * @len:            Length of the register frame window
+ * @ranges:         Describing the handler functions for each register
+ * @redist_vcpu_id: The VCPU ID to pass on to the handlers on call
+ * @iodev:          Points to memory to be passed on to the handler
+ *
+ * @iodev stores the parameters of this function to be usable by the handler
+ * respectively the dispatcher function (since the KVM I/O bus framework lacks
+ * an opaque parameter). Initialization is done in this function, but the
+ * reference should be valid and unique for the whole VGIC lifetime.
+ * If the register frame is not mapped for a specific VCPU, pass -1 to
+ * @redist_vcpu_id.
+ */
+int vgic_register_kvm_io_dev(struct kvm *kvm, gpa_t base, int len,
+			     const struct vgic_io_range *ranges,
+			     int redist_vcpu_id,
+			     struct vgic_io_device *iodev)
+{
+	struct kvm_vcpu *vcpu = NULL;
+	int ret;
+
+	if (redist_vcpu_id >= 0)
+		vcpu = kvm_get_vcpu(kvm, redist_vcpu_id);
+
+	iodev->addr		= base;
+	iodev->len		= len;
+	iodev->reg_ranges	= ranges;
+	iodev->redist_vcpu	= vcpu;
+
+	kvm_iodevice_init(&iodev->dev, &vgic_io_ops);
+
+	mutex_lock(&kvm->slots_lock);
+
+	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, base, len,
+				      &iodev->dev);
+	mutex_unlock(&kvm->slots_lock);
+
+	/* Mark the iodev as invalid if registration fails. */
+	if (ret)
+		iodev->dev.ops = NULL;
+
+	return ret;
 }
 
 static int vgic_nr_shared_irqs(struct vgic_dist *dist)
@@ -1069,6 +1116,7 @@ static void vgic_queue_irq_to_lr(struct kvm_vcpu *vcpu, int irq,
 		vlr.state |= LR_EOI_INT;
 
 	vgic_set_lr(vcpu, lr_nr, vlr);
+	vgic_sync_lr_elrsr(vcpu, lr_nr, vlr);
 }
 
 /*
@@ -1099,7 +1147,6 @@ bool vgic_queue_irq(struct kvm_vcpu *vcpu, u8 sgi_source_id, int irq)
 			kvm_debug("LR%d piggyback for IRQ%d\n", lr, vlr.irq);
 			BUG_ON(!test_bit(lr, vgic_cpu->lr_used));
 			vgic_queue_irq_to_lr(vcpu, irq, lr, vlr);
-			vgic_sync_lr_elrsr(vcpu, lr, vlr);
 			return true;
 		}
 	}
@@ -1118,7 +1165,6 @@ bool vgic_queue_irq(struct kvm_vcpu *vcpu, u8 sgi_source_id, int irq)
 	vlr.source = sgi_source_id;
 	vlr.state = 0;
 	vgic_queue_irq_to_lr(vcpu, irq, lr, vlr);
-	vgic_sync_lr_elrsr(vcpu, lr, vlr);
 
 	return true;
 }
@@ -1512,6 +1558,9 @@ int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, unsigned int irq_num,
 		if (ret)
 			goto out;
 	}
+
+	if (irq_num >= min(kvm->arch.vgic.nr_irqs, 1020))
+		return -EINVAL;
 
 	vcpu_id = vgic_update_irq_pending(kvm, cpuid, irq_num, level);
 	if (vcpu_id >= 0) {
@@ -2002,12 +2051,9 @@ int vgic_get_common_attr(struct kvm_device *dev, struct kvm_device_attr *attr)
 	return r;
 }
 
-int vgic_has_attr_regs(const struct kvm_mmio_range *ranges, phys_addr_t offset)
+int vgic_has_attr_regs(const struct vgic_io_range *ranges, phys_addr_t offset)
 {
-	struct kvm_exit_mmio dev_attr_mmio;
-
-	dev_attr_mmio.len = 4;
-	if (vgic_find_range(ranges, &dev_attr_mmio, offset))
+	if (vgic_find_range(ranges, 4, offset))
 		return 0;
 	else
 		return -ENXIO;
@@ -2080,9 +2126,6 @@ int kvm_vgic_hyp_init(void)
 		goto out_free_irq;
 	}
 
-	/* Callback into for arch code for setup */
-	vgic_arch_setup(vgic);
-
 	on_each_cpu(vgic_init_maintenance_interrupt, NULL, 1);
 
 	return 0;
@@ -2096,7 +2139,7 @@ int kvm_irq_map_gsi(struct kvm *kvm,
 		    struct kvm_kernel_irq_routing_entry *entries,
 		    int gsi)
 {
-	return gsi;
+	return 0;
 }
 
 int kvm_irq_map_chip_pin(struct kvm *kvm, unsigned irqchip, unsigned pin)
@@ -2113,10 +2156,7 @@ int kvm_set_irq(struct kvm *kvm, int irq_source_id,
 
 	BUG_ON(!vgic_initialized(kvm));
 
-	if (spi > kvm->arch.vgic.nr_irqs)
-		return -EINVAL;
 	return kvm_vgic_inject_irq(kvm, 0, spi, level);
-
 }
 
 /* MSI not implemented yet */

@@ -96,6 +96,7 @@ enum {
 	X86_BR_NO_TX		= 1 << 14,/* not in transaction */
 	X86_BR_ZERO_CALL	= 1 << 15,/* zero length call */
 	X86_BR_CALL_STACK	= 1 << 16,/* call stack */
+	X86_BR_IND_JMP		= 1 << 17,/* indirect jump */
 };
 
 #define X86_BR_PLM (X86_BR_USER | X86_BR_KERNEL)
@@ -113,6 +114,7 @@ enum {
 	 X86_BR_IRQ	 |\
 	 X86_BR_ABORT	 |\
 	 X86_BR_IND_CALL |\
+	 X86_BR_IND_JMP  |\
 	 X86_BR_ZERO_CALL)
 
 #define X86_BR_ALL (X86_BR_PLM | X86_BR_ANY)
@@ -132,17 +134,22 @@ static void intel_pmu_lbr_filter(struct cpu_hw_events *cpuc);
  * otherwise it becomes near impossible to get a reliable stack.
  */
 
-static void __intel_pmu_lbr_enable(void)
+static void __intel_pmu_lbr_enable(bool pmi)
 {
 	struct cpu_hw_events *cpuc = this_cpu_ptr(&cpu_hw_events);
-	u64 debugctl, lbr_select = 0;
+	u64 debugctl, lbr_select = 0, orig_debugctl;
 
-	if (cpuc->lbr_sel) {
+	/*
+	 * No need to reprogram LBR_SELECT in a PMI, as it
+	 * did not change.
+	 */
+	if (cpuc->lbr_sel && !pmi) {
 		lbr_select = cpuc->lbr_sel->config;
 		wrmsrl(MSR_LBR_SELECT, lbr_select);
 	}
 
 	rdmsrl(MSR_IA32_DEBUGCTLMSR, debugctl);
+	orig_debugctl = debugctl;
 	debugctl |= DEBUGCTLMSR_LBR;
 	/*
 	 * LBR callstack does not work well with FREEZE_LBRS_ON_PMI.
@@ -151,7 +158,8 @@ static void __intel_pmu_lbr_enable(void)
 	 */
 	if (!(lbr_select & LBR_CALL_STACK))
 		debugctl |= DEBUGCTLMSR_FREEZE_LBRS_ON_PMI;
-	wrmsrl(MSR_IA32_DEBUGCTLMSR, debugctl);
+	if (orig_debugctl != debugctl)
+		wrmsrl(MSR_IA32_DEBUGCTLMSR, debugctl);
 }
 
 static void __intel_pmu_lbr_disable(void)
@@ -256,9 +264,6 @@ void intel_pmu_lbr_sched_task(struct perf_event_context *ctx, bool sched_in)
 	struct cpu_hw_events *cpuc = this_cpu_ptr(&cpu_hw_events);
 	struct x86_perf_task_context *task_ctx;
 
-	if (!x86_pmu.lbr_nr)
-		return;
-
 	/*
 	 * If LBR callstack feature is enabled and the stack was saved when
 	 * the task was scheduled out, restore the stack. Otherwise flush
@@ -351,12 +356,12 @@ void intel_pmu_lbr_disable(struct perf_event *event)
 	}
 }
 
-void intel_pmu_lbr_enable_all(void)
+void intel_pmu_lbr_enable_all(bool pmi)
 {
 	struct cpu_hw_events *cpuc = this_cpu_ptr(&cpu_hw_events);
 
 	if (cpuc->lbr_users)
-		__intel_pmu_lbr_enable();
+		__intel_pmu_lbr_enable(pmi);
 }
 
 void intel_pmu_lbr_disable_all(void)
@@ -516,6 +521,9 @@ static int intel_pmu_setup_sw_lbr_filter(struct perf_event *event)
 		mask |= X86_BR_CALL | X86_BR_IND_CALL | X86_BR_RET |
 			X86_BR_CALL_STACK;
 	}
+
+	if (br_type & PERF_SAMPLE_BRANCH_IND_JUMP)
+		mask |= X86_BR_IND_JMP;
 
 	/*
 	 * stash actual user request into reg, it may
@@ -730,7 +738,7 @@ static int branch_type(unsigned long from, unsigned long to, int abort)
 			break;
 		case 4:
 		case 5:
-			ret = X86_BR_JMP;
+			ret = X86_BR_IND_JMP;
 			break;
 		}
 		break;
@@ -838,6 +846,7 @@ static const int nhm_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
 	 */
 	[PERF_SAMPLE_BRANCH_IND_CALL_SHIFT] = LBR_IND_CALL | LBR_IND_JMP,
 	[PERF_SAMPLE_BRANCH_COND_SHIFT]     = LBR_JCC,
+	[PERF_SAMPLE_BRANCH_IND_JUMP_SHIFT] = LBR_IND_JMP,
 };
 
 static const int snb_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
@@ -850,6 +859,7 @@ static const int snb_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
 						| LBR_FAR,
 	[PERF_SAMPLE_BRANCH_IND_CALL_SHIFT]	= LBR_IND_CALL,
 	[PERF_SAMPLE_BRANCH_COND_SHIFT]		= LBR_JCC,
+	[PERF_SAMPLE_BRANCH_IND_JUMP_SHIFT]	= LBR_IND_JMP,
 };
 
 static const int hsw_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
@@ -864,6 +874,7 @@ static const int hsw_lbr_sel_map[PERF_SAMPLE_BRANCH_MAX_SHIFT] = {
 	[PERF_SAMPLE_BRANCH_COND_SHIFT]		= LBR_JCC,
 	[PERF_SAMPLE_BRANCH_CALL_STACK_SHIFT]	= LBR_REL_CALL | LBR_IND_CALL
 						| LBR_RETURN | LBR_CALL_STACK,
+	[PERF_SAMPLE_BRANCH_IND_JUMP_SHIFT]	= LBR_IND_JMP,
 };
 
 /* core */

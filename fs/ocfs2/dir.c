@@ -18,7 +18,7 @@
  *
  *   linux/fs/minix/dir.c
  *
- *   Copyright (C) 1991, 1992 Linux Torvalds
+ *   Copyright (C) 1991, 1992 Linus Torvalds
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public
@@ -480,7 +480,8 @@ static int ocfs2_check_dir_trailer(struct inode *dir, struct buffer_head *bh)
 
 	trailer = ocfs2_trailer_from_bh(bh, dir->i_sb);
 	if (!OCFS2_IS_VALID_DIR_TRAILER(trailer)) {
-		rc = ocfs2_error(dir->i_sb,
+		rc = -EINVAL;
+		ocfs2_error(dir->i_sb,
 			    "Invalid dirblock #%llu: "
 			    "signature = %.*s\n",
 			    (unsigned long long)bh->b_blocknr, 7,
@@ -488,7 +489,8 @@ static int ocfs2_check_dir_trailer(struct inode *dir, struct buffer_head *bh)
 		goto out;
 	}
 	if (le64_to_cpu(trailer->db_blkno) != bh->b_blocknr) {
-		rc = ocfs2_error(dir->i_sb,
+		rc = -EINVAL;
+		ocfs2_error(dir->i_sb,
 			    "Directory block #%llu has an invalid "
 			    "db_blkno of %llu",
 			    (unsigned long long)bh->b_blocknr,
@@ -497,7 +499,8 @@ static int ocfs2_check_dir_trailer(struct inode *dir, struct buffer_head *bh)
 	}
 	if (le64_to_cpu(trailer->db_parent_dinode) !=
 	    OCFS2_I(dir)->ip_blkno) {
-		rc = ocfs2_error(dir->i_sb,
+		rc = -EINVAL;
+		ocfs2_error(dir->i_sb,
 			    "Directory block #%llu on dinode "
 			    "#%llu has an invalid parent_dinode "
 			    "of %llu",
@@ -601,13 +604,14 @@ static int ocfs2_validate_dx_root(struct super_block *sb,
 	}
 
 	if (!OCFS2_IS_VALID_DX_ROOT(dx_root)) {
-		ret = ocfs2_error(sb,
+		ocfs2_error(sb,
 			    "Dir Index Root # %llu has bad signature %.*s",
 			    (unsigned long long)le64_to_cpu(dx_root->dr_blkno),
 			    7, dx_root->dr_signature);
+		return -EINVAL;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int ocfs2_read_dx_root(struct inode *dir, struct ocfs2_dinode *di,
@@ -644,11 +648,12 @@ static int ocfs2_validate_dx_leaf(struct super_block *sb,
 	}
 
 	if (!OCFS2_IS_VALID_DX_LEAF(dx_leaf)) {
-		ret = ocfs2_error(sb, "Dir Index Leaf has bad signature %.*s",
+		ocfs2_error(sb, "Dir Index Leaf has bad signature %.*s",
 			    7, dx_leaf->dl_signature);
+		return -EROFS;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int ocfs2_read_dx_leaf(struct inode *dir, u64 blkno,
@@ -807,10 +812,11 @@ static int ocfs2_dx_dir_lookup_rec(struct inode *inode,
 		el = &eb->h_list;
 
 		if (el->l_tree_depth) {
-			ret = ocfs2_error(inode->i_sb,
+			ocfs2_error(inode->i_sb,
 				    "Inode %lu has non zero tree depth in "
 				    "btree tree block %llu\n", inode->i_ino,
 				    (unsigned long long)eb_bh->b_blocknr);
+			ret = -EROFS;
 			goto out;
 		}
 	}
@@ -826,10 +832,11 @@ static int ocfs2_dx_dir_lookup_rec(struct inode *inode,
 	}
 
 	if (!found) {
-		ret = ocfs2_error(inode->i_sb, "Inode %lu has bad extent "
+		ocfs2_error(inode->i_sb, "Inode %lu has bad extent "
 			    "record (%u, %u, 0) in btree", inode->i_ino,
 			    le32_to_cpu(rec->e_cpos),
 			    ocfs2_rec_clusters(el, rec));
+		ret = -EROFS;
 		goto out;
 	}
 
@@ -1610,7 +1617,7 @@ int __ocfs2_add_entry(handle_t *handle,
 	struct ocfs2_dir_entry *de, *de1;
 	struct ocfs2_dinode *di = (struct ocfs2_dinode *)parent_fe_bh->b_data;
 	struct super_block *sb = dir->i_sb;
-	int retval, status;
+	int retval;
 	unsigned int size = sb->s_blocksize;
 	struct buffer_head *insert_bh = lookup->dl_leaf_bh;
 	char *data_start = insert_bh->b_data;
@@ -1688,25 +1695,25 @@ int __ocfs2_add_entry(handle_t *handle,
 			}
 
 			if (insert_bh == parent_fe_bh)
-				status = ocfs2_journal_access_di(handle,
+				retval = ocfs2_journal_access_di(handle,
 								 INODE_CACHE(dir),
 								 insert_bh,
 								 OCFS2_JOURNAL_ACCESS_WRITE);
 			else {
-				status = ocfs2_journal_access_db(handle,
+				retval = ocfs2_journal_access_db(handle,
 								 INODE_CACHE(dir),
 								 insert_bh,
 					      OCFS2_JOURNAL_ACCESS_WRITE);
 
-				if (ocfs2_dir_indexed(dir)) {
-					status = ocfs2_dx_dir_insert(dir,
+				if (!retval && ocfs2_dir_indexed(dir))
+					retval = ocfs2_dx_dir_insert(dir,
 								handle,
 								lookup);
-					if (status) {
-						mlog_errno(status);
-						goto bail;
-					}
-				}
+			}
+
+			if (retval) {
+				mlog_errno(retval);
+				goto bail;
 			}
 
 			/* By now the buffer is marked for journaling */
@@ -3536,13 +3543,10 @@ static void dx_leaf_sort_swap(void *a, void *b, int size)
 {
 	struct ocfs2_dx_entry *entry1 = a;
 	struct ocfs2_dx_entry *entry2 = b;
-	struct ocfs2_dx_entry tmp;
 
 	BUG_ON(size != sizeof(*entry1));
 
-	tmp = *entry1;
-	*entry1 = *entry2;
-	*entry2 = tmp;
+	swap(*entry1, *entry2);
 }
 
 static int ocfs2_dx_leaf_same_major(struct ocfs2_dx_leaf *dx_leaf)

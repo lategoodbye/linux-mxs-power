@@ -158,6 +158,7 @@ static __init int is_reserve_region(efi_memory_desc_t *md)
 	case EFI_BOOT_SERVICES_CODE:
 	case EFI_BOOT_SERVICES_DATA:
 	case EFI_CONVENTIONAL_MEMORY:
+	case EFI_PERSISTENT_MEMORY:
 		return 0;
 	default:
 		break;
@@ -337,7 +338,11 @@ core_initcall(arm64_dmi_init);
 
 static void efi_set_pgd(struct mm_struct *mm)
 {
-	cpu_switch_mm(mm->pgd, mm);
+	if (mm == &init_mm)
+		cpu_set_reserved_ttbr0();
+	else
+		cpu_switch_mm(mm->pgd, mm);
+
 	flush_tlb_all();
 	if (icache_is_aivivt())
 		__flush_icache_all();
