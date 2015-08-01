@@ -53,6 +53,7 @@
 
 static enum power_supply_property mxs_power_ac_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_MIN,
 };
 
 static int mxs_power_5v_status(struct regmap *map)
@@ -140,6 +141,8 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 				     union power_supply_propval *val)
 {
 	struct mxs_power_data *data = power_supply_get_drvdata(psy);
+	u32 v5ctrl = 0;
+	int thresh;
 	int ret;
 
 	switch (psp) {
@@ -150,6 +153,18 @@ static int mxs_power_ac_get_property(struct power_supply *psy,
 
 		val->intval = (ret & STATUS_5V_CONNECTION) ? 1 : 0;
 		ret = 0;
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
+		ret = regmap_read(data->regmap, HW_POWER_5VCTRL, &v5ctrl);
+		if (ret)
+			return ret;
+
+		thresh = (v5ctrl & BM_POWER_5VCTRL_VBUSVALID_THRESH) >> 8;
+
+		if (thresh)
+			val->intval = (39 + thresh) * 100000;
+		else
+			val->intval = 2900000;
 		break;
 	default:
 		ret = -EINVAL;
