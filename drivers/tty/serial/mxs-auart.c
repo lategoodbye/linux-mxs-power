@@ -659,7 +659,7 @@ static void mxs_auart_settermios(struct uart_port *u,
 {
 	struct mxs_auart_port *s = to_auart_port(u);
 	u32 bm, ctrl, ctrl2, div;
-	unsigned int cflag, baud;
+	unsigned int cflag, baud, baud_min, baud_max;
 
 	cflag = termios->c_cflag;
 
@@ -752,7 +752,9 @@ static void mxs_auart_settermios(struct uart_port *u,
 	}
 
 	/* set baud rate */
-	baud = uart_get_baud_rate(u, termios, old, 0, u->uartclk);
+	baud_min = u->uartclk * 32 / 0x3fffc0;
+	baud_max = u->uartclk * 32 / 0xec;
+	baud = uart_get_baud_rate(u, termios, old, baud_min, baud_max);
 	div = u->uartclk * 32 / baud;
 	ctrl |= AUART_LINECTRL_BAUD_DIVFRAC(div & 0x3F);
 	ctrl |= AUART_LINECTRL_BAUD_DIVINT(div >> 6);
