@@ -144,10 +144,9 @@ struct inode *ll_iget(struct super_block *sb, ino_t hash,
 static void ll_invalidate_negative_children(struct inode *dir)
 {
 	struct dentry *dentry, *tmp_subdir;
-	struct ll_d_hlist_node *p;
 
 	ll_lock_dcache(dir);
-	ll_d_hlist_for_each_entry(dentry, p, &dir->i_dentry, d_u.d_alias) {
+	hlist_for_each_entry(dentry, &dir->i_dentry, d_u.d_alias) {
 		spin_lock(&dentry->d_lock);
 		if (!list_empty(&dentry->d_subdirs)) {
 			struct dentry *child;
@@ -334,15 +333,14 @@ void ll_i2gids(__u32 *suppgids, struct inode *i1, struct inode *i2)
 static struct dentry *ll_find_alias(struct inode *inode, struct dentry *dentry)
 {
 	struct dentry *alias, *discon_alias, *invalid_alias;
-	struct ll_d_hlist_node *p;
 
-	if (ll_d_hlist_empty(&inode->i_dentry))
+	if (hlist_empty(&inode->i_dentry))
 		return NULL;
 
 	discon_alias = invalid_alias = NULL;
 
 	ll_lock_dcache(inode);
-	ll_d_hlist_for_each_entry(alias, p, &inode->i_dentry, d_u.d_alias) {
+	hlist_for_each_entry(alias, &inode->i_dentry, d_u.d_alias) {
 		LASSERT(alias != dentry);
 
 		spin_lock(&alias->d_lock);
@@ -411,7 +409,7 @@ static int ll_lookup_it_finish(struct ptlrpc_request *request,
 {
 	struct inode *inode = NULL;
 	__u64 bits = 0;
-	int rc;
+	int rc = 0;
 
 	/* NB 1 request reference will be taken away by ll_intent_lock()
 	 * when I return */
@@ -441,8 +439,10 @@ static int ll_lookup_it_finish(struct ptlrpc_request *request,
 		struct dentry *alias;
 
 		alias = ll_splice_alias(inode, *de);
-		if (IS_ERR(alias))
-			return PTR_ERR(alias);
+		if (IS_ERR(alias)) {
+			rc = PTR_ERR(alias);
+			goto out;
+		}
 		*de = alias;
 	} else if (!it_disposition(it, DISP_LOOKUP_NEG)  &&
 		   !it_disposition(it, DISP_OPEN_CREATE)) {
@@ -473,7 +473,11 @@ static int ll_lookup_it_finish(struct ptlrpc_request *request,
 		}
 	}
 
-	return 0;
+out:
+	if (rc != 0 && it->it_op & IT_OPEN)
+		ll_open_cleanup((*de)->d_sb, request);
+
+	return rc;
 }
 
 static struct dentry *ll_lookup_it(struct inode *parent, struct dentry *dentry,
@@ -690,7 +694,7 @@ static struct inode *ll_create_node(struct inode *dir, struct lookup_intent *it)
 		goto out;
 	}
 
-	LASSERT(ll_d_hlist_empty(&inode->i_dentry));
+	LASSERT(hlist_empty(&inode->i_dentry));
 
 	/* We asked for a lock on the directory, but were granted a
 	 * lock on the inode.  Since we finally have an inode pointer,
@@ -901,7 +905,6 @@ int ll_objects_destroy(struct ptlrpc_request *request, struct inode *dir)
 	struct lov_stripe_md *lsm = NULL;
 	struct obd_trans_info oti = { 0 };
 	struct obdo *oa;
-	struct obd_capa *oc = NULL;
 	int rc;
 
 	/* req is swabbed so this is safe */
@@ -953,15 +956,8 @@ int ll_objects_destroy(struct ptlrpc_request *request, struct inode *dir)
 		}
 	}
 
-	if (body->valid & OBD_MD_FLOSSCAPA) {
-		rc = md_unpack_capa(ll_i2mdexp(dir), request, &RMF_CAPA2, &oc);
-		if (rc)
-			goto out_free_memmd;
-	}
-
 	rc = obd_destroy(NULL, ll_i2dtexp(dir), oa, lsm, &oti,
-			 ll_i2mdexp(dir), oc);
-	capa_put(oc);
+			 ll_i2mdexp(dir));
 	if (rc)
 		CERROR("obd destroy objid "DOSTID" error %d\n",
 		       POSTID(&lsm->lsm_oi), rc);
@@ -1008,7 +1004,7 @@ static int ll_unlink(struct inode *dir, struct dentry *dentry)
 	return rc;
 }
 
-static int ll_mkdir(struct inode *dir, struct dentry *dentry, ll_umode_t mode)
+static int ll_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int err;
 

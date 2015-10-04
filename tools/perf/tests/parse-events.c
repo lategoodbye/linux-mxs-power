@@ -3,11 +3,10 @@
 #include "evsel.h"
 #include "evlist.h"
 #include <api/fs/fs.h>
-#include <api/fs/tracefs.h>
-#include <api/fs/debugfs.h>
 #include "tests.h"
 #include "debug.h"
 #include <linux/hw_breakpoint.h>
+#include <api/fs/fs.h>
 
 #define PERF_TP_SAMPLE_TYPE (PERF_SAMPLE_RAW | PERF_SAMPLE_TIME | \
 			     PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD)
@@ -82,8 +81,12 @@ static int test__checkevent_symbolic_name_config(struct perf_evlist *evlist)
 	TEST_ASSERT_VAL("wrong type", PERF_TYPE_HARDWARE == evsel->attr.type);
 	TEST_ASSERT_VAL("wrong config",
 			PERF_COUNT_HW_CPU_CYCLES == evsel->attr.config);
+	/*
+	 * The period value gets configured within perf_evlist__config,
+	 * while this test executes only parse events method.
+	 */
 	TEST_ASSERT_VAL("wrong period",
-			100000 == evsel->attr.sample_period);
+			0 == evsel->attr.sample_period);
 	TEST_ASSERT_VAL("wrong config1",
 			0 == evsel->attr.config1);
 	TEST_ASSERT_VAL("wrong config2",
@@ -406,7 +409,11 @@ static int test__checkevent_pmu(struct perf_evlist *evlist)
 	TEST_ASSERT_VAL("wrong config",    10 == evsel->attr.config);
 	TEST_ASSERT_VAL("wrong config1",    1 == evsel->attr.config1);
 	TEST_ASSERT_VAL("wrong config2",    3 == evsel->attr.config2);
-	TEST_ASSERT_VAL("wrong period",  1000 == evsel->attr.sample_period);
+	/*
+	 * The period value gets configured within perf_evlist__config,
+	 * while this test executes only parse events method.
+	 */
+	TEST_ASSERT_VAL("wrong period",     0 == evsel->attr.sample_period);
 
 	return 0;
 }
@@ -467,6 +474,39 @@ static int test__checkevent_pmu_name(struct perf_evlist *evlist)
 	TEST_ASSERT_VAL("wrong config",  2 == evsel->attr.config);
 	TEST_ASSERT_VAL("wrong name",
 			!strcmp(perf_evsel__name(evsel), "cpu/config=2/u"));
+
+	return 0;
+}
+
+static int test__checkevent_pmu_partial_time_callgraph(struct perf_evlist *evlist)
+{
+	struct perf_evsel *evsel = perf_evlist__first(evlist);
+
+	/* cpu/config=1,call-graph=fp,time,period=100000/ */
+	TEST_ASSERT_VAL("wrong number of entries", 2 == evlist->nr_entries);
+	TEST_ASSERT_VAL("wrong type", PERF_TYPE_RAW == evsel->attr.type);
+	TEST_ASSERT_VAL("wrong config",  1 == evsel->attr.config);
+	/*
+	 * The period, time and callgraph value gets configured
+	 * within perf_evlist__config,
+	 * while this test executes only parse events method.
+	 */
+	TEST_ASSERT_VAL("wrong period",     0 == evsel->attr.sample_period);
+	TEST_ASSERT_VAL("wrong callgraph",  !(PERF_SAMPLE_CALLCHAIN & evsel->attr.sample_type));
+	TEST_ASSERT_VAL("wrong time",  !(PERF_SAMPLE_TIME & evsel->attr.sample_type));
+
+	/* cpu/config=2,call-graph=no,time=0,period=2000/ */
+	evsel = perf_evsel__next(evsel);
+	TEST_ASSERT_VAL("wrong type", PERF_TYPE_RAW == evsel->attr.type);
+	TEST_ASSERT_VAL("wrong config",  2 == evsel->attr.config);
+	/*
+	 * The period, time and callgraph value gets configured
+	 * within perf_evlist__config,
+	 * while this test executes only parse events method.
+	 */
+	TEST_ASSERT_VAL("wrong period",     0 == evsel->attr.sample_period);
+	TEST_ASSERT_VAL("wrong callgraph",  !(PERF_SAMPLE_CALLCHAIN & evsel->attr.sample_type));
+	TEST_ASSERT_VAL("wrong time",  !(PERF_SAMPLE_TIME & evsel->attr.sample_type));
 
 	return 0;
 }
@@ -1221,23 +1261,11 @@ test__checkevent_breakpoint_len_rw_modifier(struct perf_evlist *evlist)
 
 static int count_tracepoints(void)
 {
-	char events_path[PATH_MAX];
 	struct dirent *events_ent;
-	const char *mountpoint;
 	DIR *events_dir;
 	int cnt = 0;
 
-	mountpoint = tracefs_find_mountpoint();
-	if (mountpoint) {
-		scnprintf(events_path, PATH_MAX, "%s/events",
-			  mountpoint);
-	} else {
-		mountpoint = debugfs_find_mountpoint();
-		scnprintf(events_path, PATH_MAX, "%s/tracing/events",
-			  mountpoint);
-	}
-
-	events_dir = opendir(events_path);
+	events_dir = opendir(tracing_events_path);
 
 	TEST_ASSERT_VAL("Can't open events dir", events_dir);
 
@@ -1254,7 +1282,7 @@ static int count_tracepoints(void)
 			continue;
 
 		scnprintf(sys_path, PATH_MAX, "%s/%s",
-			  events_path, events_ent->d_name);
+			  tracing_events_path, events_ent->d_name);
 
 		sys_dir = opendir(sys_path);
 		TEST_ASSERT_VAL("Can't open sys dir", sys_dir);
@@ -1546,6 +1574,11 @@ static struct evlist_test test__events_pmu[] = {
 		.name  = "cpu/config=1,name=krava/u,cpu/config=2/u",
 		.check = test__checkevent_pmu_name,
 		.id    = 1,
+	},
+	{
+		.name  = "cpu/config=1,call-graph=fp,time,period=100000/,cpu/config=2,call-graph=no,time=0,period=2000/",
+		.check = test__checkevent_pmu_partial_time_callgraph,
+		.id    = 2,
 	},
 };
 

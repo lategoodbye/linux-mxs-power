@@ -6,10 +6,6 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
@@ -21,11 +17,8 @@
 #include "r8192E_hw.h"
 #include "r8192E_cmdpkt.h"
 
-bool cmpk_message_handle_tx(
-	struct net_device *dev,
-	u8	*code_virtual_address,
-	u32	packettype,
-	u32	buffer_len)
+bool rtl92e_send_cmd_pkt(struct net_device *dev, u8 *code_virtual_address,
+			 u32 packettype, u32 buffer_len)
 {
 
 	bool				rt_status = true;
@@ -41,7 +34,7 @@ bool cmpk_message_handle_tx(
 	struct tx_fwinfo_8190pci *pTxFwInfo = NULL;
 
 	RT_TRACE(COMP_CMDPKT, "%s(),buffer_len is %d\n", __func__, buffer_len);
-	firmware_init_param(dev);
+	rtl92e_init_fw_param(dev);
 	frag_threshold = pfirmware->cmdpacket_frag_thresold;
 
 	do {
@@ -84,7 +77,7 @@ bool cmpk_message_handle_tx(
 
 	} while (frag_offset < buffer_len);
 
-	write_nic_byte(dev, TPPoll, TPPoll_CQ);
+	rtl92e_writeb(dev, TPPoll, TPPoll_CQ);
 Failed:
 	return rt_status;
 }

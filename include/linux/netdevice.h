@@ -507,6 +507,7 @@ static inline void napi_enable(struct napi_struct *n)
 	BUG_ON(!test_bit(NAPI_STATE_SCHED, &n->state));
 	smp_mb__before_atomic();
 	clear_bit(NAPI_STATE_SCHED, &n->state);
+	clear_bit(NAPI_STATE_NPSVC, &n->state);
 }
 
 #ifdef CONFIG_SMP
@@ -765,6 +766,13 @@ struct netdev_phys_item_id {
 	unsigned char id[MAX_PHYS_ITEM_ID_LEN];
 	unsigned char id_len;
 };
+
+static inline bool netdev_phys_item_id_same(struct netdev_phys_item_id *a,
+					    struct netdev_phys_item_id *b)
+{
+	return a->id_len == b->id_len &&
+	       memcmp(a->id, b->id, a->id_len) == 0;
+}
 
 typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
 				       struct sk_buff *skb);
@@ -1041,6 +1049,12 @@ typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
  *	TX queue.
  * int (*ndo_get_iflink)(const struct net_device *dev);
  *	Called to get the iflink value of this device.
+ * void (*ndo_change_proto_down)(struct net_device *dev,
+ *				  bool proto_down);
+ *	This function is used to pass protocol port error state information
+ *	to the switch driver. The switch driver can react to the proto_down
+ *      by doing a phys down on the associated switch port.
+ *
  */
 struct net_device_ops {
 	int			(*ndo_init)(struct net_device *dev);
@@ -1211,6 +1225,8 @@ struct net_device_ops {
 						      int queue_index,
 						      u32 maxrate);
 	int			(*ndo_get_iflink)(const struct net_device *dev);
+	int			(*ndo_change_proto_down)(struct net_device *dev,
+							 bool proto_down);
 };
 
 /**
@@ -1225,13 +1241,8 @@ struct net_device_ops {
  *
  * @IFF_802_1Q_VLAN: 802.1Q VLAN device
  * @IFF_EBRIDGE: Ethernet bridging device
- * @IFF_SLAVE_INACTIVE: bonding slave not the curr. active
- * @IFF_MASTER_8023AD: bonding master, 802.3ad
- * @IFF_MASTER_ALB: bonding master, balance-alb
  * @IFF_BONDING: bonding master or slave
- * @IFF_SLAVE_NEEDARP: need ARPs for validation
  * @IFF_ISATAP: ISATAP interface (RFC4214)
- * @IFF_MASTER_ARPMON: bonding master, ARP mon in use
  * @IFF_WAN_HDLC: WAN HDLC device
  * @IFF_XMIT_DST_RELEASE: dev_hard_start_xmit() is allowed to
  *	release skb->dst
@@ -1247,44 +1258,40 @@ struct net_device_ops {
  * @IFF_LIVE_ADDR_CHANGE: device supports hardware address
  *	change when it's running
  * @IFF_MACVLAN: Macvlan device
+ * @IFF_L3MDEV_MASTER: device is an L3 master device
+ * @IFF_NO_QUEUE: device can run without qdisc attached
+ * @IFF_OPENVSWITCH: device is a Open vSwitch master
  */
 enum netdev_priv_flags {
 	IFF_802_1Q_VLAN			= 1<<0,
 	IFF_EBRIDGE			= 1<<1,
-	IFF_SLAVE_INACTIVE		= 1<<2,
-	IFF_MASTER_8023AD		= 1<<3,
-	IFF_MASTER_ALB			= 1<<4,
-	IFF_BONDING			= 1<<5,
-	IFF_SLAVE_NEEDARP		= 1<<6,
-	IFF_ISATAP			= 1<<7,
-	IFF_MASTER_ARPMON		= 1<<8,
-	IFF_WAN_HDLC			= 1<<9,
-	IFF_XMIT_DST_RELEASE		= 1<<10,
-	IFF_DONT_BRIDGE			= 1<<11,
-	IFF_DISABLE_NETPOLL		= 1<<12,
-	IFF_MACVLAN_PORT		= 1<<13,
-	IFF_BRIDGE_PORT			= 1<<14,
-	IFF_OVS_DATAPATH		= 1<<15,
-	IFF_TX_SKB_SHARING		= 1<<16,
-	IFF_UNICAST_FLT			= 1<<17,
-	IFF_TEAM_PORT			= 1<<18,
-	IFF_SUPP_NOFCS			= 1<<19,
-	IFF_LIVE_ADDR_CHANGE		= 1<<20,
-	IFF_MACVLAN			= 1<<21,
-	IFF_XMIT_DST_RELEASE_PERM	= 1<<22,
-	IFF_IPVLAN_MASTER		= 1<<23,
-	IFF_IPVLAN_SLAVE		= 1<<24,
+	IFF_BONDING			= 1<<2,
+	IFF_ISATAP			= 1<<3,
+	IFF_WAN_HDLC			= 1<<4,
+	IFF_XMIT_DST_RELEASE		= 1<<5,
+	IFF_DONT_BRIDGE			= 1<<6,
+	IFF_DISABLE_NETPOLL		= 1<<7,
+	IFF_MACVLAN_PORT		= 1<<8,
+	IFF_BRIDGE_PORT			= 1<<9,
+	IFF_OVS_DATAPATH		= 1<<10,
+	IFF_TX_SKB_SHARING		= 1<<11,
+	IFF_UNICAST_FLT			= 1<<12,
+	IFF_TEAM_PORT			= 1<<13,
+	IFF_SUPP_NOFCS			= 1<<14,
+	IFF_LIVE_ADDR_CHANGE		= 1<<15,
+	IFF_MACVLAN			= 1<<16,
+	IFF_XMIT_DST_RELEASE_PERM	= 1<<17,
+	IFF_IPVLAN_MASTER		= 1<<18,
+	IFF_IPVLAN_SLAVE		= 1<<19,
+	IFF_L3MDEV_MASTER		= 1<<20,
+	IFF_NO_QUEUE			= 1<<21,
+	IFF_OPENVSWITCH			= 1<<22,
 };
 
 #define IFF_802_1Q_VLAN			IFF_802_1Q_VLAN
 #define IFF_EBRIDGE			IFF_EBRIDGE
-#define IFF_SLAVE_INACTIVE		IFF_SLAVE_INACTIVE
-#define IFF_MASTER_8023AD		IFF_MASTER_8023AD
-#define IFF_MASTER_ALB			IFF_MASTER_ALB
 #define IFF_BONDING			IFF_BONDING
-#define IFF_SLAVE_NEEDARP		IFF_SLAVE_NEEDARP
 #define IFF_ISATAP			IFF_ISATAP
-#define IFF_MASTER_ARPMON		IFF_MASTER_ARPMON
 #define IFF_WAN_HDLC			IFF_WAN_HDLC
 #define IFF_XMIT_DST_RELEASE		IFF_XMIT_DST_RELEASE
 #define IFF_DONT_BRIDGE			IFF_DONT_BRIDGE
@@ -1301,6 +1308,9 @@ enum netdev_priv_flags {
 #define IFF_XMIT_DST_RELEASE_PERM	IFF_XMIT_DST_RELEASE_PERM
 #define IFF_IPVLAN_MASTER		IFF_IPVLAN_MASTER
 #define IFF_IPVLAN_SLAVE		IFF_IPVLAN_SLAVE
+#define IFF_L3MDEV_MASTER		IFF_L3MDEV_MASTER
+#define IFF_NO_QUEUE			IFF_NO_QUEUE
+#define IFF_OPENVSWITCH			IFF_OPENVSWITCH
 
 /**
  *	struct net_device - The DEVICE structure.
@@ -1448,6 +1458,8 @@ enum netdev_priv_flags {
  *
  *	@xps_maps:	XXX: need comments on this one
  *
+ *	@offload_fwd_mark:	Offload device fwding mark
+ *
  *	@trans_start:		Time (in jiffies) of last Tx
  *	@watchdog_timeo:	Represents the timeout that is used by
  *				the watchdog ( see dev_watchdog() )
@@ -1501,6 +1513,10 @@ enum netdev_priv_flags {
  *			for hardware timestamping
  *
  *	@qdisc_tx_busylock:	XXX: need comments on this one
+ *
+ *	@proto_down:	protocol port state information can be sent to the
+ *			switch driver and used to set the phys state of the
+ *			switch port.
  *
  *	FIXME: cleanup struct net_device such that network protocol info
  *	moves out.
@@ -1569,6 +1585,9 @@ struct net_device {
 	const struct ethtool_ops *ethtool_ops;
 #ifdef CONFIG_NET_SWITCHDEV
 	const struct switchdev_ops *switchdev_ops;
+#endif
+#ifdef CONFIG_NET_L3_MASTER_DEV
+	const struct l3mdev_ops	*l3mdev_ops;
 #endif
 
 	const struct header_ops *header_ops;
@@ -1685,6 +1704,10 @@ struct net_device {
 	struct xps_dev_maps __rcu *xps_maps;
 #endif
 
+#ifdef CONFIG_NET_SWITCHDEV
+	u32			offload_fwd_mark;
+#endif
+
 	/* These may be needed for future network-power-down code. */
 
 	/*
@@ -1762,6 +1785,7 @@ struct net_device {
 #endif
 	struct phy_device *phydev;
 	struct lock_class_key *qdisc_tx_busylock;
+	bool proto_down;
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
 
@@ -2093,6 +2117,13 @@ struct netdev_notifier_change_info {
 	unsigned int flags_changed;
 };
 
+struct netdev_notifier_changeupper_info {
+	struct netdev_notifier_info info; /* must be first */
+	struct net_device *upper_dev; /* new upper dev */
+	bool master; /* is upper dev master */
+	bool linking; /* is the nofication for link or unlink */
+};
+
 static inline void netdev_notifier_info_init(struct netdev_notifier_info *info,
 					     struct net_device *dev)
 {
@@ -2183,12 +2214,8 @@ int dev_open(struct net_device *dev);
 int dev_close(struct net_device *dev);
 int dev_close_many(struct list_head *head, bool unlink);
 void dev_disable_lro(struct net_device *dev);
-int dev_loopback_xmit(struct sock *sk, struct sk_buff *newskb);
-int dev_queue_xmit_sk(struct sock *sk, struct sk_buff *skb);
-static inline int dev_queue_xmit(struct sk_buff *skb)
-{
-	return dev_queue_xmit_sk(skb->sk, skb);
-}
+int dev_loopback_xmit(struct net *net, struct sock *sk, struct sk_buff *newskb);
+int dev_queue_xmit(struct sk_buff *skb);
 int dev_queue_xmit_accel(struct sk_buff *skb, void *accel_priv);
 int register_netdevice(struct net_device *dev);
 void unregister_netdevice_queue(struct net_device *dev, struct list_head *head);
@@ -2277,8 +2304,7 @@ __sum16 __skb_gro_checksum_complete(struct sk_buff *skb);
 
 static inline bool skb_at_gro_remcsum_start(struct sk_buff *skb)
 {
-	return (NAPI_GRO_CB(skb)->gro_remcsum_start - skb_headroom(skb) ==
-		skb_gro_offset(skb));
+	return (NAPI_GRO_CB(skb)->gro_remcsum_start == skb_gro_offset(skb));
 }
 
 static inline bool __skb_gro_checksum_validate_needed(struct sk_buff *skb,
@@ -2374,37 +2400,58 @@ static inline void skb_gro_remcsum_init(struct gro_remcsum *grc)
 	grc->delta = 0;
 }
 
-static inline void skb_gro_remcsum_process(struct sk_buff *skb, void *ptr,
-					   int start, int offset,
-					   struct gro_remcsum *grc,
-					   bool nopartial)
+static inline void *skb_gro_remcsum_process(struct sk_buff *skb, void *ptr,
+					    unsigned int off, size_t hdrlen,
+					    int start, int offset,
+					    struct gro_remcsum *grc,
+					    bool nopartial)
 {
 	__wsum delta;
+	size_t plen = hdrlen + max_t(size_t, offset + sizeof(u16), start);
 
 	BUG_ON(!NAPI_GRO_CB(skb)->csum_valid);
 
 	if (!nopartial) {
-		NAPI_GRO_CB(skb)->gro_remcsum_start =
-		    ((unsigned char *)ptr + start) - skb->head;
-		return;
+		NAPI_GRO_CB(skb)->gro_remcsum_start = off + hdrlen + start;
+		return ptr;
 	}
 
-	delta = remcsum_adjust(ptr, NAPI_GRO_CB(skb)->csum, start, offset);
+	ptr = skb_gro_header_fast(skb, off);
+	if (skb_gro_header_hard(skb, off + plen)) {
+		ptr = skb_gro_header_slow(skb, off + plen, off);
+		if (!ptr)
+			return NULL;
+	}
+
+	delta = remcsum_adjust(ptr + hdrlen, NAPI_GRO_CB(skb)->csum,
+			       start, offset);
 
 	/* Adjust skb->csum since we changed the packet */
 	NAPI_GRO_CB(skb)->csum = csum_add(NAPI_GRO_CB(skb)->csum, delta);
 
-	grc->offset = (ptr + offset) - (void *)skb->head;
+	grc->offset = off + hdrlen + offset;
 	grc->delta = delta;
+
+	return ptr;
 }
 
 static inline void skb_gro_remcsum_cleanup(struct sk_buff *skb,
 					   struct gro_remcsum *grc)
 {
+	void *ptr;
+	size_t plen = grc->offset + sizeof(u16);
+
 	if (!grc->delta)
 		return;
 
-	remcsum_unadjust((__sum16 *)(skb->head + grc->offset), grc->delta);
+	ptr = skb_gro_header_fast(skb, grc->offset);
+	if (skb_gro_header_hard(skb, grc->offset + sizeof(u16))) {
+		ptr = skb_gro_header_slow(skb, plen, grc->offset);
+		if (!ptr)
+			return;
+	}
+
+	remcsum_unadjust((__sum16 *)ptr, grc->delta);
 }
 
 static inline int dev_hard_header(struct sk_buff *skb, struct net_device *dev,
@@ -2940,11 +2987,7 @@ static inline void dev_consume_skb_any(struct sk_buff *skb)
 
 int netif_rx(struct sk_buff *skb);
 int netif_rx_ni(struct sk_buff *skb);
-int netif_receive_skb_sk(struct sock *sk, struct sk_buff *skb);
-static inline int netif_receive_skb(struct sk_buff *skb)
-{
-	return netif_receive_skb_sk(skb->sk, skb);
-}
+int netif_receive_skb(struct sk_buff *skb);
 gro_result_t napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb);
 void napi_gro_flush(struct napi_struct *napi, bool flush_old);
 struct sk_buff *napi_get_frags(struct napi_struct *napi);
@@ -2982,6 +3025,7 @@ int dev_get_phys_port_id(struct net_device *dev,
 			 struct netdev_phys_item_id *ppid);
 int dev_get_phys_port_name(struct net_device *dev,
 			   char *name, size_t len);
+int dev_change_proto_down(struct net_device *dev, bool proto_down);
 struct sk_buff *validate_xmit_skb_list(struct sk_buff *skb, struct net_device *dev);
 struct sk_buff *dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 				    struct netdev_queue *txq, int *ret);
@@ -3779,6 +3823,21 @@ static inline bool netif_is_bond_slave(struct net_device *dev)
 static inline bool netif_supports_nofcs(struct net_device *dev)
 {
 	return dev->priv_flags & IFF_SUPP_NOFCS;
+}
+
+static inline bool netif_is_l3_master(const struct net_device *dev)
+{
+	return dev->priv_flags & IFF_L3MDEV_MASTER;
+}
+
+static inline bool netif_is_bridge_master(const struct net_device *dev)
+{
+	return dev->priv_flags & IFF_EBRIDGE;
+}
+
+static inline bool netif_is_ovs_master(const struct net_device *dev)
+{
+	return dev->priv_flags & IFF_OPENVSWITCH;
 }
 
 /* This device needs to keep skb dst for qdisc enqueue or ndo_start_xmit() */

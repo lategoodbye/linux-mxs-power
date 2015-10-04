@@ -12,7 +12,6 @@
 #ifndef RCAR_SND_H
 #define RCAR_SND_H
 
-#include <linux/sh_clk.h>
 
 #define RSND_GEN1_SRU	0
 #define RSND_GEN1_ADG	1
@@ -61,6 +60,14 @@ struct rsnd_src_platform_info {
 /*
  * flags
  */
+struct rsnd_ctu_platform_info {
+	u32 flags;
+};
+
+struct rsnd_mix_platform_info {
+	u32 flags;
+};
+
 struct rsnd_dvc_platform_info {
 	u32 flags;
 };
@@ -68,6 +75,8 @@ struct rsnd_dvc_platform_info {
 struct rsnd_dai_path_info {
 	struct rsnd_ssi_platform_info *ssi;
 	struct rsnd_src_platform_info *src;
+	struct rsnd_ctu_platform_info *ctu;
+	struct rsnd_mix_platform_info *mix;
 	struct rsnd_dvc_platform_info *dvc;
 };
 
@@ -93,6 +102,10 @@ struct rcar_snd_info {
 	int ssi_info_nr;
 	struct rsnd_src_platform_info *src_info;
 	int src_info_nr;
+	struct rsnd_ctu_platform_info *ctu_info;
+	int ctu_info_nr;
+	struct rsnd_mix_platform_info *mix_info;
+	int mix_info_nr;
 	struct rsnd_dvc_platform_info *dvc_info;
 	int dvc_info_nr;
 	struct rsnd_dai_platform_info *dai_info;

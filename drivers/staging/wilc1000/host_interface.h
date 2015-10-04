@@ -11,67 +11,54 @@
 #define HOST_INT_H
 
 #include "coreconfigurator.h"
-#include "coreconfigsimulator.h"
 /*****************************************************************************/
 /*								Macros                                       */
 /*****************************************************************************/
-#define FAIL		0x0000
-#define SUCCESS		0x0001
 
 #define IP_ALEN  4
 
-#define BIT2                    ((u32)(1 << 2))
-#define BIT1                    ((u32)(1 << 1))
-#define BIT0                    ((u32)(1 << 0))
-
+#define IDLE_MODE	0x00
 #define AP_MODE		0x01
 #define STATION_MODE	0x02
-#define GO_MODE	0x03
+#define GO_MODE		0x03
 #define CLIENT_MODE	0x04
 
 
-#define MAX_NUM_STA                 9
+#define MAX_NUM_STA				9
 #define ACTIVE_SCAN_TIME			10
 #define PASSIVE_SCAN_TIME			1200
 #define MIN_SCAN_TIME				10
 #define MAX_SCAN_TIME				1200
 #define DEFAULT_SCAN				0
-#define USER_SCAN					BIT0
-#define OBSS_PERIODIC_SCAN			BIT1
-#define OBSS_ONETIME_SCAN			BIT2
+#define USER_SCAN				BIT(0)
+#define OBSS_PERIODIC_SCAN			BIT(1)
+#define OBSS_ONETIME_SCAN			BIT(2)
 #define GTK_RX_KEY_BUFF_LEN			24
-#define ADDKEY						0x1
-#define REMOVEKEY					0x2
-#define DEFAULTKEY					0x4
-#define ADDKEY_AP					0x8
-#define MAX_NUM_SCANNED_NETWORKS	100 /* 30		// rachel */
-#define MAX_NUM_SCANNED_NETWORKS_SHADOW	130
-#define MAX_NUM_PROBED_SSID            10  /*One more than the number of scanned ssids*/
+#define ADDKEY					0x1
+#define REMOVEKEY				0x2
+#define DEFAULTKEY				0x4
+#define ADDKEY_AP				0x8
+#define MAX_NUM_SCANNED_NETWORKS		100 /* 30		// rachel */
+#define MAX_NUM_SCANNED_NETWORKS_SHADOW		130
+#define MAX_NUM_PROBED_SSID			10  /*One more than the number of scanned ssids*/
 #define CHANNEL_SCAN_TIME			250 /* 250 */
 
 #define TX_MIC_KEY_LEN				8
 #define RX_MIC_KEY_LEN				8
-#define PTK_KEY_LEN					16
+#define PTK_KEY_LEN				16
 
 #define TX_MIC_KEY_MSG_LEN			26
 #define RX_MIC_KEY_MSG_LEN			48
 #define PTK_KEY_MSG_LEN				39
 
 #define PMKSA_KEY_LEN				22
-#define ETH_ALEN  6
-#define PMKID_LEN					16
-#define WILC_MAX_NUM_PMKIDS  16
-#define WILC_SUPP_MCS_SET_SIZE	16
-#define WILC_ADD_STA_LENGTH	40 /* Not including the rates field cause it has variable length*/
+#define ETH_ALEN				6
+#define PMKID_LEN				16
+#define WILC_MAX_NUM_PMKIDS			16
+#define WILC_SUPP_MCS_SET_SIZE			16
+#define WILC_ADD_STA_LENGTH			40 /* Not including the rates field cause it has variable length*/
 #define SCAN_EVENT_DONE_ABORTED
-/*****************************************************************************/
-/* Data Types                                                                */
-/*****************************************************************************/
-/* typedef unsigned char	uint8; */
-/* typedef signed char     int8; */
-/* typedef unsigned short	uint16; */
-/* typedef unsigned long   uint32; */
-/* typedef uint32   Bool; */
+#define NUM_CONCURRENT_IFC			2
 
 typedef struct {
 	u16 cfg_wid;
@@ -90,13 +77,13 @@ typedef struct _tstrStatistics {
 
 
 typedef enum {
-	HOST_IF_IDLE					= 0,
-	HOST_IF_SCANNING				= 1,
-	HOST_IF_CONNECTING				= 2,
-	HOST_IF_WAITING_CONN_RESP		= 3,
-	HOST_IF_CONNECTED				= 4,
-	HOST_IF_P2P_LISTEN				= 5,
-	HOST_IF_FORCE_32BIT			= 0xFFFFFFFF
+	HOST_IF_IDLE			= 0,
+	HOST_IF_SCANNING		= 1,
+	HOST_IF_CONNECTING		= 2,
+	HOST_IF_WAITING_CONN_RESP	= 3,
+	HOST_IF_CONNECTED		= 4,
+	HOST_IF_P2P_LISTEN		= 5,
+	HOST_IF_FORCE_32BIT		= 0xFFFFFFFF
 } tenuHostIFstate;
 
 typedef struct _tstrHostIFpmkid {
@@ -110,19 +97,19 @@ typedef struct _tstrHostIFpmkidAttr {
 } tstrHostIFpmkidAttr;
 
 typedef enum {
-	AUTORATE	 = 0,
-	MBPS_1	     = 1,
-	MBPS_2	     = 2,
-	MBPS_5_5	     = 5,
-	MBPS_11	     = 11,
-	MBPS_6	     = 6,
-	MBPS_9	     = 9,
-	MBPS_12	     = 12,
-	MBPS_18	     = 18,
-	MBPS_24	     = 24,
-	MBPS_36	     = 36,
-	MBPS_48	     = 48,
-	MBPS_54	     = 54
+	AUTORATE	= 0,
+	MBPS_1		= 1,
+	MBPS_2		= 2,
+	MBPS_5_5	= 5,
+	MBPS_11		= 11,
+	MBPS_6		= 6,
+	MBPS_9		= 9,
+	MBPS_12		= 12,
+	MBPS_18		= 18,
+	MBPS_24		= 24,
+	MBPS_36		= 36,
+	MBPS_48		= 48,
+	MBPS_54		= 54
 } CURRENT_TX_RATE_T;
 
 typedef struct {
@@ -151,25 +138,25 @@ typedef struct {
 } tstrCfgParamVal;
 
 typedef enum {
-	RETRY_SHORT		= 1 << 0,
-	RETRY_LONG		= 1 << 1,
-	FRAG_THRESHOLD	= 1 << 2,
-	RTS_THRESHOLD	= 1 << 3,
-	BSS_TYPE  = 1 << 4,
-	AUTH_TYPE = 1 << 5,
-	AUTHEN_TIMEOUT = 1 << 6,
-	POWER_MANAGEMENT = 1 << 7,
-	PREAMBLE = 1 << 8,
-	SHORT_SLOT_ALLOWED = 1 << 9,
-	TXOP_PROT_DISABLE = 1 << 10,
-	BEACON_INTERVAL = 1 << 11,
-	DTIM_PERIOD = 1 << 12,
-	SITE_SURVEY = 1 << 13,
-	SITE_SURVEY_SCAN_TIME = 1 << 14,
-	ACTIVE_SCANTIME = 1 << 15,
-	PASSIVE_SCANTIME = 1 << 16,
-	CURRENT_TX_RATE = 1 << 17,
-	HT_ENABLE = 1 << 18,
+	RETRY_SHORT		= BIT(0),
+	RETRY_LONG		= BIT(1),
+	FRAG_THRESHOLD		= BIT(2),
+	RTS_THRESHOLD		= BIT(3),
+	BSS_TYPE		= BIT(4),
+	AUTH_TYPE		= BIT(5),
+	AUTHEN_TIMEOUT		= BIT(6),
+	POWER_MANAGEMENT	= BIT(7),
+	PREAMBLE		= BIT(8),
+	SHORT_SLOT_ALLOWED	= BIT(9),
+	TXOP_PROT_DISABLE	= BIT(10),
+	BEACON_INTERVAL		= BIT(11),
+	DTIM_PERIOD		= BIT(12),
+	SITE_SURVEY		= BIT(13),
+	SITE_SURVEY_SCAN_TIME	= BIT(14),
+	ACTIVE_SCANTIME		= BIT(15),
+	PASSIVE_SCANTIME	= BIT(16),
+	CURRENT_TX_RATE		= BIT(17),
+	HT_ENABLE		= BIT(18),
 } tenuCfgParam;
 
 typedef struct {
@@ -185,13 +172,12 @@ typedef enum {SCAN_EVENT_NETWORK_FOUND  = 0,
 typedef enum {
 	CONN_DISCONN_EVENT_CONN_RESP		= 0,
 	CONN_DISCONN_EVENT_DISCONN_NOTIF	= 1,
-	CONN_DISCONN_EVENT_FORCE_32BIT	 = 0xFFFFFFFF
+	CONN_DISCONN_EVENT_FORCE_32BIT		= 0xFFFFFFFF
 } tenuConnDisconnEvent;
 
 typedef enum {
 	WEP,
 	WPARxGtk,
-	/* WPATxGtk, */
 	WPAPtk,
 	PMKSA,
 } tenuKeyType;
@@ -207,10 +193,8 @@ typedef void (*tWILCpfConnectResult)(tenuConnDisconnEvent,
 				     tstrDisconnectNotifInfo *,
 				     void *);
 
-#ifdef WILC_P2P
 typedef void (*tWILCpfRemainOnChanExpired)(void *, u32);  /*Remain on channel expiration callback function*/
 typedef void (*tWILCpfRemainOnChanReady)(void *); /*Remain on channel callback function*/
-#endif
 
 /* typedef u32 WILC_WFIDrvHandle; */
 typedef struct {
@@ -218,7 +202,7 @@ typedef struct {
 } *WILC_WFIDrvHandle;
 
 /*!
- *  @struct             tstrRcvdNetworkInfo
+ *  @struct             rcvd_net_info
  *  @brief		Structure to hold Received Asynchronous Network info
  *  @details
  *  @todo
@@ -227,12 +211,11 @@ typedef struct {
  *  @date		25 March 2012
  *  @version		1.0
  */
-typedef struct _tstrRcvdNetworkInfo {
+struct rcvd_net_info {
 	u8 *pu8Buffer;
 	u32 u32Length;
-} tstrRcvdNetworkInfo;
+};
 
-/*BugID_4156*/
 typedef struct _tstrHiddenNetworkInfo {
 	u8  *pu8ssid;
 	u8 u8ssidlen;
@@ -272,57 +255,50 @@ typedef struct {
 	void *u32UserConnectPvoid;
 } tstrWILC_UsrConnReq;
 
-typedef struct {
+struct drv_handler {
 	u32 u32Address;
-} tstrHostIfSetDrvHandler;
+};
 
-typedef struct {
+struct op_mode {
 	u32 u32Mode;
-} tstrHostIfSetOperationMode;
+};
 
-/*BugID_5077*/
-typedef struct {
+struct set_mac_addr {
 	u8 u8MacAddress[ETH_ALEN];
-} tstrHostIfSetMacAddress;
+};
 
-/*BugID_5213*/
-typedef struct {
+struct get_mac_addr {
 	u8 *u8MacAddress;
-} tstrHostIfGetMacAddress;
+};
 
-/*BugID_5222*/
-typedef struct {
+struct ba_session_info {
 	u8 au8Bssid[ETH_ALEN];
 	u8 u8Ted;
 	u16 u16BufferSize;
 	u16 u16SessionTimeout;
-} tstrHostIfBASessionInfo;
+};
 
-#ifdef WILC_P2P
-typedef struct {
+struct remain_ch {
 	u16 u16Channel;
 	u32 u32duration;
 	tWILCpfRemainOnChanExpired pRemainOnChanExpired;
 	tWILCpfRemainOnChanReady pRemainOnChanReady;
 	void *pVoid;
 	u32 u32ListenSessionID;
-} tstrHostIfRemainOnChan;
+};
 
-typedef struct {
-
+struct reg_frame {
 	bool bReg;
 	u16 u16FrameType;
 	u8 u8Regid;
+};
 
 
-} tstrHostIfRegisterFrame;
-
-
-#define   ACTION         0xD0
-#define   PROBE_REQ   0x40
-#define   PROBE_RESP  0x50
-#define   ACTION_FRM_IDX   0
-#define   PROBE_REQ_IDX     1
+#define ACTION			0xD0
+#define PROBE_REQ		0x40
+#define PROBE_RESP		0x50
+#define ACTION_FRM_IDX		0
+#define PROBE_REQ_IDX		1
 
 
 enum p2p_listen_state {
@@ -331,7 +307,6 @@ enum p2p_listen_state {
 	P2P_GRP_FORMATION
 };
 
-#endif
 typedef struct {
 	/* Scan user structure */
 	tstrWILC_UsrScanReq strWILC_UsrScanReq;
@@ -339,22 +314,13 @@ typedef struct {
 	/* Connect User structure */
 	tstrWILC_UsrConnReq strWILC_UsrConnReq;
 
-	#ifdef WILC_P2P
 	/*Remain on channel struvture*/
-	tstrHostIfRemainOnChan strHostIfRemainOnChan;
+	struct remain_ch strHostIfRemainOnChan;
 	u8 u8RemainOnChan_pendingreq;
 	u64 u64P2p_MgmtTimeout;
 	u8 u8P2PConnect;
-	#endif
 
 	tenuHostIFstate enuHostIFstate;
-
-	/* bool bPendingConnRequest; */
-
-	#ifndef CONNECT_DIRECT
-	u32 u32SurveyResultsCount;
-	wid_site_survey_reslts_s astrSurveyResults[MAX_NUM_SCANNED_NETWORKS];
-	#endif
 
 	u8 au8AssociatedBSSID[ETH_ALEN];
 	tstrCfgParamVal strCfgValues;
@@ -368,11 +334,9 @@ typedef struct {
 	struct semaphore hSemGetCHNL;
 	struct semaphore hSemInactiveTime;
 /* timer handlers */
-	WILC_TimerHandle hScanTimer;
-	WILC_TimerHandle hConnectTimer;
-	#ifdef WILC_P2P
-	WILC_TimerHandle hRemainOnChannel;
-	#endif
+	struct timer_list hScanTimer;
+	struct timer_list hConnectTimer;
+	struct timer_list hRemainOnChannel;
 
 	bool IFC_UP;
 } tstrWILC_WFIDrv;
@@ -397,7 +361,7 @@ typedef enum {
 	WILC_STA_FLAG_AUTHENTICATED             /*!< station is authenticated*/
 } tenuWILC_StaFlag;
 
-typedef struct {
+struct add_sta_param {
 	u8 au8BSSID[ETH_ALEN];
 	u16 u16AssocID;
 	u8 u8NumRates;
@@ -411,9 +375,7 @@ typedef struct {
 	u8 u8ASELCap;
 	u16 u16FlagsMask;               /*<! Determines which of u16FlagsSet were changed>*/
 	u16 u16FlagsSet;                /*<! Decoded according to tenuWILC_StaFlag */
-} tstrWILC_AddStaParam;
-
-/* extern void CfgDisconnected(void* pUserVoid, u16 u16reason, u8 * ie, size_t ie_len); */
+};
 
 /*****************************************************************************/
 /*																			 */
@@ -433,7 +395,7 @@ typedef struct {
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_remove_key(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8StaAddress);
+s32 host_int_remove_key(tstrWILC_WFIDrv *hWFIDrv, const u8 *pu8StaAddress);
 /**
  *  @brief              removes WEP key
  *  @details    valid only in BSS STA mode if External Supplicant support is enabled.
@@ -448,7 +410,7 @@ s32 host_int_remove_key(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8StaAddress);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_remove_wep_key(WILC_WFIDrvHandle hWFIDrv, u8 u8Index);
+s32 host_int_remove_wep_key(tstrWILC_WFIDrv *hWFIDrv, u8 u8Index);
 /**
  *  @brief              sets WEP deafault key
  *  @details    Sets the index of the WEP encryption key in use,
@@ -461,7 +423,7 @@ s32 host_int_remove_wep_key(WILC_WFIDrvHandle hWFIDrv, u8 u8Index);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_set_WEPDefaultKeyID(WILC_WFIDrvHandle hWFIDrv, u8 u8Index);
+s32 host_int_set_WEPDefaultKeyID(tstrWILC_WFIDrv *hWFIDrv, u8 u8Index);
 
 /**
  *  @brief              sets WEP deafault key
@@ -482,7 +444,7 @@ s32 host_int_set_WEPDefaultKeyID(WILC_WFIDrvHandle hWFIDrv, u8 u8Index);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_add_wep_key_bss_sta(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8WepKey, u8 u8WepKeylen, u8 u8Keyidx);
+s32 host_int_add_wep_key_bss_sta(tstrWILC_WFIDrv *hWFIDrv, const u8 *pu8WepKey, u8 u8WepKeylen, u8 u8Keyidx);
 /**
  *  @brief              host_int_add_wep_key_bss_ap
  *  @details    valid only in AP mode if External Supplicant support is enabled.
@@ -497,7 +459,7 @@ s32 host_int_add_wep_key_bss_sta(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8WepKey,
  *  @date		28 Feb 2013
  *  @version		1.0
  */
-s32 host_int_add_wep_key_bss_ap(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8WepKey, u8 u8WepKeylen, u8 u8Keyidx, u8 u8mode, AUTHTYPE_T tenuAuth_type);
+s32 host_int_add_wep_key_bss_ap(tstrWILC_WFIDrv *hWFIDrv, const u8 *pu8WepKey, u8 u8WepKeylen, u8 u8Keyidx, u8 u8mode, AUTHTYPE_T tenuAuth_type);
 
 /**
  *  @brief              adds ptk Key
@@ -515,7 +477,7 @@ s32 host_int_add_wep_key_bss_ap(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8WepKey, 
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_add_ptk(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8Ptk, u8 u8PtkKeylen,
+s32 host_int_add_ptk(tstrWILC_WFIDrv *hWFIDrv, const u8 *pu8Ptk, u8 u8PtkKeylen,
 			     const u8 *mac_addr, const u8 *pu8RxMic, const u8 *pu8TxMic, u8 mode, u8 u8Ciphermode, u8 u8Idx);
 
 /**
@@ -530,7 +492,7 @@ s32 host_int_add_ptk(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8Ptk, u8 u8PtkKeylen
  *  @date		15 April 2013
  *  @version		1.0
  */
-s32 host_int_get_inactive_time(WILC_WFIDrvHandle hWFIDrv, const u8 *mac, u32 *pu32InactiveTime);
+s32 host_int_get_inactive_time(tstrWILC_WFIDrv *hWFIDrv, const u8 *mac, u32 *pu32InactiveTime);
 
 /**
  *  @brief              adds Rx GTk Key
@@ -548,7 +510,7 @@ s32 host_int_get_inactive_time(WILC_WFIDrvHandle hWFIDrv, const u8 *mac, u32 *pu
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_add_rx_gtk(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8RxGtk, u8 u8GtkKeylen,
+s32 host_int_add_rx_gtk(tstrWILC_WFIDrv *hWFIDrv, const u8 *pu8RxGtk, u8 u8GtkKeylen,
 				u8 u8KeyIdx, u32 u32KeyRSClen, const u8 *KeyRSC,
 				const u8 *pu8RxMic, const u8 *pu8TxMic, u8 mode, u8 u8Ciphermode);
 
@@ -569,7 +531,7 @@ s32 host_int_add_rx_gtk(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8RxGtk, u8 u8GtkK
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_add_tx_gtk(WILC_WFIDrvHandle hWFIDrv, u8 u8KeyLen, u8 *pu8TxGtk, u8 u8KeyIdx);
+s32 host_int_add_tx_gtk(tstrWILC_WFIDrv *hWFIDrv, u8 u8KeyLen, u8 *pu8TxGtk, u8 u8KeyIdx);
 
 /**
  *  @brief              caches the pmkid
@@ -592,7 +554,7 @@ s32 host_int_add_tx_gtk(WILC_WFIDrvHandle hWFIDrv, u8 u8KeyLen, u8 *pu8TxGtk, u8
  *  @version		1.0
  */
 
-s32 host_int_set_pmkid_info(WILC_WFIDrvHandle hWFIDrv, tstrHostIFpmkidAttr *pu8PmkidInfoArray);
+s32 host_int_set_pmkid_info(tstrWILC_WFIDrv *hWFIDrv, tstrHostIFpmkidAttr *pu8PmkidInfoArray);
 /**
  *  @brief              gets the cached the pmkid info
  *  @details    valid only in BSS STA mode if External Supplicant
@@ -616,7 +578,7 @@ s32 host_int_set_pmkid_info(WILC_WFIDrvHandle hWFIDrv, tstrHostIFpmkidAttr *pu8P
  *  @version		1.0
  */
 
-s32 host_int_get_pmkid_info(WILC_WFIDrvHandle hWFIDrv, u8 *pu8PmkidInfoArray,
+s32 host_int_get_pmkid_info(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8PmkidInfoArray,
 				    u32 u32PmkidInfoLen);
 
 /**
@@ -633,7 +595,7 @@ s32 host_int_get_pmkid_info(WILC_WFIDrvHandle hWFIDrv, u8 *pu8PmkidInfoArray,
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_set_RSNAConfigPSKPassPhrase(WILC_WFIDrvHandle hWFIDrv, u8 *pu8PassPhrase,
+s32 host_int_set_RSNAConfigPSKPassPhrase(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8PassPhrase,
 						 u8 u8Psklength);
 /**
  *  @brief              gets the pass phrase
@@ -649,7 +611,7 @@ s32 host_int_set_RSNAConfigPSKPassPhrase(WILC_WFIDrvHandle hWFIDrv, u8 *pu8PassP
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_get_RSNAConfigPSKPassPhrase(WILC_WFIDrvHandle hWFIDrv,
+s32 host_int_get_RSNAConfigPSKPassPhrase(tstrWILC_WFIDrv *hWFIDrv,
 						 u8 *pu8PassPhrase, u8 u8Psklength);
 
 /**
@@ -663,7 +625,7 @@ s32 host_int_get_RSNAConfigPSKPassPhrase(WILC_WFIDrvHandle hWFIDrv,
  *  @date		19 April 2012
  *  @version		1.0
  */
-s32 host_int_get_MacAddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8MacAddress);
+s32 host_int_get_MacAddress(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8MacAddress);
 
 /**
  *  @brief              sets mac address
@@ -676,7 +638,7 @@ s32 host_int_get_MacAddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8MacAddress);
  *  @date		16 July 2012
  *  @version		1.0
  */
-s32 host_int_set_MacAddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8MacAddress);
+s32 host_int_set_MacAddress(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8MacAddress);
 
 /**
  *  @brief              wait until msg q is empty
@@ -690,41 +652,6 @@ s32 host_int_set_MacAddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8MacAddress);
  *  @version		1.0
  */
 s32 host_int_wait_msg_queue_idle(void);
-
-/**
- *  @brief              gets the site survey results
- *  @details
- *  @param[in,out] handle to the wifi driver,
- *                                Message containing  site survey results in the
- *                                following formate
- *|---------------------------------------------------|
- | MsgLength | fragNo.	| MsgBodyLength	| MsgBody	|
- ||-----------|-----------|---------------|-----------|
- |	 1		|	  1		|		1		|	 1		|
- | -----------------------------------------	 |  ----------------
- |
- ||---------------------------------------|
- | Network1 | Netweork2 | ... | Network5 |
- ||---------------------------------------|
- |	44	   |	44	   | ... |	 44		|
- | -------------------------- | ---------------------------------------
- |
- ||---------------------------------------------------------------------|
- | SSID | BSS Type | Channel | Security Status| BSSID | RSSI |Reserved |
- ||------|----------|---------|----------------|-------|------|---------|
- |  33  |	 1	  |	  1		|		1		 |	  6	 |	 1	|	 1	  |
- ||---------------------------------------------------------------------|
- *  @return             Error code indicating success/failure
- *  @note
- *  @author		zsalah
- *  @date		8 March 2012
- *  @version		1.0
- */
-#ifndef CONNECT_DIRECT
-s32 host_int_get_site_survey_results(WILC_WFIDrvHandle hWFIDrv,
-					     u8 ppu8RcvdSiteSurveyResults[][MAX_SURVEY_RESULT_FRAG_SIZE],
-					     u32 u32MaxSiteSrvyFragLen);
-#endif
 
 /**
  *  @brief              sets a start scan request
@@ -742,7 +669,7 @@ s32 host_int_get_site_survey_results(WILC_WFIDrvHandle hWFIDrv,
  *  @version		1.0
  */
 
-s32 host_int_set_start_scan_req(WILC_WFIDrvHandle hWFIDrv, u8 scanSource);
+s32 host_int_set_start_scan_req(tstrWILC_WFIDrv *hWFIDrv, u8 scanSource);
 /**
  *  @brief              gets scan source of the last scan
  *  @details
@@ -758,7 +685,7 @@ s32 host_int_set_start_scan_req(WILC_WFIDrvHandle hWFIDrv, u8 scanSource);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_get_start_scan_req(WILC_WFIDrvHandle hWFIDrv, u8 *pu8ScanSource);
+s32 host_int_get_start_scan_req(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8ScanSource);
 
 /**
  *  @brief              sets a join request
@@ -772,7 +699,7 @@ s32 host_int_get_start_scan_req(WILC_WFIDrvHandle hWFIDrv, u8 *pu8ScanSource);
  *  @version		1.0
  */
 
-s32 host_int_set_join_req(WILC_WFIDrvHandle hWFIDrv, u8 *pu8bssid,
+s32 host_int_set_join_req(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8bssid,
 				  const u8 *pu8ssid, size_t ssidLen,
 				  const u8 *pu8IEs, size_t IEsLen,
 				  tWILCpfConnectResult pfConnectResult, void *pvUserArg,
@@ -792,7 +719,7 @@ s32 host_int_set_join_req(WILC_WFIDrvHandle hWFIDrv, u8 *pu8bssid,
  *  @version		8.0
  */
 
-s32 host_int_flush_join_req(WILC_WFIDrvHandle hWFIDrv);
+s32 host_int_flush_join_req(tstrWILC_WFIDrv *hWFIDrv);
 
 
 /**
@@ -806,7 +733,7 @@ s32 host_int_flush_join_req(WILC_WFIDrvHandle hWFIDrv);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_disconnect(WILC_WFIDrvHandle hWFIDrv, u16 u16ReasonCode);
+s32 host_int_disconnect(tstrWILC_WFIDrv *hWFIDrv, u16 u16ReasonCode);
 
 /**
  *  @brief              disconnects a sta
@@ -819,7 +746,7 @@ s32 host_int_disconnect(WILC_WFIDrvHandle hWFIDrv, u16 u16ReasonCode);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_disconnect_station(WILC_WFIDrvHandle hWFIDrv, u8 assoc_id);
+s32 host_int_disconnect_station(tstrWILC_WFIDrv *hWFIDrv, u8 assoc_id);
 /**
  *  @brief              gets a Association request info
  *  @details
@@ -846,7 +773,7 @@ s32 host_int_disconnect_station(WILC_WFIDrvHandle hWFIDrv, u8 assoc_id);
  *  @version		1.0
  */
 
-s32 host_int_get_assoc_req_info(WILC_WFIDrvHandle hWFIDrv, u8 *pu8AssocReqInfo,
+s32 host_int_get_assoc_req_info(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8AssocReqInfo,
 					u32 u32AssocReqInfoLen);
 /**
  *  @brief              gets a Association Response info
@@ -860,7 +787,7 @@ s32 host_int_get_assoc_req_info(WILC_WFIDrvHandle hWFIDrv, u8 *pu8AssocReqInfo,
  *  @version		1.0
  */
 
-s32 host_int_get_assoc_res_info(WILC_WFIDrvHandle hWFIDrv, u8 *pu8AssocRespInfo,
+s32 host_int_get_assoc_res_info(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8AssocRespInfo,
 					u32 u32MaxAssocRespInfoLen, u32 *pu32RcvdAssocRespInfoLen);
 /**
  *  @brief              gets a Association Response info
@@ -877,7 +804,7 @@ s32 host_int_get_assoc_res_info(WILC_WFIDrvHandle hWFIDrv, u8 *pu8AssocRespInfo,
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_get_rx_power_level(WILC_WFIDrvHandle hWFIDrv, u8 *pu8RxPowerLevel,
+s32 host_int_get_rx_power_level(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8RxPowerLevel,
 					u32 u32RxPowerLevelLen);
 
 /**
@@ -895,7 +822,7 @@ s32 host_int_get_rx_power_level(WILC_WFIDrvHandle hWFIDrv, u8 *pu8RxPowerLevel,
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_set_mac_chnl_num(WILC_WFIDrvHandle hWFIDrv, u8 u8ChNum);
+s32 host_int_set_mac_chnl_num(tstrWILC_WFIDrv *hWFIDrv, u8 u8ChNum);
 
 /**
  *  @brief              gets the current channel index
@@ -912,7 +839,7 @@ s32 host_int_set_mac_chnl_num(WILC_WFIDrvHandle hWFIDrv, u8 u8ChNum);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_get_host_chnl_num(WILC_WFIDrvHandle hWFIDrv, u8 *pu8ChNo);
+s32 host_int_get_host_chnl_num(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8ChNo);
 /**
  *  @brief              gets the sta rssi
  *  @details    gets the currently maintained RSSI value for the station.
@@ -926,8 +853,8 @@ s32 host_int_get_host_chnl_num(WILC_WFIDrvHandle hWFIDrv, u8 *pu8ChNo);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_get_rssi(WILC_WFIDrvHandle hWFIDrv, s8 *ps8Rssi);
-s32 host_int_get_link_speed(WILC_WFIDrvHandle hWFIDrv, s8 *ps8lnkspd);
+s32 host_int_get_rssi(tstrWILC_WFIDrv *hWFIDrv, s8 *ps8Rssi);
+s32 host_int_get_link_speed(tstrWILC_WFIDrv *hWFIDrv, s8 *ps8lnkspd);
 /**
  *  @brief              scans a set of channels
  *  @details
@@ -945,7 +872,7 @@ s32 host_int_get_link_speed(WILC_WFIDrvHandle hWFIDrv, s8 *ps8lnkspd);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_scan(WILC_WFIDrvHandle hWFIDrv, u8 u8ScanSource,
+s32 host_int_scan(tstrWILC_WFIDrv *hWFIDrv, u8 u8ScanSource,
 			  u8 u8ScanType, u8 *pu8ChnlFreqList,
 			  u8 u8ChnlListLen, const u8 *pu8IEs,
 			  size_t IEsLen, tWILCpfScanResult ScanResult,
@@ -961,7 +888,7 @@ s32 host_int_scan(WILC_WFIDrvHandle hWFIDrv, u8 u8ScanSource,
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 hif_set_cfg(WILC_WFIDrvHandle hWFIDrv, tstrCfgParamVal *pstrCfgParamVal);
+s32 hif_set_cfg(tstrWILC_WFIDrv *hWFIDrv, tstrCfgParamVal *pstrCfgParamVal);
 
 /**
  *  @brief              gets configuration wids values
@@ -975,7 +902,7 @@ s32 hif_set_cfg(WILC_WFIDrvHandle hWFIDrv, tstrCfgParamVal *pstrCfgParamVal);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 hif_get_cfg(WILC_WFIDrvHandle hWFIDrv, u16 u16WID, u16 *pu16WID_Value);
+s32 hif_get_cfg(tstrWILC_WFIDrv *hWFIDrv, u16 u16WID, u16 *pu16WID_Value);
 /*****************************************************************************/
 /*							Notification Functions							 */
 /*****************************************************************************/
@@ -1022,7 +949,7 @@ void host_int_send_network_info_to_host
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_init(WILC_WFIDrvHandle *phWFIDrv);
+s32 host_int_init(tstrWILC_WFIDrv **phWFIDrv);
 
 /**
  *  @brief              host interface initialization function
@@ -1033,7 +960,7 @@ s32 host_int_init(WILC_WFIDrvHandle *phWFIDrv);
  *  @date		8 March 2012
  *  @version		1.0
  */
-s32 host_int_deinit(WILC_WFIDrvHandle hWFIDrv);
+s32 host_int_deinit(tstrWILC_WFIDrv *hWFIDrv);
 
 
 /*!
@@ -1058,7 +985,7 @@ s32 host_int_deinit(WILC_WFIDrvHandle hWFIDrv);
  *  @version		1.0 Description
  *
  */
-s32 host_int_add_beacon(WILC_WFIDrvHandle hWFIDrv, u32 u32Interval,
+s32 host_int_add_beacon(tstrWILC_WFIDrv *hWFIDrv, u32 u32Interval,
 				u32 u32DTIMPeriod,
 				u32 u32HeadLen, u8 *pu8Head,
 				u32 u32TailLen, u8 *pu8tail);
@@ -1076,10 +1003,11 @@ s32 host_int_add_beacon(WILC_WFIDrvHandle hWFIDrv, u32 u32Interval,
  *  @date		10 Julys 2012
  *  @version		1.0 Description
  */
-s32 host_int_del_beacon(WILC_WFIDrvHandle hWFIDrv);
+s32 host_int_del_beacon(tstrWILC_WFIDrv *hWFIDrv);
 
 /*!
- *  @fn		s32 host_int_add_station(WILC_WFIDrvHandle hWFIDrv, tstrWILC_AddStaParam strStaParams)
+ *  @fn		s32 host_int_add_station(WILC_WFIDrvHandle hWFIDrv,
+ *					 struct add_sta_param *pstrStaParams)
  *  @brief		Notifies the firmware with a new associated stations
  *  @details
  *  @param[in,out]	hWFIDrv		handle to the wifi driver
@@ -1091,7 +1019,8 @@ s32 host_int_del_beacon(WILC_WFIDrvHandle hWFIDrv);
  *  @date		12 July 2012
  *  @version		1.0 Description
  */
-s32 host_int_add_station(WILC_WFIDrvHandle hWFIDrv, tstrWILC_AddStaParam *pstrStaParams);
+s32 host_int_add_station(tstrWILC_WFIDrv *hWFIDrv,
+			 struct add_sta_param *pstrStaParams);
 
 /*!
  *  @fn		s32 host_int_del_allstation(WILC_WFIDrvHandle hWFIDrv, const u8* pu8MacAddr)
@@ -1106,7 +1035,7 @@ s32 host_int_add_station(WILC_WFIDrvHandle hWFIDrv, tstrWILC_AddStaParam *pstrSt
  *  @date		09 April 2014
  *  @version		1.0 Description
  */
-s32 host_int_del_allstation(WILC_WFIDrvHandle hWFIDrv, u8 pu8MacAddr[][ETH_ALEN]);
+s32 host_int_del_allstation(tstrWILC_WFIDrv *hWFIDrv, u8 pu8MacAddr[][ETH_ALEN]);
 
 /*!
  *  @fn		s32 host_int_del_station(WILC_WFIDrvHandle hWFIDrv, u8* pu8MacAddr)
@@ -1121,10 +1050,11 @@ s32 host_int_del_allstation(WILC_WFIDrvHandle hWFIDrv, u8 pu8MacAddr[][ETH_ALEN]
  *  @date		15 July 2012
  *  @version		1.0 Description
  */
-s32 host_int_del_station(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8MacAddr);
+s32 host_int_del_station(tstrWILC_WFIDrv *hWFIDrv, const u8 *pu8MacAddr);
 
 /*!
- *  @fn		s32 host_int_edit_station(WILC_WFIDrvHandle hWFIDrv, tstrWILC_AddStaParam strStaParams)
+ *  @fn		s32 host_int_edit_station(WILC_WFIDrvHandle hWFIDrv,
+ *					  struct add_sta_param *pstrStaParams)
  *  @brief		Notifies the firmware with new parameters of an already associated station
  *  @details
  *  @param[in,out]	hWFIDrv		handle to the wifi driver
@@ -1136,7 +1066,8 @@ s32 host_int_del_station(WILC_WFIDrvHandle hWFIDrv, const u8 *pu8MacAddr);
  *  @date		15 July 2012
  *  @version		1.0 Description
  */
-s32 host_int_edit_station(WILC_WFIDrvHandle hWFIDrv, tstrWILC_AddStaParam *pstrStaParams);
+s32 host_int_edit_station(tstrWILC_WFIDrv *hWFIDrv,
+			  struct add_sta_param *pstrStaParams);
 
 /*!
  *  @fn		s32 host_int_set_power_mgmt(WILC_WFIDrvHandle hWFIDrv, bool bIsEnabled, u32 u32Timeout)
@@ -1153,7 +1084,7 @@ s32 host_int_edit_station(WILC_WFIDrvHandle hWFIDrv, tstrWILC_AddStaParam *pstrS
  *  @date		24 November 2012
  *  @version		1.0 Description
  */
-s32 host_int_set_power_mgmt(WILC_WFIDrvHandle hWFIDrv, bool bIsEnabled, u32 u32Timeout);
+s32 host_int_set_power_mgmt(tstrWILC_WFIDrv *hWFIDrv, bool bIsEnabled, u32 u32Timeout);
 /*  @param[in,out]	hWFIDrv		handle to the wifi driver
  *  @param[in]	bIsEnabled	TRUE if enabled, FALSE otherwise
  *  @param[in]	u8count		count of mac address entries in the filter table
@@ -1165,7 +1096,7 @@ s32 host_int_set_power_mgmt(WILC_WFIDrvHandle hWFIDrv, bool bIsEnabled, u32 u32T
  *  @date		24 November 2012
  *  @version		1.0 Description
  */
-s32 host_int_setup_multicast_filter(WILC_WFIDrvHandle hWFIDrv, bool bIsEnabled, u32 u32count);
+s32 host_int_setup_multicast_filter(tstrWILC_WFIDrv *hWFIDrv, bool bIsEnabled, u32 u32count);
 /**
  *  @brief           host_int_setup_ipaddress
  *  @details       set IP address on firmware
@@ -1175,7 +1106,7 @@ s32 host_int_setup_multicast_filter(WILC_WFIDrvHandle hWFIDrv, bool bIsEnabled, 
  *  @date
  *  @version	1.0
  */
-s32 host_int_setup_ipaddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8IPAddr, u8 idx);
+s32 host_int_setup_ipaddress(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8IPAddr, u8 idx);
 
 
 /**
@@ -1187,7 +1118,7 @@ s32 host_int_setup_ipaddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8IPAddr, u8 idx);
  *  @date
  *  @version	1.0
  */
-s32 host_int_delBASession(WILC_WFIDrvHandle hWFIDrv, char *pBSSID, char TID);
+s32 host_int_delBASession(tstrWILC_WFIDrv *hWFIDrv, char *pBSSID, char TID);
 
 /**
  *  @brief           host_int_delBASession
@@ -1198,7 +1129,7 @@ s32 host_int_delBASession(WILC_WFIDrvHandle hWFIDrv, char *pBSSID, char TID);
  *  @date
  *  @version	1.0
  */
-s32 host_int_del_All_Rx_BASession(WILC_WFIDrvHandle hWFIDrv, char *pBSSID, char TID);
+s32 host_int_del_All_Rx_BASession(tstrWILC_WFIDrv *hWFIDrv, char *pBSSID, char TID);
 
 
 /**
@@ -1210,9 +1141,8 @@ s32 host_int_del_All_Rx_BASession(WILC_WFIDrvHandle hWFIDrv, char *pBSSID, char 
  *  @date
  *  @version	1.0
  */
-s32 host_int_get_ipaddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8IPAddr, u8 idx);
+s32 host_int_get_ipaddress(tstrWILC_WFIDrv *hWFIDrv, u8 *pu8IPAddr, u8 idx);
 
-#ifdef WILC_P2P
 /**
  *  @brief           host_int_remain_on_channel
  *  @details
@@ -1222,7 +1152,7 @@ s32 host_int_get_ipaddress(WILC_WFIDrvHandle hWFIDrv, u8 *pu8IPAddr, u8 idx);
  *  @date
  *  @version	1.0
  */
-s32 host_int_remain_on_channel(WILC_WFIDrvHandle hWFIDrv, u32 u32SessionID, u32 u32duration, u16 chan, tWILCpfRemainOnChanExpired RemainOnChanExpired, tWILCpfRemainOnChanReady RemainOnChanReady, void *pvUserArg);
+s32 host_int_remain_on_channel(tstrWILC_WFIDrv *hWFIDrv, u32 u32SessionID, u32 u32duration, u16 chan, tWILCpfRemainOnChanExpired RemainOnChanExpired, tWILCpfRemainOnChanReady RemainOnChanReady, void *pvUserArg);
 
 /**
  *  @brief              host_int_ListenStateExpired
@@ -1238,7 +1168,7 @@ s32 host_int_remain_on_channel(WILC_WFIDrvHandle hWFIDrv, u32 u32SessionID, u32 
  *  @date
  *  @version		1.0
  */
-s32 host_int_ListenStateExpired(WILC_WFIDrvHandle hWFIDrv, u32 u32SessionID);
+s32 host_int_ListenStateExpired(tstrWILC_WFIDrv *hWFIDrv, u32 u32SessionID);
 
 /**
  *  @brief           host_int_frame_register
@@ -1249,8 +1179,7 @@ s32 host_int_ListenStateExpired(WILC_WFIDrvHandle hWFIDrv, u32 u32SessionID);
  *  @date
  *  @version	1.0
  */
-s32 host_int_frame_register(WILC_WFIDrvHandle hWFIDrv, u16 u16FrameType, bool bReg);
-#endif
+s32 host_int_frame_register(tstrWILC_WFIDrv *hWFIDrv, u16 u16FrameType, bool bReg);
 /**
  *  @brief           host_int_set_wfi_drv_handler
  *  @details
@@ -1260,18 +1189,18 @@ s32 host_int_frame_register(WILC_WFIDrvHandle hWFIDrv, u16 u16FrameType, bool bR
  *  @date
  *  @version	1.0
  */
-s32 host_int_set_wfi_drv_handler(u32 u32address);
-s32 host_int_set_operation_mode(WILC_WFIDrvHandle hWFIDrv, u32 u32mode);
+s32 host_int_set_wfi_drv_handler(tstrWILC_WFIDrv *u32address);
+s32 host_int_set_operation_mode(tstrWILC_WFIDrv *hWFIDrv, u32 u32mode);
 
-static s32 Handle_ScanDone(void *drvHandler, tenuScanEvent enuEvent);
+static s32 Handle_ScanDone(tstrWILC_WFIDrv *drvHandler, tenuScanEvent enuEvent);
 
-static int host_int_addBASession(WILC_WFIDrvHandle hWFIDrv, char *pBSSID, char TID, short int BufferSize,
+static int host_int_addBASession(tstrWILC_WFIDrv *hWFIDrv, char *pBSSID, char TID, short int BufferSize,
 				 short int SessionTimeout, void *drvHandler);
 
 
 void host_int_freeJoinParams(void *pJoinParams);
 
-s32 host_int_get_statistics(WILC_WFIDrvHandle hWFIDrv, tstrStatistics *pstrStatistics);
+s32 host_int_get_statistics(tstrWILC_WFIDrv *hWFIDrv, tstrStatistics *pstrStatistics);
 
 /*****************************************************************************/
 /*																			 */

@@ -335,9 +335,8 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
 
 	sk_acceptq_removed(sk);
 	if (sk->sk_protocol == IPPROTO_TCP &&
-	    tcp_rsk(req)->tfo_listener &&
-	    queue->fastopenq) {
-		spin_lock_bh(&queue->fastopenq->lock);
+	    tcp_rsk(req)->tfo_listener) {
+		spin_lock_bh(&queue->fastopenq.lock);
 		if (tcp_rsk(req)->tfo_listener) {
 			/* We are still waiting for the final ACK from 3WHS
 			 * so can't free req now. Instead, we set req->sk to
@@ -348,7 +347,7 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
 			req->sk = NULL;
 			req = NULL;
 		}
-		spin_unlock_bh(&queue->fastopenq->lock);
+		spin_unlock_bh(&queue->fastopenq.lock);
 	}
 out:
 	release_sock(sk);
@@ -408,7 +407,7 @@ void inet_csk_reset_keepalive_timer(struct sock *sk, unsigned long len)
 }
 EXPORT_SYMBOL(inet_csk_reset_keepalive_timer);
 
-struct dst_entry *inet_csk_route_req(struct sock *sk,
+struct dst_entry *inet_csk_route_req(const struct sock *sk,
 				     struct flowi4 *fl4,
 				     const struct request_sock *req)
 {
@@ -439,7 +438,7 @@ no_route:
 }
 EXPORT_SYMBOL_GPL(inet_csk_route_req);
 
-struct dst_entry *inet_csk_route_child_sock(struct sock *sk,
+struct dst_entry *inet_csk_route_child_sock(const struct sock *sk,
 					    struct sock *newsk,
 					    const struct request_sock *req)
 {
@@ -563,7 +562,7 @@ static inline void syn_ack_recalc(struct request_sock *req, const int thresh,
 		  req->num_timeout >= rskq_defer_accept - 1;
 }
 
-int inet_rtx_syn_ack(struct sock *parent, struct request_sock *req)
+int inet_rtx_syn_ack(const struct sock *parent, struct request_sock *req)
 {
 	int err = req->rsk_ops->rtx_syn_ack(parent, req);
 
@@ -593,7 +592,7 @@ static bool reqsk_queue_unlink(struct request_sock_queue *queue,
 	}
 
 	spin_unlock(&queue->syn_wait_lock);
-	if (del_timer(&req->rsk_timer))
+	if (timer_pending(&req->rsk_timer) && del_timer_sync(&req->rsk_timer))
 		reqsk_put(req);
 	return found;
 }
@@ -685,20 +684,20 @@ void reqsk_queue_hash_req(struct request_sock_queue *queue,
 	req->num_timeout = 0;
 	req->sk = NULL;
 
+	setup_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req);
+	mod_timer_pinned(&req->rsk_timer, jiffies + timeout);
+	req->rsk_hash = hash;
+
 	/* before letting lookups find us, make sure all req fields
 	 * are committed to memory and refcnt initialized.
 	 */
 	smp_wmb();
 	atomic_set(&req->rsk_refcnt, 2);
-	setup_timer(&req->rsk_timer, reqsk_timer_handler, (unsigned long)req);
-	req->rsk_hash = hash;
 
 	spin_lock(&queue->syn_wait_lock);
 	req->dl_next = lopt->syn_table[hash];
 	lopt->syn_table[hash] = req;
 	spin_unlock(&queue->syn_wait_lock);
-
-	mod_timer_pinned(&req->rsk_timer, jiffies + timeout);
 }
 EXPORT_SYMBOL(reqsk_queue_hash_req);
 
@@ -886,12 +885,12 @@ void inet_csk_listen_stop(struct sock *sk)
 		sk_acceptq_removed(sk);
 		reqsk_put(req);
 	}
-	if (queue->fastopenq) {
+	if (queue->fastopenq.rskq_rst_head) {
 		/* Free all the reqs queued in rskq_rst_head. */
-		spin_lock_bh(&queue->fastopenq->lock);
-		acc_req = queue->fastopenq->rskq_rst_head;
-		queue->fastopenq->rskq_rst_head = NULL;
-		spin_unlock_bh(&queue->fastopenq->lock);
+		spin_lock_bh(&queue->fastopenq.lock);
+		acc_req = queue->fastopenq.rskq_rst_head;
+		queue->fastopenq.rskq_rst_head = NULL;
+		spin_unlock_bh(&queue->fastopenq.lock);
 		while ((req = acc_req) != NULL) {
 			acc_req = req->dl_next;
 			reqsk_put(req);

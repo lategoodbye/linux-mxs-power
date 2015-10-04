@@ -46,6 +46,7 @@ struct iio_dummy_state {
 	int event_irq;
 	int event_val;
 	bool event_en;
+	s64 event_timestamp;
 #endif /* CONFIG_IIO_SIMPLE_DUMMY_EVENTS */
 };
 
@@ -119,6 +120,7 @@ static inline int iio_simple_dummy_configure_buffer(struct iio_dev *indio_dev)
 {
 	return 0;
 };
+
 static inline
 void iio_simple_dummy_unconfigure_buffer(struct iio_dev *indio_dev)
 {};

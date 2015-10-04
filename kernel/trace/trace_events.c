@@ -30,6 +30,7 @@
 DEFINE_MUTEX(event_mutex);
 
 LIST_HEAD(ftrace_events);
+static LIST_HEAD(ftrace_generic_fields);
 static LIST_HEAD(ftrace_common_fields);
 
 #define GFP_TRACE (GFP_KERNEL | __GFP_ZERO)
@@ -94,6 +95,10 @@ trace_find_event_field(struct trace_event_call *call, char *name)
 	struct ftrace_event_field *field;
 	struct list_head *head;
 
+	field = __find_event_field(&ftrace_generic_fields, name);
+	if (field)
+		return field;
+
 	field = __find_event_field(&ftrace_common_fields, name);
 	if (field)
 		return field;
@@ -144,6 +149,13 @@ int trace_define_field(struct trace_event_call *call, const char *type,
 }
 EXPORT_SYMBOL_GPL(trace_define_field);
 
+#define __generic_field(type, item, filter_type)			\
+	ret = __trace_define_field(&ftrace_generic_fields, #type,	\
+				   #item, 0, 0, is_signed_type(type),	\
+				   filter_type);			\
+	if (ret)							\
+		return ret;
+
 #define __common_field(type, item)					\
 	ret = __trace_define_field(&ftrace_common_fields, #type,	\
 				   "common_" #item,			\
@@ -152,6 +164,16 @@ EXPORT_SYMBOL_GPL(trace_define_field);
 				   is_signed_type(type), FILTER_OTHER);	\
 	if (ret)							\
 		return ret;
+
+static int trace_define_generic_fields(void)
+{
+	int ret;
+
+	__generic_field(int, cpu, FILTER_OTHER);
+	__generic_field(char *, comm, FILTER_PTR_STRING);
+
+	return ret;
+}
 
 static int trace_define_common_fields(void)
 {
@@ -316,6 +338,7 @@ static int __ftrace_event_enable_disable(struct trace_event_file *file,
 					 int enable, int soft_disable)
 {
 	struct trace_event_call *call = file->event_call;
+	struct trace_array *tr = file->tr;
 	int ret = 0;
 	int disable;
 
@@ -379,7 +402,7 @@ static int __ftrace_event_enable_disable(struct trace_event_file *file,
 			if (soft_disable)
 				set_bit(EVENT_FILE_FL_SOFT_DISABLED_BIT, &file->flags);
 
-			if (trace_flags & TRACE_ITER_RECORD_CMD) {
+			if (tr->trace_flags & TRACE_ITER_RECORD_CMD) {
 				tracing_start_cmdline_record();
 				set_bit(EVENT_FILE_FL_RECORDED_CMD_BIT, &file->flags);
 			}
@@ -2671,6 +2694,9 @@ static __init int event_trace_init(void)
 	if (!entry)
 		pr_warn("Could not create tracefs 'available_events' entry\n");
 
+	if (trace_define_generic_fields())
+		pr_warn("tracing: Failed to allocated generic fields");
+
 	if (trace_define_common_fields())
 		pr_warn("tracing: Failed to allocate common fields");
 
@@ -2866,7 +2892,9 @@ static __init void event_trace_self_tests(void)
 
 static DEFINE_PER_CPU(atomic_t, ftrace_test_event_disable);
 
-static void
+static struct trace_array *event_tr;
+
+static void __init
 function_test_events_call(unsigned long ip, unsigned long parent_ip,
 			  struct ftrace_ops *op, struct pt_regs *pt_regs)
 {
@@ -2897,7 +2925,7 @@ function_test_events_call(unsigned long ip, unsigned long parent_ip,
 	entry->ip			= ip;
 	entry->parent_ip		= parent_ip;
 
-	trace_buffer_unlock_commit(buffer, event, flags, pc);
+	trace_buffer_unlock_commit(event_tr, buffer, event, flags, pc);
 
  out:
 	atomic_dec(&per_cpu(ftrace_test_event_disable, cpu));
@@ -2913,6 +2941,9 @@ static struct ftrace_ops trace_ops __initdata  =
 static __init void event_trace_self_test_with_function(void)
 {
 	int ret;
+	event_tr = top_trace_array();
+	if (WARN_ON(!event_tr))
+		return;
 	ret = register_ftrace_function(&trace_ops);
 	if (WARN_ON(ret < 0)) {
 		pr_info("Failed to enable function tracer for event tests\n");

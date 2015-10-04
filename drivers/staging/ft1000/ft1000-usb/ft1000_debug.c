@@ -260,7 +260,8 @@ void ft1000_destroy_dev(struct net_device *netdev)
 		/* Make sure we free any memory reserve for slow Queue */
 		for (i = 0; i < MAX_NUM_APP; i++) {
 			while (list_empty(&dev->app_info[i].app_sqlist) == 0) {
-				pdpram_blk = list_entry(dev->app_info[i].app_sqlist.next, struct dpram_blk, list);
+				pdpram_blk = list_entry(dev->app_info[i].app_sqlist.next,
+							struct dpram_blk, list);
 				list_del(&pdpram_blk->list);
 				ft1000_free_buffer(pdpram_blk, &freercvpool);
 
@@ -412,15 +413,21 @@ static long ft1000_ioctl(struct file *file, unsigned int command,
 	int i;
 	u16 tempword;
 	unsigned long flags;
-	struct timeval tv;
 	struct IOCTL_GET_VER get_ver_data;
 	struct IOCTL_GET_DSP_STAT get_stat_data;
-	u8 ConnectionMsg[] = {0x00, 0x44, 0x10, 0x20, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x93, 0x64,
-			      0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x0a,
-			      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			      0x00, 0x00, 0x02, 0x37, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x7f, 0x00,
-			      0x00, 0x01, 0x00, 0x00};
+	u8 ConnectionMsg[] = {
+		0x00, 0x44, 0x10, 0x20, 0x80, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x93, 0x64,
+		0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x0a,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x02, 0x37, 0x00, 0x00, 0x00, 0x08,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x7f, 0x00,
+		0x00, 0x01, 0x00, 0x00
+	};
 
 	unsigned short ledStat = 0;
 	unsigned short conStat = 0;
@@ -495,10 +502,12 @@ static long ft1000_ioctl(struct file *file, unsigned int command,
 		memcpy(get_stat_data.eui64, info->eui64, EUISZ);
 
 		if (info->ProgConStat != 0xFF) {
-			ft1000_read_dpram16(ft1000dev, FT1000_MAG_DSP_LED, (u8 *)&ledStat, FT1000_MAG_DSP_LED_INDX);
+			ft1000_read_dpram16(ft1000dev, FT1000_MAG_DSP_LED,
+					    (u8 *)&ledStat, FT1000_MAG_DSP_LED_INDX);
 			get_stat_data.LedStat = ntohs(ledStat);
 			pr_debug("LedStat = 0x%x\n", get_stat_data.LedStat);
-			ft1000_read_dpram16(ft1000dev, FT1000_MAG_DSP_CON_STATE, (u8 *)&conStat, FT1000_MAG_DSP_CON_STATE_INDX);
+			ft1000_read_dpram16(ft1000dev, FT1000_MAG_DSP_CON_STATE,
+					    (u8 *)&conStat, FT1000_MAG_DSP_CON_STATE_INDX);
 			get_stat_data.ConStat = ntohs(conStat);
 			pr_debug("ConStat = 0x%x\n", get_stat_data.ConStat);
 		} else {
@@ -510,8 +519,7 @@ static long ft1000_ioctl(struct file *file, unsigned int command,
 		get_stat_data.nRxPkts = info->stats.rx_packets;
 		get_stat_data.nTxBytes = info->stats.tx_bytes;
 		get_stat_data.nRxBytes = info->stats.rx_bytes;
-		do_gettimeofday(&tv);
-		get_stat_data.ConTm = (u32)(tv.tv_sec - info->ConTm);
+		get_stat_data.ConTm = ktime_get_seconds() - info->ConTm;
 		pr_debug("Connection Time = %d\n", (int)get_stat_data.ConTm);
 		if (copy_to_user(argp, &get_stat_data, sizeof(get_stat_data))) {
 			pr_debug("copy fault occurred\n");
@@ -689,7 +697,8 @@ static long ft1000_ioctl(struct file *file, unsigned int command,
 		if (list_empty(&ft1000dev->app_info[i].app_sqlist) == 0) {
 			/* pr_debug("Message detected in slow queue\n"); */
 			spin_lock_irqsave(&free_buff_lock, flags);
-			pdpram_blk = list_entry(ft1000dev->app_info[i].app_sqlist.next, struct dpram_blk, list);
+			pdpram_blk = list_entry(ft1000dev->app_info[i].app_sqlist.next,
+						struct dpram_blk, list);
 			list_del(&pdpram_blk->list);
 			ft1000dev->app_info[i].NumOfMsg--;
 			/* pr_debug("NumOfMsg for app %d = %d\n", i, ft1000dev->app_info[i].NumOfMsg); */

@@ -194,7 +194,7 @@ static void dw_writer(struct dw_spi *dws)
 			else
 				txw = *(u16 *)(dws->tx);
 		}
-		dw_writel(dws, DW_SPI_DR, txw);
+		dw_write_io_reg(dws, DW_SPI_DR, txw);
 		dws->tx += dws->n_bytes;
 	}
 }
@@ -205,7 +205,7 @@ static void dw_reader(struct dw_spi *dws)
 	u16 rxw;
 
 	while (max--) {
-		rxw = dw_readl(dws, DW_SPI_DR);
+		rxw = dw_read_io_reg(dws, DW_SPI_DR);
 		/* Care rx only if the transfer's original "rx" is not null */
 		if (dws->rx_end - dws->len) {
 			if (dws->n_bytes == 1)
@@ -309,34 +309,29 @@ static int dw_spi_transfer_one(struct spi_master *master,
 	cr0 = chip->cr0;
 
 	/* Handle per transfer options for bpw and speed */
-	if (transfer->speed_hz) {
-		speed = chip->speed_hz;
+	speed = chip->speed_hz;
+	if ((transfer->speed_hz != speed) || !chip->clk_div) {
+		speed = transfer->speed_hz;
 
-		if ((transfer->speed_hz != speed) || !chip->clk_div) {
-			speed = transfer->speed_hz;
+		/* clk_div doesn't support odd number */
+		clk_div = (dws->max_freq / speed + 1) & 0xfffe;
 
-			/* clk_div doesn't support odd number */
-			clk_div = (dws->max_freq / speed + 1) & 0xfffe;
+		chip->speed_hz = speed;
+		chip->clk_div = clk_div;
 
-			chip->speed_hz = speed;
-			chip->clk_div = clk_div;
-
-			spi_set_clk(dws, chip->clk_div);
-		}
+		spi_set_clk(dws, chip->clk_div);
 	}
-	if (transfer->bits_per_word) {
-		if (transfer->bits_per_word == 8) {
-			dws->n_bytes = 1;
-			dws->dma_width = 1;
-		} else if (transfer->bits_per_word == 16) {
-			dws->n_bytes = 2;
-			dws->dma_width = 2;
-		}
-		cr0 = (transfer->bits_per_word - 1)
-			| (chip->type << SPI_FRF_OFFSET)
-			| (spi->mode << SPI_MODE_OFFSET)
-			| (chip->tmode << SPI_TMOD_OFFSET);
+	if (transfer->bits_per_word == 8) {
+		dws->n_bytes = 1;
+		dws->dma_width = 1;
+	} else if (transfer->bits_per_word == 16) {
+		dws->n_bytes = 2;
+		dws->dma_width = 2;
 	}
+	cr0 = (transfer->bits_per_word - 1)
+		| (chip->type << SPI_FRF_OFFSET)
+		| (spi->mode << SPI_MODE_OFFSET)
+		| (chip->tmode << SPI_TMOD_OFFSET);
 
 	/*
 	 * Adjust transfer mode if necessary. Requires platform dependent
@@ -452,11 +447,6 @@ static int dw_spi_setup(struct spi_device *spi)
 		chip->dma_width = 2;
 	}
 	chip->bits_per_word = spi->bits_per_word;
-
-	if (!spi->max_speed_hz) {
-		dev_err(&spi->dev, "No max speed HZ parameter\n");
-		return -EINVAL;
-	}
 
 	chip->tmode = 0; /* Tx & Rx */
 	/* Default SPI mode is SCPOL = 0, SCPH = 0 */

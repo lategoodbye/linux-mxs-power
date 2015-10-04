@@ -879,7 +879,7 @@ static void copy_spare(struct mtd_info *mtd, bool bfrom)
 				      oob_chunk_size);
 
 		/* the last chunk */
-		memcpy16_toio(&s[oob_chunk_size * sparebuf_size],
+		memcpy16_toio(&s[i * sparebuf_size],
 			      &d[i * oob_chunk_size],
 			      host->used_oobsize - i * oob_chunk_size);
 	}
@@ -1458,6 +1458,7 @@ static const struct of_device_id mxcnd_dt_ids[] = {
 	},
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, mxcnd_dt_ids);
 
 static int __init mxcnd_probe_dt(struct mxc_nand_host *host)
 {

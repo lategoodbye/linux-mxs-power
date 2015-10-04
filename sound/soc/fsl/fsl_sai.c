@@ -791,7 +791,7 @@ static int fsl_sai_probe(struct platform_device *pdev)
 		return ret;
 
 	if (sai->sai_on_imx)
-		return imx_pcm_dma_init(pdev);
+		return imx_pcm_dma_init(pdev, IMX_SAI_DMABUF_SIZE);
 	else
 		return devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
 }
@@ -801,6 +801,7 @@ static const struct of_device_id fsl_sai_ids[] = {
 	{ .compatible = "fsl,imx6sx-sai", },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, fsl_sai_ids);
 
 static struct platform_driver fsl_sai_driver = {
 	.probe = fsl_sai_probe,

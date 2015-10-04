@@ -726,7 +726,7 @@ static void edma_callback(unsigned ch_num, u16 ch_status, void *data)
 	edesc = echan->edesc;
 
 	/* Pause the channel for non-cyclic */
-	if (!edesc || (edesc && !edesc->cyclic))
+	if (!edesc || !edesc->cyclic)
 		edma_pause(echan->ch_num);
 
 	switch (ch_status) {
@@ -1000,7 +1000,7 @@ static void edma_dma_init(struct edma_cc *ecc, struct dma_device *dma,
 	 * code using dma memcpy must make sure alignment of
 	 * length is at dma->copy_align boundary.
 	 */
-	dma->copy_align = DMA_SLAVE_BUSWIDTH_4_BYTES;
+	dma->copy_align = DMAENGINE_ALIGN_4_BYTES;
 
 	INIT_LIST_HEAD(&dma->channels);
 }

@@ -470,8 +470,6 @@ static int hci_uart_tty_open(struct tty_struct *tty)
 	INIT_WORK(&hu->init_ready, hci_uart_init_work);
 	INIT_WORK(&hu->write_work, hci_uart_write_work);
 
-	spin_lock_init(&hu->rx_lock);
-
 	/* Flush any pending characters in the driver and line discipline. */
 
 	/* FIXME: why is this needed. Note don't use ldisc_ref here as the
@@ -569,13 +567,13 @@ static void hci_uart_tty_receive(struct tty_struct *tty, const u8 *data,
 	if (!test_bit(HCI_UART_PROTO_SET, &hu->flags))
 		return;
 
-	spin_lock(&hu->rx_lock);
+	/* It does not need a lock here as it is already protected by a mutex in
+	 * tty caller
+	 */
 	hu->proto->recv(hu, data, count);
 
 	if (hu->hdev)
 		hu->hdev->stat.byte_rx += count;
-
-	spin_unlock(&hu->rx_lock);
 
 	tty_unthrottle(tty);
 }
@@ -770,7 +768,7 @@ static int __init hci_uart_init(void)
 
 	/* Register the tty discipline */
 
-	memset(&hci_uart_ldisc, 0, sizeof (hci_uart_ldisc));
+	memset(&hci_uart_ldisc, 0, sizeof(hci_uart_ldisc));
 	hci_uart_ldisc.magic		= TTY_LDISC_MAGIC;
 	hci_uart_ldisc.name		= "n_hci";
 	hci_uart_ldisc.open		= hci_uart_tty_open;
@@ -804,8 +802,14 @@ static int __init hci_uart_init(void)
 #ifdef CONFIG_BT_HCIUART_3WIRE
 	h5_init();
 #endif
+#ifdef CONFIG_BT_HCIUART_INTEL
+	intel_init();
+#endif
 #ifdef CONFIG_BT_HCIUART_BCM
 	bcm_init();
+#endif
+#ifdef CONFIG_BT_HCIUART_QCA
+	qca_init();
 #endif
 
 	return 0;
@@ -830,8 +834,14 @@ static void __exit hci_uart_exit(void)
 #ifdef CONFIG_BT_HCIUART_3WIRE
 	h5_deinit();
 #endif
+#ifdef CONFIG_BT_HCIUART_INTEL
+	intel_deinit();
+#endif
 #ifdef CONFIG_BT_HCIUART_BCM
 	bcm_deinit();
+#endif
+#ifdef CONFIG_BT_HCIUART_QCA
+	qca_deinit();
 #endif
 
 	/* Release tty registration of line discipline */

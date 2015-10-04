@@ -287,28 +287,6 @@ static struct toklist dgap_tlist[] = {
 	{ 0,		NULL }
 };
 
-
-/*
- * dgap_sindex: much like index(), but it looks for a match of any character in
- * the group, and returns that position.
- */
-static char *dgap_sindex(char *string, char *group)
-{
-	char *ptr;
-
-	if (!string || !group)
-		return NULL;
-
-	for (; *string; string++) {
-		for (ptr = group; *ptr; ptr++) {
-			if (*ptr == *string)
-				return string;
-		}
-	}
-
-	return NULL;
-}
-
 /*
  * get a word from the input stream, also keep track of current line number.
  * words are separated by whitespace.
@@ -317,7 +295,7 @@ static char *dgap_getword(char **in)
 {
 	char *ret_ptr = *in;
 
-	char *ptr = dgap_sindex(*in, " \t\n");
+	char *ptr = strpbrk(*in, " \t\n");
 
 	/* If no word found, return null */
 	if (!ptr)
@@ -349,6 +327,8 @@ static int dgap_gettok(char **in)
 
 	if (strstr(dgap_cword, "board")) {
 		w = dgap_getword(in);
+		if (!w)
+			return 0;
 		snprintf(dgap_cword, MAXCWORD, "%s", w);
 		for (t = dgap_brdtype; t->token != 0; t++) {
 			if (!strcmp(w, t->string))
@@ -662,7 +642,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 
@@ -692,6 +672,7 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
+			kfree(p->u.board.portstr);
 			p->u.board.portstr = kstrdup(s, GFP_KERNEL);
 			if (kstrtol(s, 0, &p->u.board.port)) {
 				pr_err("bad number for IO port");
@@ -710,6 +691,7 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
+			kfree(p->u.board.addrstr);
 			p->u.board.addrstr = kstrdup(s, GFP_KERNEL);
 			if (kstrtoul(s, 0, &p->u.board.addr)) {
 				pr_err("bad number for memory address");
@@ -728,6 +710,7 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
+			kfree(p->u.board.pcibusstr);
 			p->u.board.pcibusstr = kstrdup(s, GFP_KERNEL);
 			if (kstrtoul(s, 0, &p->u.board.pcibus)) {
 				pr_err("bad number for pci bus");
@@ -739,6 +722,7 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
+			kfree(p->u.board.pcislotstr);
 			p->u.board.pcislotstr = kstrdup(s, GFP_KERNEL);
 			if (kstrtoul(s, 0, &p->u.board.pcislot)) {
 				pr_err("bad number for pci slot");
@@ -757,6 +741,7 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
+			kfree(p->u.board.method);
 			p->u.board.method = kstrdup(s, GFP_KERNEL);
 			p->u.board.v_method = 1;
 			break;
@@ -771,6 +756,7 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
+			kfree(p->u.board.status);
 			p->u.board.status = kstrdup(s, GFP_KERNEL);
 			break;
 
@@ -820,13 +806,15 @@ static int dgap_parsefile(char **in)
 				pr_err("unexpected end of file");
 				return -1;
 			}
-
+			kfree(p->u.board.status);
 			p->u.board.status = kstrdup(s, GFP_KERNEL);
 
 			if (p->type == CNODE) {
+				kfree(p->u.conc.id);
 				p->u.conc.id = kstrdup(s, GFP_KERNEL);
 				p->u.conc.v_id = 1;
 			} else if (p->type == MNODE) {
+				kfree(p->u.module.id);
 				p->u.module.id = kstrdup(s, GFP_KERNEL);
 				p->u.module.v_id = 1;
 			} else {
@@ -881,7 +869,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = TNODE;
@@ -903,7 +891,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = CUNODE;
@@ -934,7 +922,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = LNODE;
@@ -953,7 +941,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = CNODE;
@@ -995,7 +983,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = MNODE;
@@ -1023,6 +1011,7 @@ static int dgap_parsefile(char **in)
 					pr_err("unexpected end of file");
 					return -1;
 				}
+				kfree(p->u.line.cable);
 				p->u.line.cable = kstrdup(s, GFP_KERNEL);
 				p->u.line.v_cable = 1;
 			}
@@ -1064,6 +1053,7 @@ static int dgap_parsefile(char **in)
 					pr_err("unexpected end of file");
 					return -1;
 				}
+				kfree(p->u.conc.connect);
 				p->u.conc.connect = kstrdup(s, GFP_KERNEL);
 				p->u.conc.v_connect = 1;
 			}
@@ -1074,7 +1064,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = PNODE;
@@ -1096,7 +1086,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = JNODE;
@@ -1118,7 +1108,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = ANODE;
@@ -1140,7 +1130,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = INTRNODE;
@@ -1161,7 +1151,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = TSNODE;
@@ -1183,7 +1173,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = CSNODE;
@@ -1205,7 +1195,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = BSNODE;
@@ -1227,7 +1217,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = USNODE;
@@ -1249,7 +1239,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = FSNODE;
@@ -1271,7 +1261,7 @@ static int dgap_parsefile(char **in)
 
 			p->next = kzalloc(sizeof(struct cnode), GFP_KERNEL);
 			if (!p->next)
-				return -1;
+				return -ENOMEM;
 
 			p = p->next;
 			p->type = VSNODE;
@@ -1864,7 +1854,6 @@ static int dgap_event(struct board_t *bd)
 	int port;
 	int reason;
 	int modem;
-	int b1;
 
 	if (!bd || bd->magic != DGAP_BOARD_MAGIC)
 		return -EIO;
@@ -1909,7 +1898,7 @@ static int dgap_event(struct board_t *bd)
 		port   = ioread8(event);
 		reason = ioread8(event + 1);
 		modem  = ioread8(event + 2);
-		b1     = ioread8(event + 3);
+		ioread8(event + 3);
 
 		/*
 		 * Make sure the interrupt is valid.
@@ -4568,7 +4557,6 @@ static int dgap_tty_open(struct tty_struct *tty, struct file *file)
  */
 static void dgap_tty_close(struct tty_struct *tty, struct file *file)
 {
-	struct ktermios *ts;
 	struct board_t *bd;
 	struct channel_t *ch;
 	struct un_t *un;
@@ -4588,8 +4576,6 @@ static void dgap_tty_close(struct tty_struct *tty, struct file *file)
 	bd = ch->ch_bd;
 	if (!bd || bd->magic != DGAP_BOARD_MAGIC)
 		return;
-
-	ts = &tty->termios;
 
 	spin_lock_irqsave(&ch->ch_lock, lock_flags);
 
@@ -4953,9 +4939,8 @@ static int dgap_tty_ioctl(struct tty_struct *tty, unsigned int cmd,
 		spin_unlock_irqrestore(&ch->ch_lock, lock_flags2);
 		spin_unlock_irqrestore(&bd->bd_lock, lock_flags);
 
-		rc = put_user(C_CLOCAL(tty) ? 1 : 0,
+		return put_user(C_CLOCAL(tty) ? 1 : 0,
 				(unsigned long __user *) arg);
-		return rc;
 
 	case TIOCSSOFTCAR:
 		spin_unlock_irqrestore(&ch->ch_lock, lock_flags2);
@@ -7004,25 +6989,29 @@ static void dgap_cleanup_board(struct board_t *brd)
 	kfree(brd);
 }
 
-static void dgap_remove_one(struct pci_dev *dev)
+static void dgap_stop(bool removesys, struct pci_driver *drv)
 {
-	unsigned int i;
-	ulong lock_flags;
-	struct pci_driver *drv = to_pci_driver(dev->dev.driver);
+	unsigned long lock_flags;
 
 	spin_lock_irqsave(&dgap_poll_lock, lock_flags);
 	dgap_poll_stop = 1;
 	spin_unlock_irqrestore(&dgap_poll_lock, lock_flags);
 
-	/* Turn off poller right away. */
 	del_timer_sync(&dgap_poll_timer);
-
-	dgap_remove_driver_sysfiles(drv);
+	if (removesys)
+		dgap_remove_driver_sysfiles(drv);
 
 	device_destroy(dgap_class, MKDEV(DIGI_DGAP_MAJOR, 0));
 	class_destroy(dgap_class);
 	unregister_chrdev(DIGI_DGAP_MAJOR, "dgap");
+}
 
+static void dgap_remove_one(struct pci_dev *dev)
+{
+	unsigned int i;
+	struct pci_driver *drv = to_pci_driver(dev->dev.driver);
+
+	dgap_stop(true, drv);
 	for (i = 0; i < dgap_numboards; ++i) {
 		dgap_remove_ports_sysfiles(dgap_board[i]);
 		dgap_cleanup_tty(dgap_board[i]);
@@ -7096,21 +7085,6 @@ failed_class:
 	return rc;
 }
 
-static void dgap_stop(void)
-{
-	unsigned long lock_flags;
-
-	spin_lock_irqsave(&dgap_poll_lock, lock_flags);
-	dgap_poll_stop = 1;
-	spin_unlock_irqrestore(&dgap_poll_lock, lock_flags);
-
-	del_timer_sync(&dgap_poll_timer);
-
-	device_destroy(dgap_class, MKDEV(DIGI_DGAP_MAJOR, 0));
-	class_destroy(dgap_class);
-	unregister_chrdev(DIGI_DGAP_MAJOR, "dgap");
-}
-
 /************************************************************************
  *
  * Driver load/unload functions
@@ -7133,8 +7107,10 @@ static int dgap_init_module(void)
 		return rc;
 
 	rc = pci_register_driver(&dgap_driver);
-	if (rc)
-		goto err_stop;
+	if (rc) {
+		dgap_stop(false, NULL);
+		return rc;
+	}
 
 	rc = dgap_create_driver_sysfiles(&dgap_driver);
 	if (rc)
@@ -7146,9 +7122,6 @@ static int dgap_init_module(void)
 
 err_unregister:
 	pci_unregister_driver(&dgap_driver);
-err_stop:
-	dgap_stop();
-
 	return rc;
 }
 

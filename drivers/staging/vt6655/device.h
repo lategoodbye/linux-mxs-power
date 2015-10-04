@@ -157,14 +157,6 @@
 #define PK_TYPE_11GB    2
 #define PK_TYPE_11GA    3
 
-typedef struct __chip_info_tbl {
-	CHIP_TYPE   chip_id;
-	char *name;
-	int         io_size;
-	int         nTxQueue;
-	u32         flags;
-} CHIP_INFO, *PCHIP_INFO;
-
 typedef enum {
 	OWNED_BY_HOST = 0,
 	OWNED_BY_NIC = 1
@@ -235,32 +227,25 @@ struct vnt_private {
 	unsigned char *tx1_bufs;
 	unsigned char *tx_beacon_bufs;
 
-	CHIP_TYPE                   chip_id;
-
 	void __iomem                *PortOffset;
 	u32                         memaddr;
 	u32                         ioaddr;
-	u32                         io_size;
 
-	unsigned char byRevId;
 	unsigned char byRxMode;
-	unsigned short SubSystemID;
-	unsigned short SubVendorID;
 
 	spinlock_t                  lock;
 
-	int                         nTxQueues;
 	volatile int                iTDUsed[TYPE_MAXTD];
 
-	volatile PSTxDesc           apCurrTD[TYPE_MAXTD];
-	volatile PSTxDesc           apTailTD[TYPE_MAXTD];
+	struct vnt_tx_desc *apCurrTD[TYPE_MAXTD];
+	struct vnt_tx_desc *apTailTD[TYPE_MAXTD];
 
-	volatile PSTxDesc           apTD0Rings;
-	volatile PSTxDesc           apTD1Rings;
+	struct vnt_tx_desc *apTD0Rings;
+	struct vnt_tx_desc *apTD1Rings;
 
-	volatile PSRxDesc           aRD0Ring;
-	volatile PSRxDesc           aRD1Ring;
-	volatile PSRxDesc           pCurrRD[TYPE_MAXRD];
+	struct vnt_rx_desc *aRD0Ring;
+	struct vnt_rx_desc *aRD1Ring;
+	struct vnt_rx_desc *pCurrRD[TYPE_MAXRD];
 
 	OPTIONS                     sOpts;
 
@@ -268,7 +253,6 @@ struct vnt_private {
 
 	u32                         rx_buf_sz;
 	u8 rx_rate;
-	int                         multicast_limit;
 
 	u32                         rx_bytes;
 
@@ -403,19 +387,20 @@ struct vnt_private {
 	unsigned char abyEEPROM[EEP_MAX_CONTEXT_SIZE]; /* unsigned long alignment */
 
 	unsigned short wBeaconInterval;
+	u16 wake_up_count;
 
 	struct work_struct interrupt_work;
 
 	struct ieee80211_low_level_stats low_stats;
 };
 
-static inline PDEVICE_RD_INFO alloc_rd_info(void)
+static inline struct vnt_rd_info *alloc_rd_info(void)
 {
-	return kzalloc(sizeof(DEVICE_RD_INFO), GFP_ATOMIC);
+	return kzalloc(sizeof(struct vnt_rd_info), GFP_ATOMIC);
 }
 
-static inline PDEVICE_TD_INFO alloc_td_info(void)
+static inline struct vnt_td_info *alloc_td_info(void)
 {
-	return kzalloc(sizeof(DEVICE_TD_INFO), GFP_ATOMIC);
+	return kzalloc(sizeof(struct vnt_td_info), GFP_ATOMIC);
 }
 #endif

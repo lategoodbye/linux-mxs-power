@@ -107,6 +107,10 @@ static void lov_putref(struct obd_device *obd)
 			/* Disconnect */
 			__lov_del_obd(obd, tgt);
 		}
+
+		if (lov->lov_tgts_kobj)
+			kobject_put(lov->lov_tgts_kobj);
+
 	} else {
 		mutex_unlock(&lov->lov_lock);
 	}
@@ -321,9 +325,6 @@ static int lov_disconnect(struct obd_export *exp)
 			lov_del_target(obd, i, NULL, lov->lov_tgts[i]->ltd_gen);
 		}
 	}
-
-	if (lov->lov_tgts_kobj)
-		kobject_put(lov->lov_tgts_kobj);
 
 	obd_putref(obd);
 
@@ -976,7 +977,7 @@ static int lov_recreate(struct obd_export *exp, struct obdo *src_oa,
 		src_oa->o_flags & OBD_FL_RECREATE_OBJS);
 
 	obj_mdp = kzalloc(sizeof(*obj_mdp), GFP_NOFS);
-	if (obj_mdp == NULL)
+	if (!obj_mdp)
 		return -ENOMEM;
 
 	ost_idx = src_oa->o_nlink;
@@ -1060,8 +1061,7 @@ do {									    \
 
 static int lov_destroy(const struct lu_env *env, struct obd_export *exp,
 		       struct obdo *oa, struct lov_stripe_md *lsm,
-		       struct obd_trans_info *oti, struct obd_export *md_exp,
-		       void *capa)
+		       struct obd_trans_info *oti, struct obd_export *md_exp)
 {
 	struct lov_request_set *set;
 	struct obd_info oinfo;
@@ -1093,7 +1093,7 @@ static int lov_destroy(const struct lu_env *env, struct obd_export *exp,
 			oti->oti_logcookies = set->set_cookies + req->rq_stripe;
 
 		err = obd_destroy(env, lov->lov_tgts[req->rq_idx]->ltd_exp,
-				  req->rq_oi.oi_oa, NULL, oti, NULL, capa);
+				  req->rq_oi.oi_oa, NULL, oti, NULL);
 		err = lov_update_common_set(set, req, err);
 		if (err) {
 			CERROR("%s: destroying objid "DOSTID" subobj "
@@ -1364,7 +1364,7 @@ static int lov_statfs(const struct lu_env *env, struct obd_export *exp,
 		      struct obd_statfs *osfs, __u64 max_age, __u32 flags)
 {
 	struct ptlrpc_request_set *set = NULL;
-	struct obd_info oinfo = { { { 0 } } };
+	struct obd_info oinfo = { };
 	int rc = 0;
 
 	/* for obdclass we forbid using obd_statfs_rqset, but prefer using async
@@ -1439,7 +1439,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 		__u32 *genp;
 
 		len = 0;
-		if (obd_ioctl_getdata(&buf, &len, (void *)uarg))
+		if (obd_ioctl_getdata(&buf, &len, uarg))
 			return -EINVAL;
 
 		data = (struct obd_ioctl_data *)buf;
@@ -1472,7 +1472,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 			*genp = lov->lov_tgts[i]->ltd_gen;
 		}
 
-		if (copy_to_user((void *)uarg, buf, len))
+		if (copy_to_user(uarg, buf, len))
 			rc = -EFAULT;
 		obd_ioctl_freedata(buf, len);
 		break;
@@ -1486,7 +1486,7 @@ static int lov_iocontrol(unsigned int cmd, struct obd_export *exp, int len,
 		struct obd_quotactl *oqctl;
 
 		if (qctl->qc_valid == QC_OSTIDX) {
-			if (qctl->qc_idx < 0 || count <= qctl->qc_idx)
+			if (count <= qctl->qc_idx)
 				return -EINVAL;
 
 			tgt = lov->lov_tgts[qctl->qc_idx];
@@ -1671,7 +1671,7 @@ static int fiemap_calc_last_stripe(struct lov_stripe_md *lsm, u64 fm_start,
 				break;
 		}
 		*stripe_count = j;
-		last_stripe = (start_stripe + j - 1) %lsm->lsm_stripe_count;
+		last_stripe = (start_stripe + j - 1) % lsm->lsm_stripe_count;
 	}
 
 	return last_stripe;
@@ -1861,7 +1861,7 @@ static int lov_fiemap(struct lov_obd *lov, __u32 keylen, void *key,
 			fm_local->fm_start = lun_start;
 			fm_local->fm_flags &= ~FIEMAP_FLAG_DEVICE_ORDER;
 			memcpy(&fm_key->fiemap, fm_local, sizeof(*fm_local));
-			*vallen=fiemap_count_to_size(fm_local->fm_extent_count);
+			*vallen = fiemap_count_to_size(fm_local->fm_extent_count);
 			rc = obd_get_info(NULL,
 					  lov->lov_tgts[ost_index]->ltd_exp,
 					  keylen, key, vallen, fm_local, lsm);
@@ -2066,7 +2066,7 @@ static int lov_set_info_async(const struct lu_env *env, struct obd_export *exp,
 	struct lov_tgt_desc *tgt;
 	unsigned incr, check_uuid,
 		 do_inactive, no_set;
-	unsigned next_id = 0,  mds_con = 0, capa = 0;
+	unsigned next_id = 0,  mds_con = 0;
 
 	incr = check_uuid = do_inactive = no_set = 0;
 	if (set == NULL) {
@@ -2091,8 +2091,6 @@ static int lov_set_info_async(const struct lu_env *env, struct obd_export *exp,
 		/* use defaults:  do_inactive = incr = 0; */
 	} else if (KEY_IS(KEY_MDS_CONN)) {
 		mds_con = 1;
-	} else if (KEY_IS(KEY_CAPA_KEY)) {
-		capa = 1;
 	} else if (KEY_IS(KEY_CACHE_SET)) {
 		LASSERT(lov->lov_cache == NULL);
 		lov->lov_cache = val;
@@ -2131,19 +2129,6 @@ static int lov_set_info_async(const struct lu_env *env, struct obd_export *exp,
 			err = obd_set_info_async(env, tgt->ltd_exp,
 					 keylen, key, vallen,
 					 ((struct obd_id_info *)val)->data, set);
-		} else if (capa) {
-			struct mds_capa_info *info = (struct mds_capa_info *)val;
-
-			LASSERT(vallen == sizeof(*info));
-
-			 /* Only want a specific OSC */
-			if (info->uuid &&
-			    !obd_uuid_equals(info->uuid, &tgt->ltd_uuid))
-				continue;
-
-			err = obd_set_info_async(env, tgt->ltd_exp, keylen,
-						 key, sizeof(*info->capa),
-						 info->capa, set);
 		} else {
 			/* Only want a specific OSC */
 			if (check_uuid &&

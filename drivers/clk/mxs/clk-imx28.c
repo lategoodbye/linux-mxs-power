@@ -9,9 +9,9 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
-#include <linux/clk.h>
 #include <linux/clk/mxs.h>
 #include <linux/clkdev.h>
+#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/err.h>
 #include <linux/init.h>
@@ -56,16 +56,6 @@ static void __iomem *clkctrl;
 #define BP_FRAC0_IO1FRAC	16
 #define BP_FRAC0_IO0FRAC	24
 
-#define BP_HBUS_ASM_BUSY		31
-#define BP_HBUS_ASM_EMIPORT_AS_ENABLE	27
-#define BP_HBUS_APBHDMA_AS_ENABLE	26
-#define BP_HBUS_TRAFFIC_AS_ENABLE	23
-#define BP_HBUS_CPU_DATA_AS_ENABLE	22
-#define BP_HBUS_CPU_INSTR_AS_ENABLE	21
-#define BP_HBUS_ASM_ENABLE		20
-#define BM_HBUS_SLOW_DIV		(7 << 16)
-#define BM_HBUS_SLOW_DIV_BY8		(3 << 16)
-
 static void __iomem *digctrl;
 #define DIGCTRL digctrl
 #define BP_SAIF_CLKMUX		10
@@ -88,46 +78,6 @@ int mxs_saif_clkmux_select(unsigned int clkmux)
 
 	writel_relaxed(0x3 << BP_SAIF_CLKMUX, DIGCTRL + CLR);
 	writel_relaxed(clkmux << BP_SAIF_CLKMUX, DIGCTRL + SET);
-
-	return 0;
-}
-
-int mx28_hbus_is_autoslow_enabled(void)
-{
-	if (readl_relaxed(HBUS) & (1 << BP_HBUS_ASM_ENABLE))
-		return 1;
-
-	return 0;
-}
-
-int mx28_hbus_set_autoslow(int enable)
-{
-	u32 val;
-	int timeout;
-
-	for (timeout = 0; timeout < 100000; timeout++) {
-		val = readl_relaxed(HBUS);
-		if (!(val & (1 << BP_HBUS_ASM_BUSY)))
-			break;
-	}
-
-	if (timeout == 5)
-		return -ETIMEDOUT;
-
-	if (!enable) {
-		writel_relaxed(1 << BP_HBUS_ASM_ENABLE, HBUS + CLR);
-		return 0;
-	}
-
-	val |= BP_HBUS_ASM_EMIPORT_AS_ENABLE;
-	val |= BP_HBUS_APBHDMA_AS_ENABLE;
-	val |= BP_HBUS_TRAFFIC_AS_ENABLE;
-	val |= BP_HBUS_CPU_DATA_AS_ENABLE;
-	val |= BP_HBUS_CPU_INSTR_AS_ENABLE;
-	val |= BP_HBUS_ASM_ENABLE;
-	val |= BM_HBUS_SLOW_DIV_BY8;
-
-	writel_relaxed(val, HBUS);
 
 	return 0;
 }

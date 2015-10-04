@@ -174,7 +174,7 @@ modifier_bp	[rwx]{1,3}
 
 <config>{
 	/*
-	 * Please update formats_error_string any time
+	 * Please update parse_events_formats_error_string any time
 	 * new static term is added.
 	 */
 config			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_CONFIG); }
@@ -182,7 +182,11 @@ config1			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_CONFIG1); }
 config2			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_CONFIG2); }
 name			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_NAME); }
 period			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_SAMPLE_PERIOD); }
+freq			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_SAMPLE_FREQ); }
 branch_type		{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_BRANCH_SAMPLE_TYPE); }
+time			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_TIME); }
+call-graph		{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_CALLGRAPH); }
+stack-size		{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_STACKSIZE); }
 ,			{ return ','; }
 "/"			{ BEGIN(INITIAL); return '/'; }
 {name_minus}		{ return str(yyscanner, PE_NAME); }

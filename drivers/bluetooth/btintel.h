@@ -73,6 +73,12 @@ struct intel_secure_send_result {
 
 int btintel_check_bdaddr(struct hci_dev *hdev);
 int btintel_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr);
+void btintel_hw_error(struct hci_dev *hdev, u8 code);
+
+void btintel_version_info(struct hci_dev *hdev, struct intel_version *ver);
+int btintel_secure_send(struct hci_dev *hdev, u8 fragment_type, u32 plen,
+			const void *param);
+int btintel_load_ddc_config(struct hci_dev *hdev, const char *ddc_name);
 
 #else
 
@@ -82,6 +88,27 @@ static inline int btintel_check_bdaddr(struct hci_dev *hdev)
 }
 
 static inline int btintel_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline void btintel_hw_error(struct hci_dev *hdev, u8 code)
+{
+}
+
+static inline void btintel_version_info(struct hci_dev *hdev,
+					struct intel_version *ver)
+{
+}
+
+static inline int btintel_secure_send(struct hci_dev *hdev, u8 fragment_type,
+				      u32 plen, const void *param)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int btintel_load_ddc_config(struct hci_dev *hdev,
+					  const char *ddc_name)
 {
 	return -EOPNOTSUPP;
 }

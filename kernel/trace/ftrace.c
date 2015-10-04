@@ -98,6 +98,13 @@ struct ftrace_pid {
 	struct pid *pid;
 };
 
+static bool ftrace_pids_enabled(void)
+{
+	return !list_empty(&ftrace_pids);
+}
+
+static void ftrace_update_trampoline(struct ftrace_ops *ops);
+
 /*
  * ftrace_disabled is set when an anomaly is discovered.
  * ftrace_disabled is much stronger than ftrace_enabled.
@@ -109,7 +116,6 @@ static DEFINE_MUTEX(ftrace_lock);
 static struct ftrace_ops *ftrace_control_list __read_mostly = &ftrace_list_end;
 static struct ftrace_ops *ftrace_ops_list __read_mostly = &ftrace_list_end;
 ftrace_func_t ftrace_trace_function __read_mostly = ftrace_stub;
-ftrace_func_t ftrace_pid_function __read_mostly = ftrace_stub;
 static struct ftrace_ops global_ops;
 static struct ftrace_ops control_ops;
 
@@ -183,14 +189,7 @@ static void ftrace_pid_func(unsigned long ip, unsigned long parent_ip,
 	if (!test_tsk_trace_trace(current))
 		return;
 
-	ftrace_pid_function(ip, parent_ip, op, regs);
-}
-
-static void set_ftrace_pid_function(ftrace_func_t func)
-{
-	/* do not set ftrace_pid_function to itself! */
-	if (func != ftrace_pid_func)
-		ftrace_pid_function = func;
+	op->saved_func(ip, parent_ip, op, regs);
 }
 
 /**
@@ -202,7 +201,6 @@ static void set_ftrace_pid_function(ftrace_func_t func)
 void clear_ftrace_function(void)
 {
 	ftrace_trace_function = ftrace_stub;
-	ftrace_pid_function = ftrace_stub;
 }
 
 static void control_ops_disable_all(struct ftrace_ops *ops)
@@ -245,6 +243,11 @@ static void ftrace_sync_ipi(void *data)
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 static void update_function_graph_func(void);
+
+/* Both enabled by default (can be cleared by function_graph tracer flags */
+static bool fgraph_sleep_time = true;
+static bool fgraph_graph_time = true;
+
 #else
 static inline void update_function_graph_func(void) { }
 #endif
@@ -436,6 +439,12 @@ static int __register_ftrace_function(struct ftrace_ops *ops)
 	} else
 		add_ftrace_ops(&ftrace_ops_list, ops);
 
+	/* Always save the function, and reset at unregistering */
+	ops->saved_func = ops->func;
+
+	if (ops->flags & FTRACE_OPS_FL_PID && ftrace_pids_enabled())
+		ops->func = ftrace_pid_func;
+
 	ftrace_update_trampoline(ops);
 
 	if (ftrace_enabled)
@@ -463,14 +472,27 @@ static int __unregister_ftrace_function(struct ftrace_ops *ops)
 	if (ftrace_enabled)
 		update_ftrace_function();
 
+	ops->func = ops->saved_func;
+
 	return 0;
 }
 
 static void ftrace_update_pid_func(void)
 {
+	bool enabled = ftrace_pids_enabled();
+	struct ftrace_ops *op;
+
 	/* Only do something if we are tracing something */
 	if (ftrace_trace_function == ftrace_stub)
 		return;
+
+	do_for_each_ftrace_op(op, ftrace_ops_list) {
+		if (op->flags & FTRACE_OPS_FL_PID) {
+			op->func = enabled ? ftrace_pid_func :
+				op->saved_func;
+			ftrace_update_trampoline(op);
+		}
+	} while_for_each_ftrace_op(op);
 
 	update_ftrace_function();
 }
@@ -613,13 +635,18 @@ static int function_stat_show(struct seq_file *m, void *v)
 		goto out;
 	}
 
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	avg = rec->time;
+	do_div(avg, rec->counter);
+	if (tracing_thresh && (avg < tracing_thresh))
+		goto out;
+#endif
+
 	kallsyms_lookup(rec->ip, NULL, NULL, NULL, str);
 	seq_printf(m, "  %-30.30s  %10lu", str, rec->counter);
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	seq_puts(m, "    ");
-	avg = rec->time;
-	do_div(avg, rec->counter);
 
 	/* Sample standard deviation (s^2) */
 	if (rec->counter <= 1)
@@ -895,7 +922,7 @@ static void profile_graph_return(struct ftrace_graph_ret *trace)
 
 	calltime = trace->rettime - trace->calltime;
 
-	if (!(trace_flags & TRACE_ITER_GRAPH_TIME)) {
+	if (!fgraph_graph_time) {
 		int index;
 
 		index = trace->depth;
@@ -1133,7 +1160,8 @@ static struct ftrace_ops global_ops = {
 	.local_hash.filter_hash		= EMPTY_HASH,
 	INIT_OPS_HASH(global_ops)
 	.flags				= FTRACE_OPS_FL_RECURSION_SAFE |
-					  FTRACE_OPS_FL_INITIALIZED,
+					  FTRACE_OPS_FL_INITIALIZED |
+					  FTRACE_OPS_FL_PID,
 };
 
 /*
@@ -5023,7 +5051,9 @@ static void ftrace_update_trampoline(struct ftrace_ops *ops)
 
 static struct ftrace_ops global_ops = {
 	.func			= ftrace_stub,
-	.flags			= FTRACE_OPS_FL_RECURSION_SAFE | FTRACE_OPS_FL_INITIALIZED,
+	.flags			= FTRACE_OPS_FL_RECURSION_SAFE |
+				  FTRACE_OPS_FL_INITIALIZED |
+				  FTRACE_OPS_FL_PID,
 };
 
 static int __init ftrace_nodyn_init(void)
@@ -5080,11 +5110,6 @@ void ftrace_init_array_ops(struct trace_array *tr, ftrace_func_t func)
 		if (WARN_ON(tr->ops->func != ftrace_stub))
 			printk("ftrace ops had %pS for function\n",
 			       tr->ops->func);
-		/* Only the top level instance does pid tracing */
-		if (!list_empty(&ftrace_pids)) {
-			set_ftrace_pid_function(func);
-			func = ftrace_pid_func;
-		}
 	}
 	tr->ops->func = func;
 	tr->ops->private = tr;
@@ -5371,7 +5396,7 @@ static void *fpid_start(struct seq_file *m, loff_t *pos)
 {
 	mutex_lock(&ftrace_lock);
 
-	if (list_empty(&ftrace_pids) && (!*pos))
+	if (!ftrace_pids_enabled() && (!*pos))
 		return (void *) 1;
 
 	return seq_list_start(&ftrace_pids, *pos);
@@ -5610,6 +5635,7 @@ static struct ftrace_ops graph_ops = {
 	.func			= ftrace_stub,
 	.flags			= FTRACE_OPS_FL_RECURSION_SAFE |
 				   FTRACE_OPS_FL_INITIALIZED |
+				   FTRACE_OPS_FL_PID |
 				   FTRACE_OPS_FL_STUB,
 #ifdef FTRACE_GRAPH_TRAMP_ADDR
 	.trampoline		= FTRACE_GRAPH_TRAMP_ADDR,
@@ -5617,6 +5643,16 @@ static struct ftrace_ops graph_ops = {
 #endif
 	ASSIGN_OPS_HASH(graph_ops, &global_ops.local_hash)
 };
+
+void ftrace_graph_sleep_time_control(bool enable)
+{
+	fgraph_sleep_time = enable;
+}
+
+void ftrace_graph_graph_time_control(bool enable)
+{
+	fgraph_graph_time = enable;
+}
 
 int ftrace_graph_entry_stub(struct ftrace_graph_ent *trace)
 {
@@ -5686,7 +5722,7 @@ ftrace_graph_probe_sched_switch(void *ignore,
 	 * Does the user want to count the time a function was asleep.
 	 * If so, do not update the time stamps.
 	 */
-	if (trace_flags & TRACE_ITER_SLEEP_TIME)
+	if (fgraph_sleep_time)
 		return;
 
 	timestamp = trace_clock_local();

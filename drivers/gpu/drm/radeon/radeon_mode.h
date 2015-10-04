@@ -237,7 +237,6 @@ struct radeon_afmt {
 	int offset;
 	bool last_buffer_filled_status;
 	int id;
-	struct r600_audio_pin *pin;
 };
 
 struct radeon_mode_info {
@@ -439,6 +438,7 @@ struct radeon_encoder_atom_dig {
 	uint8_t backlight_level;
 	int panel_mode;
 	struct radeon_afmt *afmt;
+	struct r600_audio_pin *pin;
 	int active_mst_links;
 };
 
@@ -876,8 +876,9 @@ extern void radeon_cursor_reset(struct drm_crtc *crtc);
 
 extern int radeon_get_crtc_scanoutpos(struct drm_device *dev, int crtc,
 				      unsigned int flags,
-				      int *vpos, int *hpos, ktime_t *stime,
-				      ktime_t *etime);
+				      int *vpos, int *hpos,
+				      ktime_t *stime, ktime_t *etime,
+				      const struct drm_display_mode *mode);
 
 extern bool radeon_combios_check_hardcoded_edid(struct radeon_device *rdev);
 extern struct edid *

@@ -1528,7 +1528,7 @@ struct ldlm_lock *ldlm_lock_create(struct ldlm_namespace *ns,
 	if (lvb_len) {
 		lock->l_lvb_len = lvb_len;
 		lock->l_lvb_data = kzalloc(lvb_len, GFP_NOFS);
-		if (lock->l_lvb_data == NULL)
+		if (!lock->l_lvb_data)
 			goto out;
 	}
 
@@ -1564,7 +1564,7 @@ ldlm_error_t ldlm_lock_enqueue(struct ldlm_namespace *ns,
 	ldlm_error_t rc = ELDLM_OK;
 	struct ldlm_interval *node = NULL;
 
-	lock->l_last_activity = get_seconds();
+	lock->l_last_activity = ktime_get_real_seconds();
 	/* policies are not executed on the client or during replay */
 	if ((*flags & (LDLM_FL_HAS_INTENT|LDLM_FL_REPLAY)) == LDLM_FL_HAS_INTENT
 	    && !local && ns->ns_policy) {
@@ -1813,7 +1813,7 @@ int ldlm_run_ast_work(struct ldlm_namespace *ns, struct list_head *rpc_list,
 		return 0;
 
 	arg = kzalloc(sizeof(*arg), GFP_NOFS);
-	if (arg == NULL)
+	if (!arg)
 		return -ENOMEM;
 
 	atomic_set(&arg->restart, 0);

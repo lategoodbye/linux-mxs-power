@@ -28,11 +28,6 @@
  * This takes messages of various sizes written OUT to a device, and loops
  * them back so they can be read IN from it.  It has been used by certain
  * test applications.  It supports limited testing of data queueing logic.
- *
- *
- * This is currently packaged as a configuration driver, which can't be
- * combined with other functions to make composite devices.  However, it
- * can be combined with other independent configurations.
  */
 struct f_loopback {
 	struct usb_function	function;
@@ -200,12 +195,10 @@ autoconf_fail:
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 	}
-	loop->in_ep->driver_data = cdev;	/* claim */
 
 	loop->out_ep = usb_ep_autoconfig(cdev->gadget, &fs_loop_sink_desc);
 	if (!loop->out_ep)
 		goto autoconf_fail;
-	loop->out_ep->driver_data = cdev;	/* claim */
 
 	/* support high speed hardware */
 	hs_loop_source_desc.bEndpointAddress =
@@ -369,8 +362,7 @@ static int loopback_set_alt(struct usb_function *f,
 	struct usb_composite_dev *cdev = f->config->cdev;
 
 	/* we know alt is zero */
-	if (loop->in_ep->driver_data)
-		disable_loopback(loop);
+	disable_loopback(loop);
 	return enable_loopback(cdev, loop);
 }
 
@@ -418,9 +410,6 @@ static inline struct f_lb_opts *to_f_lb_opts(struct config_item *item)
 			    func_inst.group);
 }
 
-CONFIGFS_ATTR_STRUCT(f_lb_opts);
-CONFIGFS_ATTR_OPS(f_lb_opts);
-
 static void lb_attr_release(struct config_item *item)
 {
 	struct f_lb_opts *lb_opts = to_f_lb_opts(item);
@@ -430,24 +419,24 @@ static void lb_attr_release(struct config_item *item)
 
 static struct configfs_item_operations lb_item_ops = {
 	.release		= lb_attr_release,
-	.show_attribute		= f_lb_opts_attr_show,
-	.store_attribute	= f_lb_opts_attr_store,
 };
 
-static ssize_t f_lb_opts_qlen_show(struct f_lb_opts *opts, char *page)
+static ssize_t f_lb_opts_qlen_show(struct config_item *item, char *page)
 {
+	struct f_lb_opts *opts = to_f_lb_opts(item);
 	int result;
 
 	mutex_lock(&opts->lock);
-	result = sprintf(page, "%d", opts->qlen);
+	result = sprintf(page, "%d\n", opts->qlen);
 	mutex_unlock(&opts->lock);
 
 	return result;
 }
 
-static ssize_t f_lb_opts_qlen_store(struct f_lb_opts *opts,
+static ssize_t f_lb_opts_qlen_store(struct config_item *item,
 				    const char *page, size_t len)
 {
+	struct f_lb_opts *opts = to_f_lb_opts(item);
 	int ret;
 	u32 num;
 
@@ -468,25 +457,22 @@ end:
 	return ret;
 }
 
-static struct f_lb_opts_attribute f_lb_opts_qlen =
-	__CONFIGFS_ATTR(qlen, S_IRUGO | S_IWUSR,
-			f_lb_opts_qlen_show,
-			f_lb_opts_qlen_store);
-
-static ssize_t f_lb_opts_bulk_buflen_show(struct f_lb_opts *opts, char *page)
+static ssize_t f_lb_opts_bulk_buflen_show(struct config_item *item, char *page)
 {
+	struct f_lb_opts *opts = to_f_lb_opts(item);
 	int result;
 
 	mutex_lock(&opts->lock);
-	result = sprintf(page, "%d", opts->bulk_buflen);
+	result = sprintf(page, "%d\n", opts->bulk_buflen);
 	mutex_unlock(&opts->lock);
 
 	return result;
 }
 
-static ssize_t f_lb_opts_bulk_buflen_store(struct f_lb_opts *opts,
+static ssize_t f_lb_opts_bulk_buflen_store(struct config_item *item,
 				    const char *page, size_t len)
 {
+	struct f_lb_opts *opts = to_f_lb_opts(item);
 	int ret;
 	u32 num;
 
@@ -507,14 +493,12 @@ end:
 	return ret;
 }
 
-static struct f_lb_opts_attribute f_lb_opts_bulk_buflen =
-	__CONFIGFS_ATTR(buflen, S_IRUGO | S_IWUSR,
-			f_lb_opts_bulk_buflen_show,
-			f_lb_opts_bulk_buflen_store);
+CONFIGFS_ATTR(f_lb_opts_, qlen);
+CONFIGFS_ATTR(f_lb_opts_, bulk_buflen);
 
 static struct configfs_attribute *lb_attrs[] = {
-	&f_lb_opts_qlen.attr,
-	&f_lb_opts_bulk_buflen.attr,
+	&f_lb_opts_attr_qlen,
+	&f_lb_opts_attr_bulk_buflen,
 	NULL,
 };
 

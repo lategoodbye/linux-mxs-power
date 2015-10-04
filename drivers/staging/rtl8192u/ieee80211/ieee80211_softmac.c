@@ -19,7 +19,7 @@
 #include <linux/random.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/etherdevice.h>
 
 #include "dot11d.h"
@@ -277,7 +277,6 @@ inline void softmac_mgmt_xmit(struct sk_buff *skb, struct ieee80211_device *ieee
 			printk("%s():insert to waitqueue!\n",__func__);
 			skb_queue_tail(&ieee->skb_waitQ[tcb_desc->queue_index], skb);
 		} else {
-			//printk("TX packet!\n");
 			ieee->softmac_hard_start_xmit(skb, ieee->dev);
 			//dev_kfree_skb_any(skb);//edit by thomas
 		}
@@ -1177,7 +1176,7 @@ inline struct sk_buff *ieee80211_association_req(struct ieee80211_network *beaco
 			tag = skb_put(skb, ht_cap_len);
 			*tag++ = MFIE_TYPE_HT_CAP;
 			*tag++ = ht_cap_len - 2;
-			memcpy(tag, ht_cap_buf,ht_cap_len -2);
+			memcpy(tag, ht_cap_buf, ht_cap_len - 2);
 			tag += ht_cap_len -2;
 		}
 	}
@@ -1214,7 +1213,7 @@ inline struct sk_buff *ieee80211_association_req(struct ieee80211_network *beaco
 			tag = skb_put(skb, realtek_ie_len);
 			*tag++ = MFIE_TYPE_GENERIC;
 			*tag++ = realtek_ie_len - 2;
-			memcpy(tag, realtek_ie_buf,realtek_ie_len -2 );
+			memcpy(tag, realtek_ie_buf, realtek_ie_len - 2);
 		}
 	}
 //	printk("<=====%s(), %p, %p\n", __func__, ieee->dev, ieee->dev->dev_addr);
@@ -1964,7 +1963,7 @@ static void ieee80211_check_auth_response(struct ieee80211_device *ieee,
 			}
 
 			if (ieee->current_network.mode == IEEE_N_24G &&
-					bHalfSupportNmode == true) {
+					bHalfSupportNmode) {
 				netdev_dbg(ieee->dev, "enter half N mode\n");
 				ieee->bHalfWirelessN24GMode = true;
 			} else

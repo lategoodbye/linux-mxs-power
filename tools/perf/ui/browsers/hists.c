@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include "../libslang.h"
 #include <stdlib.h>
 #include <string.h>
 #include <linux/rbtree.h>
@@ -27,7 +26,7 @@ struct hist_browser {
 	struct map_symbol   *selection;
 	struct hist_browser_timer *hbt;
 	struct pstack	    *pstack;
-	struct perf_session_env *env;
+	struct perf_env *env;
 	int		     print_seq;
 	bool		     show_dso;
 	bool		     show_headers;
@@ -540,10 +539,10 @@ static void hist_browser__show_callchain_entry(struct hist_browser *browser,
 
 	ui_browser__set_color(&browser->b, color);
 	hist_browser__gotorc(browser, row, 0);
-	slsmg_write_nstring(" ", offset);
-	slsmg_printf("%c", folded_sign);
+	ui_browser__write_nstring(&browser->b, " ", offset);
+	ui_browser__printf(&browser->b, "%c", folded_sign);
 	ui_browser__write_graph(&browser->b, show_annotated ? SLSMG_RARROW_CHAR : ' ');
-	slsmg_write_nstring(str, width);
+	ui_browser__write_nstring(&browser->b, str, width);
 }
 
 static void hist_browser__fprintf_callchain_entry(struct hist_browser *b __maybe_unused,
@@ -680,7 +679,7 @@ static int __hpp__slsmg_color_printf(struct perf_hpp *hpp, const char *fmt, ...)
 	ui_browser__set_percent_color(arg->b, percent, arg->current_entry);
 
 	ret = scnprintf(hpp->buf, hpp->size, fmt, len, percent);
-	slsmg_printf("%s", hpp->buf);
+	ui_browser__printf(arg->b, "%s", hpp->buf);
 
 	advance_hpp(hpp, ret);
 	return ret;
@@ -713,10 +712,11 @@ hist_browser__hpp_color_##_type(struct perf_hpp_fmt *fmt,		\
 				struct hist_entry *he)			\
 {									\
 	if (!symbol_conf.cumulate_callchain) {				\
+		struct hpp_arg *arg = hpp->ptr;				\
 		int len = fmt->user_len ?: fmt->len;			\
 		int ret = scnprintf(hpp->buf, hpp->size,		\
 				    "%*s", len, "N/A");			\
-		slsmg_printf("%s", hpp->buf);				\
+		ui_browser__printf(arg->b, "%s", hpp->buf);		\
 									\
 		return ret;						\
 	}								\
@@ -801,12 +801,12 @@ static int hist_browser__show_entry(struct hist_browser *browser,
 
 			if (first) {
 				if (symbol_conf.use_callchain) {
-					slsmg_printf("%c ", folded_sign);
+					ui_browser__printf(&browser->b, "%c ", folded_sign);
 					width -= 2;
 				}
 				first = false;
 			} else {
-				slsmg_printf("  ");
+				ui_browser__printf(&browser->b, "  ");
 				width -= 2;
 			}
 
@@ -814,7 +814,7 @@ static int hist_browser__show_entry(struct hist_browser *browser,
 				width -= fmt->color(fmt, &hpp, entry);
 			} else {
 				width -= fmt->entry(fmt, &hpp, entry);
-				slsmg_printf("%s", s);
+				ui_browser__printf(&browser->b, "%s", s);
 			}
 		}
 
@@ -822,7 +822,7 @@ static int hist_browser__show_entry(struct hist_browser *browser,
 		if (!browser->b.navkeypressed)
 			width += 1;
 
-		slsmg_write_nstring("", width);
+		ui_browser__write_nstring(&browser->b, "", width);
 
 		++row;
 		++printed;
@@ -899,7 +899,7 @@ static void hist_browser__show_headers(struct hist_browser *browser)
 	hists__scnprintf_headers(headers, sizeof(headers), browser->hists);
 	ui_browser__gotorc(&browser->b, 0, 0);
 	ui_browser__set_color(&browser->b, HE_COLORSET_ROOT);
-	slsmg_write_nstring(headers, browser->b.width + 1);
+	ui_browser__write_nstring(&browser->b, headers, browser->b.width + 1);
 }
 
 static void ui_browser__hists_init_top(struct ui_browser *browser)
@@ -1214,7 +1214,7 @@ static int hist_browser__dump(struct hist_browser *browser)
 
 static struct hist_browser *hist_browser__new(struct hists *hists,
 					      struct hist_browser_timer *hbt,
-					      struct perf_session_env *env)
+					      struct perf_env *env)
 {
 	struct hist_browser *browser = zalloc(sizeof(*browser));
 
@@ -1261,12 +1261,15 @@ static int hists__browser_title(struct hists *hists,
 	int printed;
 	const struct dso *dso = hists->dso_filter;
 	const struct thread *thread = hists->thread_filter;
+	int socket_id = hists->socket_filter;
 	unsigned long nr_samples = hists->stats.nr_events[PERF_RECORD_SAMPLE];
 	u64 nr_events = hists->stats.total_period;
 	struct perf_evsel *evsel = hists_to_evsel(hists);
 	const char *ev_name = perf_evsel__name(evsel);
 	char buf[512];
 	size_t buflen = sizeof(buf);
+	char ref[30] = " show reference callgraph, ";
+	bool enable_ref = false;
 
 	if (symbol_conf.filter_relative) {
 		nr_samples = hists->stats.nr_non_filtered_samples;
@@ -1292,10 +1295,13 @@ static int hists__browser_title(struct hists *hists,
 		}
 	}
 
+	if (symbol_conf.show_ref_callgraph &&
+	    strstr(ev_name, "call-graph=no"))
+		enable_ref = true;
 	nr_samples = convert_unit(nr_samples, &unit);
 	printed = scnprintf(bf, size,
-			   "Samples: %lu%c of event '%s', Event count (approx.): %" PRIu64,
-			   nr_samples, unit, ev_name, nr_events);
+			   "Samples: %lu%c of event '%s',%sEvent count (approx.): %" PRIu64,
+			   nr_samples, unit, ev_name, enable_ref ? ref : " ", nr_events);
 
 
 	if (hists->uid_filter_str)
@@ -1309,6 +1315,9 @@ static int hists__browser_title(struct hists *hists,
 	if (dso)
 		printed += scnprintf(bf + printed, size - printed,
 				    ", DSO: %s", dso->short_name);
+	if (socket_id > -1)
+		printed += scnprintf(bf + printed, size - printed,
+				    ", Processor Socket: %d", socket_id);
 	if (!is_report_browser(hbt)) {
 		struct perf_top *top = hbt->arg;
 
@@ -1420,6 +1429,7 @@ struct popup_action {
 	struct thread 		*thread;
 	struct dso		*dso;
 	struct map_symbol 	ms;
+	int			socket;
 
 	int (*fn)(struct hist_browser *browser, struct popup_action *act);
 };
@@ -1432,7 +1442,7 @@ do_annotate(struct hist_browser *browser, struct popup_action *act)
 	struct hist_entry *he;
 	int err;
 
-	if (!objdump_path && perf_session_env__lookup_objdump(browser->env))
+	if (!objdump_path && perf_env__lookup_objdump(browser->env))
 		return 0;
 
 	notes = symbol__annotation(act->ms.sym);
@@ -1517,7 +1527,7 @@ add_thread_opt(struct hist_browser *browser, struct popup_action *act,
 static int
 do_zoom_dso(struct hist_browser *browser, struct popup_action *act)
 {
-	struct dso *dso = act->dso;
+	struct map *map = act->ms.map;
 
 	if (browser->hists->dso_filter) {
 		pstack__remove(browser->pstack, &browser->hists->dso_filter);
@@ -1525,11 +1535,11 @@ do_zoom_dso(struct hist_browser *browser, struct popup_action *act)
 		browser->hists->dso_filter = NULL;
 		ui_helpline__pop();
 	} else {
-		if (dso == NULL)
+		if (map == NULL)
 			return 0;
 		ui_helpline__fpush("To zoom out press <- or -> + \"Zoom out of %s DSO\"",
-				   dso->kernel ? "the Kernel" : dso->short_name);
-		browser->hists->dso_filter = dso;
+				   __map__is_kernel(map) ? "the Kernel" : map->dso->short_name);
+		browser->hists->dso_filter = map->dso;
 		perf_hpp__set_elide(HISTC_DSO, true);
 		pstack__push(browser->pstack, &browser->hists->dso_filter);
 	}
@@ -1541,17 +1551,18 @@ do_zoom_dso(struct hist_browser *browser, struct popup_action *act)
 
 static int
 add_dso_opt(struct hist_browser *browser, struct popup_action *act,
-	    char **optstr, struct dso *dso)
+	    char **optstr, struct map *map)
 {
-	if (dso == NULL)
+	if (map == NULL)
 		return 0;
 
 	if (asprintf(optstr, "Zoom %s %s DSO",
 		     browser->hists->dso_filter ? "out of" : "into",
-		     dso->kernel ? "the Kernel" : dso->short_name) < 0)
+		     __map__is_kernel(map) ? "the Kernel" : map->dso->short_name) < 0)
 		return 0;
 
-	act->dso = dso;
+	act->ms.map = map;
+	act->dso = map->dso;
 	act->fn = do_zoom_dso;
 	return 1;
 }
@@ -1667,6 +1678,41 @@ add_exit_opt(struct hist_browser *browser __maybe_unused,
 	return 1;
 }
 
+static int
+do_zoom_socket(struct hist_browser *browser, struct popup_action *act)
+{
+	if (browser->hists->socket_filter > -1) {
+		pstack__remove(browser->pstack, &browser->hists->socket_filter);
+		browser->hists->socket_filter = -1;
+		perf_hpp__set_elide(HISTC_SOCKET, false);
+	} else {
+		browser->hists->socket_filter = act->socket;
+		perf_hpp__set_elide(HISTC_SOCKET, true);
+		pstack__push(browser->pstack, &browser->hists->socket_filter);
+	}
+
+	hists__filter_by_socket(browser->hists);
+	hist_browser__reset(browser);
+	return 0;
+}
+
+static int
+add_socket_opt(struct hist_browser *browser, struct popup_action *act,
+	       char **optstr, int socket_id)
+{
+	if (socket_id < 0)
+		return 0;
+
+	if (asprintf(optstr, "Zoom %s Processor Socket %d",
+		     (browser->hists->socket_filter > -1) ? "out of" : "into",
+		     socket_id) < 0)
+		return 0;
+
+	act->socket = socket_id;
+	act->fn = do_zoom_socket;
+	return 1;
+}
+
 static void hist_browser__update_nr_entries(struct hist_browser *hb)
 {
 	u64 nr_entries = 0;
@@ -1690,7 +1736,7 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 				    bool left_exits,
 				    struct hist_browser_timer *hbt,
 				    float min_pcnt,
-				    struct perf_session_env *env)
+				    struct perf_env *env)
 {
 	struct hists *hists = evsel__hists(evsel);
 	struct hist_browser *browser = hist_browser__new(hists, hbt, env);
@@ -1720,6 +1766,7 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 	"E             Expand all callchains\n"				\
 	"F             Toggle percentage of filtered entries\n"		\
 	"H             Display column headers\n"			\
+	"S             Zoom into current Processor Socket\n"		\
 
 	/* help messages are sorted by lexical order of the hotkey */
 	const char report_help[] = HIST_BROWSER_HELP_COMMON
@@ -1750,7 +1797,7 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 		hist_browser__update_nr_entries(browser);
 	}
 
-	browser->pstack = pstack__new(2);
+	browser->pstack = pstack__new(3);
 	if (browser->pstack == NULL)
 		goto out;
 
@@ -1768,7 +1815,9 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 	while (1) {
 		struct thread *thread = NULL;
 		struct dso *dso = NULL;
+		struct map *map = NULL;
 		int choice = 0;
+		int socked_id = -1;
 
 		nr_options = 0;
 
@@ -1776,7 +1825,10 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 
 		if (browser->he_selection != NULL) {
 			thread = hist_browser__selected_thread(browser);
-			dso = browser->selection->map ? browser->selection->map->dso : NULL;
+			map = browser->selection->map;
+			if (map)
+				dso = map->dso;
+			socked_id = browser->he_selection->socket;
 		}
 		switch (key) {
 		case K_TAB:
@@ -1818,6 +1870,10 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 		case 't':
 			actions->thread = thread;
 			do_zoom_thread(browser, actions);
+			continue;
+		case 'S':
+			actions->socket = socked_id;
+			do_zoom_socket(browser, actions);
 			continue;
 		case '/':
 			if (ui_browser__input_window("Symbol to show",
@@ -1868,6 +1924,7 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 		case K_RIGHT:
 			/* menu */
 			break;
+		case K_ESC:
 		case K_LEFT: {
 			const void *top;
 
@@ -1877,6 +1934,12 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 				 */
 				if (left_exits)
 					goto out_free_stack;
+
+				if (key == K_ESC &&
+				    ui_browser__dialog_yesno(&browser->b,
+							     "Do you really want to exit?"))
+					goto out_free_stack;
+
 				continue;
 			}
 			top = pstack__peek(browser->pstack);
@@ -1887,17 +1950,13 @@ static int perf_evsel__hists_browse(struct perf_evsel *evsel, int nr_events,
 				 * Ditto for thread below.
 				 */
 				do_zoom_dso(browser, actions);
-			}
-			if (top == &browser->hists->thread_filter)
+			} else if (top == &browser->hists->thread_filter) {
 				do_zoom_thread(browser, actions);
+			} else if (top == &browser->hists->socket_filter) {
+				do_zoom_socket(browser, actions);
+			}
 			continue;
 		}
-		case K_ESC:
-			if (!left_exits &&
-			    !ui_browser__dialog_yesno(&browser->b,
-					       "Do you really want to exit?"))
-				continue;
-			/* Fall thru */
 		case 'q':
 		case CTRL('c'):
 			goto out_free_stack;
@@ -1959,17 +2018,29 @@ skip_annotation:
 		nr_options += add_thread_opt(browser, &actions[nr_options],
 					     &options[nr_options], thread);
 		nr_options += add_dso_opt(browser, &actions[nr_options],
-					  &options[nr_options], dso);
+					  &options[nr_options], map);
 		nr_options += add_map_opt(browser, &actions[nr_options],
 					  &options[nr_options],
-					  browser->selection->map);
-
+					  browser->selection ?
+						browser->selection->map : NULL);
+		nr_options += add_socket_opt(browser, &actions[nr_options],
+					     &options[nr_options],
+					     socked_id);
 		/* perf script support */
 		if (browser->he_selection) {
 			nr_options += add_script_opt(browser,
 						     &actions[nr_options],
 						     &options[nr_options],
 						     thread, NULL);
+			/*
+			 * Note that browser->selection != NULL
+			 * when browser->he_selection is not NULL,
+			 * so we don't need to check browser->selection
+			 * before fetching browser->selection->sym like what
+			 * we do before fetching browser->selection->map.
+			 *
+			 * See hist_browser__show_entry.
+			 */
 			nr_options += add_script_opt(browser,
 						     &actions[nr_options],
 						     &options[nr_options],
@@ -2010,7 +2081,7 @@ struct perf_evsel_menu {
 	struct perf_evsel *selection;
 	bool lost_events, lost_events_warned;
 	float min_pcnt;
-	struct perf_session_env *env;
+	struct perf_env *env;
 };
 
 static void perf_evsel_menu__write(struct ui_browser *browser,
@@ -2044,7 +2115,7 @@ static void perf_evsel_menu__write(struct ui_browser *browser,
 	nr_events = convert_unit(nr_events, &unit);
 	printed = scnprintf(bf, sizeof(bf), "%lu%c%s%s", nr_events,
 			   unit, unit == ' ' ? "" : " ", ev_name);
-	slsmg_printf("%s", bf);
+	ui_browser__printf(browser, "%s", bf);
 
 	nr_events = hists->stats.nr_events[PERF_RECORD_LOST];
 	if (nr_events != 0) {
@@ -2057,7 +2128,7 @@ static void perf_evsel_menu__write(struct ui_browser *browser,
 		warn = bf;
 	}
 
-	slsmg_write_nstring(warn, browser->width - printed);
+	ui_browser__write_nstring(browser, warn, browser->width - printed);
 
 	if (current_entry)
 		menu->selection = evsel;
@@ -2120,15 +2191,11 @@ browse_hists:
 				else
 					pos = perf_evsel__prev(pos);
 				goto browse_hists;
-			case K_ESC:
-				if (!ui_browser__dialog_yesno(&menu->b,
-						"Do you really want to exit?"))
-					continue;
-				/* Fall thru */
 			case K_SWITCH_INPUT_DATA:
 			case 'q':
 			case CTRL('c'):
 				goto out;
+			case K_ESC:
 			default:
 				continue;
 			}
@@ -2167,7 +2234,7 @@ static int __perf_evlist__tui_browse_hists(struct perf_evlist *evlist,
 					   int nr_entries, const char *help,
 					   struct hist_browser_timer *hbt,
 					   float min_pcnt,
-					   struct perf_session_env *env)
+					   struct perf_env *env)
 {
 	struct perf_evsel *pos;
 	struct perf_evsel_menu menu = {
@@ -2200,7 +2267,7 @@ static int __perf_evlist__tui_browse_hists(struct perf_evlist *evlist,
 int perf_evlist__tui_browse_hists(struct perf_evlist *evlist, const char *help,
 				  struct hist_browser_timer *hbt,
 				  float min_pcnt,
-				  struct perf_session_env *env)
+				  struct perf_env *env)
 {
 	int nr_entries = evlist->nr_entries;
 

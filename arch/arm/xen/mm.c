@@ -25,7 +25,7 @@
 unsigned long xen_get_swiotlb_free_pages(unsigned int order)
 {
 	struct memblock_region *reg;
-	gfp_t flags = __GFP_NOWARN;
+	gfp_t flags = __GFP_NOWARN|__GFP_KSWAPD_RECLAIM;
 
 	for_each_memblock(memory, reg) {
 		if (reg->base < (phys_addr_t)0xffffffff) {
@@ -139,9 +139,9 @@ void __xen_dma_sync_single_for_device(struct device *hwdev,
 
 bool xen_arch_need_swiotlb(struct device *dev,
 			   unsigned long pfn,
-			   unsigned long mfn)
+			   unsigned long bfn)
 {
-	return (!hypercall_cflush && (pfn != mfn) && !is_device_dma_coherent(dev));
+	return (!hypercall_cflush && (pfn != bfn) && !is_device_dma_coherent(dev));
 }
 
 int xen_create_contiguous_region(phys_addr_t pstart, unsigned int order,

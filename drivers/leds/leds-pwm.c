@@ -44,6 +44,11 @@ static void __led_pwm_set(struct led_pwm_data *led_dat)
 	int new_duty = led_dat->duty;
 
 	pwm_config(led_dat->pwm, new_duty, led_dat->period);
+
+	if (new_duty == 0)
+		pwm_disable(led_dat->pwm);
+	else
+		pwm_enable(led_dat->pwm);
 }
 
 static void led_pwm_work(struct work_struct *work)
@@ -88,7 +93,6 @@ static void led_pwm_cleanup(struct led_pwm_priv *priv)
 		led_classdev_unregister(&priv->leds[priv->num_leds].cdev);
 		if (priv->leds[priv->num_leds].can_sleep)
 			cancel_work_sync(&priv->leds[priv->num_leds].work);
-		pwm_disable(priv->leds[priv->num_leds].pwm);
 	}
 }
 
@@ -124,10 +128,6 @@ static int led_pwm_add(struct device *dev, struct led_pwm_priv *priv,
 	led_data->period = pwm_get_period(led_data->pwm);
 	if (!led_data->period && (led->pwm_period_ns > 0))
 		led_data->period = led->pwm_period_ns;
-
-	pwm_config(led_data->pwm, led_data->active_low ? led_data->period: 0,
-		   led_data->period);
-	pwm_enable(led_data->pwm);
 
 	ret = led_classdev_register(dev, &led_data->cdev);
 	if (ret == 0) {

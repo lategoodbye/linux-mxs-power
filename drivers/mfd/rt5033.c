@@ -124,6 +124,7 @@ static const struct of_device_id rt5033_dt_match[] = {
 	{ .compatible = "richtek,rt5033", },
 	{ }
 };
+MODULE_DEVICE_TABLE(of, rt5033_dt_match);
 
 static struct i2c_driver rt5033_driver = {
 	.driver = {
@@ -136,7 +137,6 @@ static struct i2c_driver rt5033_driver = {
 };
 module_i2c_driver(rt5033_driver);
 
-MODULE_ALIAS("i2c:rt5033");
 MODULE_DESCRIPTION("Richtek RT5033 multi-function core driver");
 MODULE_AUTHOR("Beomho Seo <beomho.seo@samsung.com>");
 MODULE_LICENSE("GPL");

@@ -37,6 +37,8 @@
 #include <sound/jack.h>
 #include <sound/asoundef.h>
 #include <sound/tlv.h>
+#include <sound/hdaudio.h>
+#include <sound/hda_i915.h>
 #include "hda_codec.h"
 #include "hda_local.h"
 #include "hda_jack.h"
@@ -144,6 +146,9 @@ struct hdmi_spec {
 	 */
 	struct hda_multi_out multiout;
 	struct hda_pcm_stream pcm_playback;
+
+	/* i915/powerwell (Haswell+/Valleyview+) specific */
+	struct i915_audio_component_audio_ops i915_audio_ops;
 };
 
 
@@ -1770,6 +1775,16 @@ static bool check_non_pcm_per_cvt(struct hda_codec *codec, hda_nid_t cvt_nid)
 	return non_pcm;
 }
 
+/* There is a fixed mapping between audio pin node and display port
+ * on current Intel platforms:
+ * Pin Widget 5 - PORT B (port = 1 in i915 driver)
+ * Pin Widget 6 - PORT C (port = 2 in i915 driver)
+ * Pin Widget 7 - PORT D (port = 3 in i915 driver)
+ */
+static int intel_pin2port(hda_nid_t pin_nid)
+{
+	return pin_nid - 4;
+}
 
 /*
  * HDMI callbacks
@@ -1786,6 +1801,8 @@ static int generic_hdmi_playback_pcm_prepare(struct hda_pcm_stream *hinfo,
 	int pin_idx = hinfo_to_pin_index(codec, hinfo);
 	struct hdmi_spec_per_pin *per_pin = get_pin(spec, pin_idx);
 	hda_nid_t pin_nid = per_pin->pin_nid;
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct i915_audio_component *acomp = codec->bus->core.audio_component;
 	bool non_pcm;
 	int pinctl;
 
@@ -1801,6 +1818,13 @@ static int generic_hdmi_playback_pcm_prepare(struct hda_pcm_stream *hinfo,
 		intel_verify_pin_cvt_connect(codec, per_pin);
 		intel_not_share_assigned_cvt(codec, pin_nid, per_pin->mux_idx);
 	}
+
+	/* Call sync_audio_rate to set the N/CTS/M manually if necessary */
+	/* Todo: add DP1.2 MST audio support later */
+	if (acomp && acomp->ops && acomp->ops->sync_audio_rate)
+		acomp->ops->sync_audio_rate(acomp->dev,
+				intel_pin2port(pin_nid),
+				runtime->rate);
 
 	non_pcm = check_non_pcm_per_cvt(codec, cvt_nid);
 	mutex_lock(&per_pin->lock);
@@ -2191,6 +2215,9 @@ static void generic_hdmi_free(struct hda_codec *codec)
 	struct hdmi_spec *spec = codec->spec;
 	int pin_idx;
 
+	if (is_haswell_plus(codec) || is_valleyview_plus(codec))
+		snd_hdac_i915_register_notifier(NULL);
+
 	for (pin_idx = 0; pin_idx < spec->num_pins; pin_idx++) {
 		struct hdmi_spec_per_pin *per_pin = get_pin(spec, pin_idx);
 
@@ -2316,6 +2343,14 @@ static void haswell_set_power_state(struct hda_codec *codec, hda_nid_t fg,
 	snd_hda_codec_set_power_to_all(codec, fg, power_state);
 }
 
+static void intel_pin_eld_notify(void *audio_ptr, int port)
+{
+	struct hda_codec *codec = audio_ptr;
+	int pin_nid = port + 0x04;
+
+	check_presence_and_report(codec, pin_nid);
+}
+
 static int patch_generic_hdmi(struct hda_codec *codec)
 {
 	struct hdmi_spec *spec;
@@ -2342,8 +2377,12 @@ static int patch_generic_hdmi(struct hda_codec *codec)
 	if (is_valleyview_plus(codec) || is_skylake(codec))
 		codec->core.link_power_control = 1;
 
-	if (is_haswell_plus(codec) || is_valleyview_plus(codec))
+	if (is_haswell_plus(codec) || is_valleyview_plus(codec)) {
 		codec->depop_delay = 0;
+		spec->i915_audio_ops.audio_ptr = codec;
+		spec->i915_audio_ops.pin_eld_notify = intel_pin_eld_notify;
+		snd_hdac_i915_register_notifier(&spec->i915_audio_ops);
+	}
 
 	if (hdmi_parse_codec(codec) < 0) {
 		codec->spec = NULL;
@@ -3512,6 +3551,7 @@ static const struct hda_codec_preset snd_hda_preset_hdmi[] = {
 { .id = 0x10de0070, .name = "GPU 70 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de0071, .name = "GPU 71 HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de0072, .name = "GPU 72 HDMI/DP",	.patch = patch_nvhdmi },
+{ .id = 0x10de007d, .name = "GPU 7d HDMI/DP",	.patch = patch_nvhdmi },
 { .id = 0x10de8001, .name = "MCP73 HDMI",	.patch = patch_nvhdmi_2ch },
 { .id = 0x11069f80, .name = "VX900 HDMI/DP",	.patch = patch_via_hdmi },
 { .id = 0x11069f81, .name = "VX900 HDMI/DP",	.patch = patch_via_hdmi },
@@ -3576,6 +3616,7 @@ MODULE_ALIAS("snd-hda-codec-id:10de0067");
 MODULE_ALIAS("snd-hda-codec-id:10de0070");
 MODULE_ALIAS("snd-hda-codec-id:10de0071");
 MODULE_ALIAS("snd-hda-codec-id:10de0072");
+MODULE_ALIAS("snd-hda-codec-id:10de007d");
 MODULE_ALIAS("snd-hda-codec-id:10de8001");
 MODULE_ALIAS("snd-hda-codec-id:11069f80");
 MODULE_ALIAS("snd-hda-codec-id:11069f81");

@@ -167,27 +167,15 @@ config INPUT_M68K_BEEP
 	depends on M68K
 
 config INPUT_MAX77693_HAPTIC
-	tristate "MAXIM MAX77693 haptic controller support"
-	depends on MFD_MAX77693 && PWM
+	tristate "MAXIM MAX77693/MAX77843 haptic controller support"
+	depends on (MFD_MAX77693 || MFD_MAX77843) && PWM
 	select INPUT_FF_MEMLESS
 	help
 	  This option enables support for the haptic controller on
-	  MAXIM MAX77693 chip.
+	  MAXIM MAX77693 and MAX77843 chips.
 
 	  To compile this driver as module, choose M here: the
 	  module will be called max77693-haptic.
-
-config INPUT_MAX77843_HAPTIC
-    tristate "MAXIM MAX77843 haptic controller support"
-    depends on MFD_MAX77843 && REGULATOR
-    select INPUT_FF_MEMLESS
-    help
-      This option enables support for the haptic controller on
-      MAXIM MAX77843 chip. The driver supports ff-memless interface
-      from input framework.
-
-      To compile this driver as module, choose M here: the
-      module will be called max77843-haptic.
 
 config INPUT_MAX8925_ONKEY
 	tristate "MAX8925 ONKEY support"
@@ -242,6 +230,16 @@ config INPUT_MPU3050
 	  To compile this driver as a module, choose M here: the
 	  module will be called mpu3050.
 
+config INPUT_MXS_PSWITCH
+	tristate "MXS Power Switch Button"
+	depends on (MXS_POWER || COMPILE_TEST)
+	help
+	  Support the Power Switch Key of the MXS processor as an input
+	  device.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called mxs_pswitch.
+
 config INPUT_APANEL
 	tristate "Fujitsu Lifebook Application Panel buttons"
 	depends on X86 && I2C && LEDS_CLASS
@@ -259,7 +257,7 @@ config INPUT_APANEL
 config INPUT_GP2A
 	tristate "Sharp GP2AP002A00F I2C Proximity/Opto sensor driver"
 	depends on I2C
-	depends on GPIOLIB
+	depends on GPIOLIB || COMPILE_TEST
 	help
 	  Say Y here if you have a Sharp GP2AP002A00F proximity/als combo-chip
 	  hooked to an I2C bus.
@@ -269,7 +267,7 @@ config INPUT_GP2A
 
 config INPUT_GPIO_BEEPER
 	tristate "Generic GPIO Beeper support"
-	depends on GPIOLIB
+	depends on GPIOLIB || COMPILE_TEST
 	help
 	  Say Y here if you have a beeper connected to a GPIO pin.
 
@@ -278,7 +276,7 @@ config INPUT_GPIO_BEEPER
 
 config INPUT_GPIO_TILT_POLLED
 	tristate "Polled GPIO tilt switch"
-	depends on GPIOLIB
+	depends on GPIOLIB || COMPILE_TEST
 	select INPUT_POLLDEV
 	help
 	  This driver implements support for tilt switches connected
@@ -529,16 +527,6 @@ config HP_SDC_RTC
 	  Say Y here if you want to support the built-in real time clock
 	  of the HP SDC controller.
 
-config INPUT_MXS_PSWITCH
-	tristate "MXS Power Switch Button"
-	depends on (MXS_POWER || COMPILE_TEST) && INPUT
-	help
-	  Support the Power Switch Key of the MXS processor as an input
-	  device.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called mxs_pswitch.
-
 config INPUT_PALMAS_PWRBUTTON
 	tristate "Palmas Power button Driver"
 	depends on MFD_PALMAS
@@ -579,7 +567,7 @@ config INPUT_PWM_BEEPER
 
 config INPUT_GPIO_ROTARY_ENCODER
 	tristate "Rotary encoders connected to GPIO pins"
-	depends on GPIOLIB
+	depends on GPIOLIB || COMPILE_TEST
 	help
 	  Say Y here to add support for rotary encoders connected to GPIO lines.
 	  Check file:Documentation/input/rotary-encoder.txt for more
@@ -621,11 +609,11 @@ config INPUT_DA9055_ONKEY
 	  will be called da9055_onkey.
 
 config INPUT_DA9063_ONKEY
-	tristate "Dialog DA9063 OnKey"
-	depends on MFD_DA9063
+	tristate "Dialog DA9062/63 OnKey"
+	depends on MFD_DA9063 || MFD_DA9062
 	help
-	  Support the ONKEY of Dialog DA9063 Power Management IC as an
-	  input device reporting power button statue.
+	  Support the ONKEY of Dialog DA9063 and DA9062 Power Management ICs
+	  as an input device capable of reporting the power button status.
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called da9063_onkey.
@@ -786,7 +774,8 @@ config INPUT_SOC_BUTTON_ARRAY
 
 config INPUT_DRV260X_HAPTICS
 	tristate "TI DRV260X haptics support"
-	depends on INPUT && I2C && GPIOLIB
+	depends on INPUT && I2C
+	depends on GPIOLIB || COMPILE_TEST
 	select INPUT_FF_MEMLESS
 	select REGMAP_I2C
 	help

@@ -925,6 +925,20 @@ static int set_flash(struct net_device *netdev, struct ethtool_flash *ef)
 	const struct firmware *fw;
 	struct adapter *adap = netdev2adap(netdev);
 	unsigned int mbox = PCIE_FW_MASTER_M + 1;
+	u32 pcie_fw;
+	unsigned int master;
+	u8 master_vld = 0;
+
+	pcie_fw = t4_read_reg(adap, PCIE_FW_A);
+	master = PCIE_FW_MASTER_G(pcie_fw);
+	if (pcie_fw & PCIE_FW_MASTER_VLD_F)
+		master_vld = 1;
+	/* if csiostor is the master return */
+	if (master_vld && (master != adap->pf)) {
+		dev_warn(adap->pdev_dev,
+			 "cxgb4 driver needs to be loaded as MASTER to support FW flash\n");
+		return -EOPNOTSUPP;
+	}
 
 	ef->data[sizeof(ef->data) - 1] = '\0';
 	ret = request_firmware(&fw, ef->data, adap->pdev_dev);
@@ -945,6 +959,20 @@ static int set_flash(struct net_device *netdev, struct ethtool_flash *ef)
 		dev_info(adap->pdev_dev,
 			 "loaded firmware %s, reload cxgb4 driver\n", ef->data);
 	return ret;
+}
+
+static int get_ts_info(struct net_device *dev, struct ethtool_ts_info *ts_info)
+{
+	ts_info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
+				   SOF_TIMESTAMPING_RX_SOFTWARE |
+				   SOF_TIMESTAMPING_SOFTWARE;
+
+	ts_info->so_timestamping |= SOF_TIMESTAMPING_RX_HARDWARE |
+				    SOF_TIMESTAMPING_RAW_HARDWARE;
+
+	ts_info->phc_index = -1;
+
+	return 0;
 }
 
 static u32 get_rss_table_size(struct net_device *dev)
@@ -1081,6 +1109,7 @@ static const struct ethtool_ops cxgb_ethtool_ops = {
 	.get_rxfh	   = get_rss_table,
 	.set_rxfh	   = set_rss_table,
 	.flash_device      = set_flash,
+	.get_ts_info       = get_ts_info
 };
 
 void cxgb4_set_ethtool_ops(struct net_device *netdev)

@@ -275,7 +275,7 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 	int rc = 0, i;
 
 	set = kzalloc(sizeof(*set), GFP_NOFS);
-	if (set == NULL)
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -301,7 +301,7 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		}
 
 		req = kzalloc(sizeof(*req), GFP_NOFS);
-		if (req == NULL) {
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -319,7 +319,6 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		       sizeof(*req->rq_oi.oi_oa));
 		req->rq_oi.oi_oa->o_oi = loi->loi_oi;
 		req->rq_oi.oi_cb_up = cb_getattr_update;
-		req->rq_oi.oi_capa = oinfo->oi_capa;
 
 		lov_set_add_req(req, set);
 	}
@@ -358,7 +357,7 @@ int lov_prep_destroy_set(struct obd_export *exp, struct obd_info *oinfo,
 	int rc = 0, i;
 
 	set = kzalloc(sizeof(*set), GFP_NOFS);
-	if (set == NULL)
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -384,7 +383,7 @@ int lov_prep_destroy_set(struct obd_export *exp, struct obd_info *oinfo,
 		}
 
 		req = kzalloc(sizeof(*req), GFP_NOFS);
-		if (req == NULL) {
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -477,7 +476,7 @@ int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 	int rc = 0, i;
 
 	set = kzalloc(sizeof(*set), GFP_NOFS);
-	if (set == NULL)
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -500,7 +499,7 @@ int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		}
 
 		req = kzalloc(sizeof(*req), GFP_NOFS);
-		if (req == NULL) {
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -518,7 +517,6 @@ int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		req->rq_oi.oi_oa->o_oi = loi->loi_oi;
 		req->rq_oi.oi_oa->o_stripe_idx = i;
 		req->rq_oi.oi_cb_up = cb_setattr_update;
-		req->rq_oi.oi_capa = oinfo->oi_capa;
 
 		if (oinfo->oi_oa->o_valid & OBD_MD_FLSIZE) {
 			int off = lov_stripe_offset(oinfo->oi_md,
@@ -704,7 +702,7 @@ int lov_prep_statfs_set(struct obd_device *obd, struct obd_info *oinfo,
 	int rc = 0, i;
 
 	set = kzalloc(sizeof(*set), GFP_NOFS);
-	if (set == NULL)
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -730,14 +728,14 @@ int lov_prep_statfs_set(struct obd_device *obd, struct obd_info *oinfo,
 		}
 
 		req = kzalloc(sizeof(*req), GFP_NOFS);
-		if (req == NULL) {
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
 
 		req->rq_oi.oi_osfs = kzalloc(sizeof(*req->rq_oi.oi_osfs),
 					     GFP_NOFS);
-		if (req->rq_oi.oi_osfs == NULL) {
+		if (!req->rq_oi.oi_osfs) {
 			kfree(req);
 			rc = -ENOMEM;
 			goto out_set;

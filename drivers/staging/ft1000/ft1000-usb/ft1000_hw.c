@@ -619,7 +619,6 @@ static int ft1000_open(struct net_device *dev)
 {
 	struct ft1000_info *pInfo = netdev_priv(dev);
 	struct ft1000_usb *pFt1000Dev = pInfo->priv;
-	struct timeval tv;
 
 	pr_debug("ft1000_open is called for card %d\n", pFt1000Dev->CardNumber);
 
@@ -627,8 +626,7 @@ static int ft1000_open(struct net_device *dev)
 	pInfo->stats.tx_bytes = 0;
 	pInfo->stats.rx_packets = 0;
 	pInfo->stats.tx_packets = 0;
-	do_gettimeofday(&tv);
-	pInfo->ConTm = tv.tv_sec;
+	pInfo->ConTm = ktime_get_seconds();
 	pInfo->ProgConStat = 0;
 
 	netif_start_queue(dev);
@@ -842,7 +840,6 @@ static int ft1000_copy_up_pkt(struct urb *urb)
 	skb = dev_alloc_skb(len + 12 + 2);
 
 	if (skb == NULL) {
-		pr_debug("No Network buffers available\n");
 		info->stats.rx_errors++;
 		ft1000_submit_rx_urb(info);
 		return -1;
@@ -1547,7 +1544,7 @@ int ft1000_poll(void *dev_id)
 					       FT1000_REG_MAG_WATERMARK);
 			/* ring doorbell to tell DSP that
 			 * ASIC is out of reset
-			 * */
+			 */
 			status = ft1000_write_register(dev,
 						       FT1000_ASIC_RESET_DSP,
 						       FT1000_REG_DOORBELL);

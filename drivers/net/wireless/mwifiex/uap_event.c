@@ -41,6 +41,8 @@ static int mwifiex_check_uap_capabilties(struct mwifiex_private *priv,
 	mwifiex_dbg_dump(priv->adapter, EVT_D, "uap capabilties:",
 			 event->data, event->len);
 
+	skb_push(event, MWIFIEX_BSS_START_EVT_FIX_SIZE);
+
 	while ((evt_len >= sizeof(tlv_hdr->header))) {
 		tlv_hdr = (struct mwifiex_ie_types_data *)curr;
 		tlv_len = le16_to_cpu(tlv_hdr->header.len);
@@ -176,6 +178,7 @@ int mwifiex_process_uap_event(struct mwifiex_private *priv)
 		break;
 	case EVENT_UAP_BSS_IDLE:
 		priv->media_connected = false;
+		priv->port_open = false;
 		if (netif_carrier_ok(priv->netdev))
 			netif_carrier_off(priv->netdev);
 		mwifiex_stop_net_dev_queue(priv->netdev, adapter);
@@ -185,6 +188,7 @@ int mwifiex_process_uap_event(struct mwifiex_private *priv)
 		break;
 	case EVENT_UAP_BSS_ACTIVE:
 		priv->media_connected = true;
+		priv->port_open = true;
 		if (!netif_carrier_ok(priv->netdev))
 			netif_carrier_on(priv->netdev);
 		mwifiex_wake_up_net_dev_queue(priv->netdev, adapter);
@@ -192,6 +196,7 @@ int mwifiex_process_uap_event(struct mwifiex_private *priv)
 	case EVENT_UAP_BSS_START:
 		mwifiex_dbg(adapter, EVENT,
 			    "AP EVENT: event id: %#x\n", eventcause);
+		priv->port_open = false;
 		memcpy(priv->netdev->dev_addr, adapter->event_body + 2,
 		       ETH_ALEN);
 		if (priv->hist_data)
@@ -264,7 +269,9 @@ int mwifiex_process_uap_event(struct mwifiex_private *priv)
 		adapter->tx_lock_flag = false;
 		if (adapter->pps_uapsd_mode && adapter->gen_null_pkt) {
 			if (mwifiex_check_last_packet_indication(priv)) {
-				if (adapter->data_sent) {
+				if (adapter->data_sent ||
+				    (adapter->if_ops.is_port_ready &&
+				     !adapter->if_ops.is_port_ready(priv))) {
 					adapter->ps_state = PS_STATE_AWAKE;
 					adapter->pm_wakeup_card_req = false;
 					adapter->pm_wakeup_fw_try = false;
@@ -297,6 +304,16 @@ int mwifiex_process_uap_event(struct mwifiex_private *priv)
 		mwifiex_bt_coex_wlan_param_update_event(priv,
 							adapter->event_skb);
 		break;
+	case EVENT_TX_DATA_PAUSE:
+		mwifiex_dbg(adapter, EVENT, "event: TX DATA PAUSE\n");
+		mwifiex_process_tx_pause_event(priv, adapter->event_skb);
+		break;
+
+	case EVENT_MULTI_CHAN_INFO:
+		mwifiex_dbg(adapter, EVENT, "event: multi-chan info\n");
+		mwifiex_process_multi_chan_event(priv, adapter->event_skb);
+		break;
+
 	default:
 		mwifiex_dbg(adapter, EVENT,
 			    "event: unknown event id: %#x\n", eventcause);

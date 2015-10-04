@@ -71,8 +71,8 @@
 #define MPT3SAS_DRIVER_NAME		"mpt3sas"
 #define MPT3SAS_AUTHOR "Avago Technologies <MPT-FusionLinux.pdl@avagotech.com>"
 #define MPT3SAS_DESCRIPTION	"LSI MPT Fusion SAS 3.0 Device Driver"
-#define MPT3SAS_DRIVER_VERSION		"04.100.00.00"
-#define MPT3SAS_MAJOR_VERSION		4
+#define MPT3SAS_DRIVER_VERSION		"09.100.00.00"
+#define MPT3SAS_MAJOR_VERSION		9
 #define MPT3SAS_MINOR_VERSION		100
 #define MPT3SAS_BUILD_VERSION		0
 #define MPT3SAS_RELEASE_VERSION	00
@@ -152,12 +152,49 @@
 #define MPT3SAS_INTEL_RS3UC080_SSDID    0x3524
 
 /*
+ * Dell HBA branding
+ */
+#define MPT3SAS_DELL_12G_HBA_BRANDING       \
+	"Dell 12Gbps HBA"
+
+/*
+ * Dell HBA SSDIDs
+ */
+#define MPT3SAS_DELL_12G_HBA_SSDID	0x1F46
+
+/*
+ * Cisco HBA branding
+ */
+#define MPT3SAS_CISCO_12G_8E_HBA_BRANDING		\
+		"Cisco 9300-8E 12G SAS HBA"
+#define MPT3SAS_CISCO_12G_8I_HBA_BRANDING		\
+		"Cisco 9300-8i 12G SAS HBA"
+#define MPT3SAS_CISCO_12G_AVILA_HBA_BRANDING	\
+		"Cisco 12G Modular SAS Pass through Controller"
+#define MPT3SAS_CISCO_12G_COLUSA_MEZZANINE_HBA_BRANDING		\
+		"UCS C3X60 12G SAS Pass through Controller"
+/*
+ * Cisco HBA SSSDIDs
+ */
+#define MPT3SAS_CISCO_12G_8E_HBA_SSDID  0x14C
+#define MPT3SAS_CISCO_12G_8I_HBA_SSDID  0x154
+#define MPT3SAS_CISCO_12G_AVILA_HBA_SSDID  0x155
+#define MPT3SAS_CISCO_12G_COLUSA_MEZZANINE_HBA_SSDID  0x156
+
+/*
  * status bits for ioc->diag_buffer_status
  */
 #define MPT3_DIAG_BUFFER_IS_REGISTERED	(0x01)
 #define MPT3_DIAG_BUFFER_IS_RELEASED	(0x02)
 #define MPT3_DIAG_BUFFER_IS_DIAG_RESET	(0x04)
 
+/*
+ * Combined Reply Queue constants,
+ * There are twelve Supplemental Reply Post Host Index Registers
+ * and each register is at offset 0x10 bytes from the previous one.
+ */
+#define MPT3_SUP_REPLY_POST_HOST_INDEX_REG_COUNT 12
+#define MPT3_SUP_REPLY_POST_HOST_INDEX_REG_OFFSET (0x10)
 
 /* OEM Identifiers */
 #define MFG10_OEM_ID_INVALID                   (0x00000000)
@@ -172,6 +209,8 @@
 #define MFG10_GF0_R10_DISPLAY                  (0x00000004)
 #define MFG10_GF0_SSD_DATA_SCRUB_DISABLE       (0x00000008)
 #define MFG10_GF0_SINGLE_DRIVE_R0              (0x00000010)
+
+#define VIRTUAL_IO_FAILED_RETRY			(0x32010081)
 
 /* OEM Specific Flags will come from OEM specific header files */
 struct Mpi2ManufacturingPage10_t {
@@ -209,6 +248,7 @@ struct Mpi2ManufacturingPage11_t {
  * @flags: MPT_TARGET_FLAGS_XXX flags
  * @deleted: target flaged for deletion
  * @tm_busy: target is busy with TM request.
+ * @sdev: The sas_device associated with this target
  */
 struct MPT3SAS_TARGET {
 	struct scsi_target *starget;
@@ -218,6 +258,7 @@ struct MPT3SAS_TARGET {
 	u32	flags;
 	u8	deleted;
 	u8	tm_busy;
+	struct	_sas_device *sdev;
 };
 
 
@@ -294,7 +335,11 @@ struct _internal_cmd {
  * @responding: used in _scsih_sas_device_mark_responding
  * @fast_path: fast path feature enable bit
  * @pfa_led_on: flag for PFA LED status
- *
+ * @pend_sas_rphy_add: flag to check if device is in sas_rphy_add()
+ *	addition routine.
+ * @enclosure_level: used for enclosure services
+ * @connector_name: ASCII value from pg0.ConnectorName
+ * @refcount: reference count for deletion
  */
 struct _sas_device {
 	struct list_head list;
@@ -315,7 +360,26 @@ struct _sas_device {
 	u8	responding;
 	u8	fast_path;
 	u8	pfa_led_on;
+	u8	pend_sas_rphy_add;
+	u8	enclosure_level;
+	u8	connector_name[4];
+	struct kref refcount;
 };
+
+static inline void sas_device_get(struct _sas_device *s)
+{
+	kref_get(&s->refcount);
+}
+
+static inline void sas_device_free(struct kref *r)
+{
+	kfree(container_of(r, struct _sas_device, refcount));
+}
+
+static inline void sas_device_put(struct _sas_device *s)
+{
+	kref_put(&s->refcount, sas_device_free);
+}
 
 /**
  * struct _raid_device - raid volume link list
@@ -728,7 +792,8 @@ typedef void (*MPT3SAS_FLUSH_RUNNING_CMDS)(struct MPT3SAS_ADAPTER *ioc);
  *				is assigned only ones
  * @reply_queue_count: number of reply queue's
  * @reply_queue_list: link list contaning the reply queue info
- * @reply_post_host_index: head index in the pool where FW completes IO
+ * @msix96_vector: 96 MSI-X vector support
+ * @replyPostRegisterIndex: index of next position in Reply Desc Post Queue
  * @delayed_tr_list: target reset link list
  * @delayed_tr_volume_list: volume target reset link list
  * @@temp_sensors_count: flag to carry the number of temperature sensors
@@ -814,7 +879,6 @@ struct MPT3SAS_ADAPTER {
 	MPT_BUILD_SG_SCMD build_sg_scmd;
 	MPT_BUILD_SG    build_sg;
 	MPT_BUILD_ZERO_LEN_SGE build_zero_len_sge;
-	u8              mpi25;
 	u16             sge_size_ieee;
 
 	/* function ptr for MPI sg elements only */
@@ -937,6 +1001,10 @@ struct MPT3SAS_ADAPTER {
 	u8		reply_queue_count;
 	struct list_head reply_queue_list;
 
+	u8		msix96_vector;
+	/* reply post register index */
+	resource_size_t	**replyPostRegisterIndex;
+
 	struct list_head delayed_tr_list;
 	struct list_head delayed_tr_volume_list;
 	u8		temp_sensors_count;
@@ -1043,7 +1111,9 @@ struct _sas_node *mpt3sas_scsih_expander_find_by_handle(
 	struct MPT3SAS_ADAPTER *ioc, u16 handle);
 struct _sas_node *mpt3sas_scsih_expander_find_by_sas_address(
 	struct MPT3SAS_ADAPTER *ioc, u64 sas_address);
-struct _sas_device *mpt3sas_scsih_sas_device_find_by_sas_address(
+struct _sas_device *mpt3sas_get_sdev_by_addr(
+	 struct MPT3SAS_ADAPTER *ioc, u64 sas_address);
+struct _sas_device *__mpt3sas_get_sdev_by_addr(
 	struct MPT3SAS_ADAPTER *ioc, u64 sas_address);
 
 void mpt3sas_port_enable_complete(struct MPT3SAS_ADAPTER *ioc);

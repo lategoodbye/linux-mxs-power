@@ -36,7 +36,7 @@
 #define RX_BUF_SIZE	(25*1024)
 
 #define TX_HZ		2000
-#define TX_INTERVAL	(1000000/TX_HZ)
+#define TX_INTERVAL	(NSEC_PER_SEC/TX_HZ)
 
 static struct sdio_tx *alloc_tx_struct(struct tx_cxt *tx)
 {
@@ -173,12 +173,12 @@ static int init_sdio(struct sdiowm_dev *sdev)
 	spin_lock_init(&tx->lock);
 
 	tx->sdu_buf = kmalloc(SDU_TX_BUF_SIZE, GFP_KERNEL);
-	if (tx->sdu_buf == NULL)
+	if (!tx->sdu_buf)
 		goto fail;
 
 	for (i = 0; i < MAX_NR_SDU_BUF; i++) {
 		t = alloc_tx_struct(tx);
-		if (t == NULL) {
+		if (!t) {
 			ret = -ENOMEM;
 			goto fail;
 		}
@@ -192,7 +192,7 @@ static int init_sdio(struct sdiowm_dev *sdev)
 
 	for (i = 0; i < MAX_NR_RX_BUF; i++) {
 		r = alloc_rx_struct(rx);
-		if (r == NULL) {
+		if (!r) {
 			ret = -ENOMEM;
 			goto fail;
 		}
@@ -200,7 +200,7 @@ static int init_sdio(struct sdiowm_dev *sdev)
 	}
 
 	rx->rx_buf = kmalloc(RX_BUF_SIZE, GFP_KERNEL);
-	if (rx->rx_buf == NULL)
+	if (!rx->rx_buf)
 		goto fail;
 
 	return 0;
@@ -303,7 +303,7 @@ static void send_sdu(struct sdio_func *func, struct tx_cxt *tx)
 		put_tx_struct(t->tx_cxt, t);
 	}
 
-	do_gettimeofday(&tx->sdu_stamp);
+	tx->sdu_stamp = ktime_get();
 	spin_unlock_irqrestore(&tx->lock, flags);
 }
 
@@ -330,7 +330,7 @@ static void do_tx(struct work_struct *work)
 	struct sdio_func *func = sdev->func;
 	struct tx_cxt *tx = &sdev->tx;
 	struct sdio_tx *t = NULL;
-	struct timeval now, *before;
+	ktime_t now, before;
 	int is_sdu = 0;
 	long diff;
 	unsigned long flags;
@@ -346,11 +346,10 @@ static void do_tx(struct work_struct *work)
 		list_del(&t->list);
 		is_sdu = 0;
 	} else if (!tx->stop_sdu_tx && !list_empty(&tx->sdu_list)) {
-		do_gettimeofday(&now);
-		before = &tx->sdu_stamp;
+		now = ktime_get();
+		before = tx->sdu_stamp;
 
-		diff = (now.tv_sec - before->tv_sec) * 1000000 +
-			(now.tv_usec - before->tv_usec);
+		diff = ktime_to_ns(ktime_sub(now, before));
 		if (diff >= 0 && diff < TX_INTERVAL) {
 			schedule_work(&sdev->ws);
 			spin_unlock_irqrestore(&tx->lock, flags);
@@ -359,7 +358,7 @@ static void do_tx(struct work_struct *work)
 		is_sdu = 1;
 	}
 
-	if (!is_sdu && t == NULL) {
+	if (!is_sdu && !t) {
 		spin_unlock_irqrestore(&tx->lock, flags);
 		return;
 	}
@@ -393,7 +392,7 @@ static int gdm_sdio_send(void *priv_dev, void *data, int len,
 	cmd_evt = (pkt[0] << 8) | pkt[1];
 	if (cmd_evt == WIMAX_TX_SDU) {
 		t = get_tx_struct(tx, &no_spc);
-		if (t == NULL) {
+		if (!t) {
 			/* This case must not happen. */
 			spin_unlock_irqrestore(&tx->lock, flags);
 			return -ENOSPC;
@@ -407,7 +406,7 @@ static int gdm_sdio_send(void *priv_dev, void *data, int len,
 		t->cb_data = cb_data;
 	} else {
 		t = alloc_tx_struct(tx);
-		if (t == NULL) {
+		if (!t) {
 			spin_unlock_irqrestore(&tx->lock, flags);
 			return -ENOMEM;
 		}
@@ -581,7 +580,7 @@ static int gdm_sdio_receive(void *priv_dev,
 
 	spin_lock_irqsave(&rx->lock, flags);
 	r = get_rx_struct(rx);
-	if (r == NULL) {
+	if (!r) {
 		spin_unlock_irqrestore(&rx->lock, flags);
 		return -ENOMEM;
 	}
@@ -615,12 +614,12 @@ static int sdio_wimax_probe(struct sdio_func *func,
 		return ret;
 
 	phy_dev = kzalloc(sizeof(*phy_dev), GFP_KERNEL);
-	if (phy_dev == NULL) {
+	if (!phy_dev) {
 		ret = -ENOMEM;
 		goto out;
 	}
 	sdev = kzalloc(sizeof(*sdev), GFP_KERNEL);
-	if (sdev == NULL) {
+	if (!sdev) {
 		ret = -ENOMEM;
 		goto out;
 	}

@@ -27,6 +27,8 @@
 #define HV_X64_MSR_VP_RUNTIME_AVAILABLE		(1 << 0)
 /* Partition Reference Counter (HV_X64_MSR_TIME_REF_COUNT) available*/
 #define HV_X64_MSR_TIME_REF_COUNT_AVAILABLE	(1 << 1)
+/* Partition reference TSC MSR is available */
+#define HV_X64_MSR_REFERENCE_TSC_AVAILABLE              (1 << 9)
 
 /* A partition's reference time stamp counter (TSC) page */
 #define HV_X64_MSR_REFERENCE_TSC		0x40000021
@@ -150,6 +152,12 @@
 
 /* MSR used to provide vcpu index */
 #define HV_X64_MSR_VP_INDEX			0x40000002
+
+/* MSR used to reset the guest OS. */
+#define HV_X64_MSR_RESET			0x40000003
+
+/* MSR used to provide vcpu runtime in 100ns units */
+#define HV_X64_MSR_VP_RUNTIME			0x40000010
 
 /* MSR used to read the per-partition time reference counter */
 #define HV_X64_MSR_TIME_REF_COUNT		0x40000020

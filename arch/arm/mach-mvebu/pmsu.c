@@ -296,11 +296,11 @@ int armada_370_xp_pmsu_idle_enter(unsigned long deepidle)
 	/* Test the CR_C bit and set it if it was cleared */
 	asm volatile(
 	"mrc	p15, 0, r0, c1, c0, 0 \n\t"
-	"tst	r0, #(1 << 2) \n\t"
+	"tst	r0, %0 \n\t"
 	"orreq	r0, r0, #(1 << 2) \n\t"
 	"mcreq	p15, 0, r0, c1, c0, 0 \n\t"
 	"isb	"
-	: : : "r0");
+	: : "Ir" (CR_C) : "r0");
 
 	pr_debug("Failed to suspend the system\n");
 
@@ -415,7 +415,7 @@ static __init int armada_38x_cpuidle_init(void)
 	void __iomem *mpsoc_base;
 	u32 reg;
 
-	pr_warn("CPU idle is currently broken on Armada 38x: disabling");
+	pr_warn("CPU idle is currently broken on Armada 38x: disabling\n");
 	return 0;
 
 	np = of_find_compatible_node(NULL, NULL,
@@ -486,7 +486,7 @@ static int __init mvebu_v7_cpu_pm_init(void)
 	 */
 	if (of_machine_is_compatible("marvell,armada380")) {
 		cpu_hotplug_disable();
-		pr_warn("CPU hotplug support is currently broken on Armada 38x: disabling");
+		pr_warn("CPU hotplug support is currently broken on Armada 38x: disabling\n");
 	}
 
 	if (of_machine_is_compatible("marvell,armadaxp"))

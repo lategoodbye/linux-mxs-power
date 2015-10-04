@@ -105,8 +105,11 @@ static int ocfs2_file_open(struct inode *inode, struct file *file)
 			      file->f_path.dentry->d_name.len,
 			      file->f_path.dentry->d_name.name, mode);
 
-	if (file->f_mode & FMODE_WRITE)
-		dquot_initialize(inode);
+	if (file->f_mode & FMODE_WRITE) {
+		status = dquot_initialize(inode);
+		if (status)
+			goto leave;
+	}
 
 	spin_lock(&oi->ip_lock);
 
@@ -1127,6 +1130,7 @@ out:
 int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 {
 	int status = 0, size_change;
+	int inode_locked = 0;
 	struct inode *inode = d_inode(dentry);
 	struct super_block *sb = inode->i_sb;
 	struct ocfs2_super *osb = OCFS2_SB(sb);
@@ -1155,8 +1159,11 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 	if (status)
 		return status;
 
-	if (is_quota_modification(inode, attr))
-		dquot_initialize(inode);
+	if (is_quota_modification(inode, attr)) {
+		status = dquot_initialize(inode);
+		if (status)
+			return status;
+	}
 	size_change = S_ISREG(inode->i_mode) && attr->ia_valid & ATTR_SIZE;
 	if (size_change) {
 		status = ocfs2_rw_lock(inode, 1);
@@ -1172,6 +1179,7 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 			mlog_errno(status);
 		goto bail_unlock_rw;
 	}
+	inode_locked = 1;
 
 	if (size_change) {
 		status = inode_newsize_ok(inode, attr->ia_size);
@@ -1209,8 +1217,8 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 		    && OCFS2_HAS_RO_COMPAT_FEATURE(sb,
 		    OCFS2_FEATURE_RO_COMPAT_USRQUOTA)) {
 			transfer_to[USRQUOTA] = dqget(sb, make_kqid_uid(attr->ia_uid));
-			if (!transfer_to[USRQUOTA]) {
-				status = -ESRCH;
+			if (IS_ERR(transfer_to[USRQUOTA])) {
+				status = PTR_ERR(transfer_to[USRQUOTA]);
 				goto bail_unlock;
 			}
 		}
@@ -1218,8 +1226,8 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 		    && OCFS2_HAS_RO_COMPAT_FEATURE(sb,
 		    OCFS2_FEATURE_RO_COMPAT_GRPQUOTA)) {
 			transfer_to[GRPQUOTA] = dqget(sb, make_kqid_gid(attr->ia_gid));
-			if (!transfer_to[GRPQUOTA]) {
-				status = -ESRCH;
+			if (IS_ERR(transfer_to[GRPQUOTA])) {
+				status = PTR_ERR(transfer_to[GRPQUOTA]);
 				goto bail_unlock;
 			}
 		}
@@ -1252,7 +1260,10 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 bail_commit:
 	ocfs2_commit_trans(osb, handle);
 bail_unlock:
-	ocfs2_inode_unlock(inode, 1);
+	if (status) {
+		ocfs2_inode_unlock(inode, 1);
+		inode_locked = 0;
+	}
 bail_unlock_rw:
 	if (size_change)
 		ocfs2_rw_unlock(inode, 1);
@@ -1268,6 +1279,8 @@ bail:
 		if (status < 0)
 			mlog_errno(status);
 	}
+	if (inode_locked)
+		ocfs2_inode_unlock(inode, 1);
 
 	return status;
 }
@@ -1356,44 +1369,6 @@ static int __ocfs2_write_remove_suid(struct inode *inode,
 
 out_trans:
 	ocfs2_commit_trans(osb, handle);
-out:
-	return ret;
-}
-
-/*
- * Will look for holes and unwritten extents in the range starting at
- * pos for count bytes (inclusive).
- */
-static int ocfs2_check_range_for_holes(struct inode *inode, loff_t pos,
-				       size_t count)
-{
-	int ret = 0;
-	unsigned int extent_flags;
-	u32 cpos, clusters, extent_len, phys_cpos;
-	struct super_block *sb = inode->i_sb;
-
-	cpos = pos >> OCFS2_SB(sb)->s_clustersize_bits;
-	clusters = ocfs2_clusters_for_bytes(sb, pos + count) - cpos;
-
-	while (clusters) {
-		ret = ocfs2_get_clusters(inode, cpos, &phys_cpos, &extent_len,
-					 &extent_flags);
-		if (ret < 0) {
-			mlog_errno(ret);
-			goto out;
-		}
-
-		if (phys_cpos == 0 || (extent_flags & OCFS2_EXT_UNWRITTEN)) {
-			ret = 1;
-			break;
-		}
-
-		if (extent_len > clusters)
-			extent_len = clusters;
-
-		clusters -= extent_len;
-		cpos += extent_len;
-	}
 out:
 	return ret;
 }
@@ -2108,18 +2083,12 @@ out:
 
 static int ocfs2_prepare_inode_for_write(struct file *file,
 					 loff_t pos,
-					 size_t count,
-					 int appending,
-					 int *direct_io,
-					 int *has_refcount)
+					 size_t count)
 {
 	int ret = 0, meta_level = 0;
 	struct dentry *dentry = file->f_path.dentry;
 	struct inode *inode = d_inode(dentry);
 	loff_t end;
-	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
-	int full_coherency = !(osb->s_mount_opt &
-		OCFS2_MOUNT_COHERENCY_BUFFERED);
 
 	/*
 	 * We start with a read level meta lock and only jump to an ex
@@ -2168,10 +2137,6 @@ static int ocfs2_prepare_inode_for_write(struct file *file,
 							       pos,
 							       count,
 							       &meta_level);
-			if (has_refcount)
-				*has_refcount = 1;
-			if (direct_io)
-				*direct_io = 0;
 		}
 
 		if (ret < 0) {
@@ -2179,67 +2144,12 @@ static int ocfs2_prepare_inode_for_write(struct file *file,
 			goto out_unlock;
 		}
 
-		/*
-		 * Skip the O_DIRECT checks if we don't need
-		 * them.
-		 */
-		if (!direct_io || !(*direct_io))
-			break;
-
-		/*
-		 * There's no sane way to do direct writes to an inode
-		 * with inline data.
-		 */
-		if (OCFS2_I(inode)->ip_dyn_features & OCFS2_INLINE_DATA_FL) {
-			*direct_io = 0;
-			break;
-		}
-
-		/*
-		 * Allowing concurrent direct writes means
-		 * i_size changes wouldn't be synchronized, so
-		 * one node could wind up truncating another
-		 * nodes writes.
-		 */
-		if (end > i_size_read(inode) && !full_coherency) {
-			*direct_io = 0;
-			break;
-		}
-
-		/*
-		 * Fallback to old way if the feature bit is not set.
-		 */
-		if (end > i_size_read(inode) &&
-				!ocfs2_supports_append_dio(osb)) {
-			*direct_io = 0;
-			break;
-		}
-
-		/*
-		 * We don't fill holes during direct io, so
-		 * check for them here. If any are found, the
-		 * caller will have to retake some cluster
-		 * locks and initiate the io as buffered.
-		 */
-		ret = ocfs2_check_range_for_holes(inode, pos, count);
-		if (ret == 1) {
-			/*
-			 * Fallback to old way if the feature bit is not set.
-			 * Otherwise try dio first and then complete the rest
-			 * request through buffer io.
-			 */
-			if (!ocfs2_supports_append_dio(osb))
-				*direct_io = 0;
-			ret = 0;
-		} else if (ret < 0)
-			mlog_errno(ret);
 		break;
 	}
 
 out_unlock:
 	trace_ocfs2_prepare_inode_for_write(OCFS2_I(inode)->ip_blkno,
-					    pos, appending, count,
-					    direct_io, has_refcount);
+					    pos, count);
 
 	if (meta_level >= 0)
 		ocfs2_inode_unlock(inode, meta_level);
@@ -2251,20 +2161,18 @@ out:
 static ssize_t ocfs2_file_write_iter(struct kiocb *iocb,
 				    struct iov_iter *from)
 {
-	int direct_io, appending, rw_level;
-	int can_do_direct, has_refcount = 0;
+	int direct_io, rw_level;
 	ssize_t written = 0;
 	ssize_t ret;
-	size_t count = iov_iter_count(from), orig_count;
-	loff_t old_size;
-	u32 old_clusters;
+	size_t count = iov_iter_count(from);
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file_inode(file);
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 	int full_coherency = !(osb->s_mount_opt &
 			       OCFS2_MOUNT_COHERENCY_BUFFERED);
 	int unaligned_dio = 0;
-	int dropped_dio = 0;
+	int append_write = ((iocb->ki_pos + count) >=
+			i_size_read(inode) ? 1 : 0);
 
 	trace_ocfs2_file_aio_write(inode, file, file->f_path.dentry,
 		(unsigned long long)OCFS2_I(inode)->ip_blkno,
@@ -2275,17 +2183,16 @@ static ssize_t ocfs2_file_write_iter(struct kiocb *iocb,
 	if (count == 0)
 		return 0;
 
-	appending = iocb->ki_flags & IOCB_APPEND ? 1 : 0;
 	direct_io = iocb->ki_flags & IOCB_DIRECT ? 1 : 0;
 
 	mutex_lock(&inode->i_mutex);
 
-relock:
 	/*
 	 * Concurrent O_DIRECT writes are allowed with
 	 * mount_option "coherency=buffered".
+	 * For append write, we must take rw EX.
 	 */
-	rw_level = (!direct_io || full_coherency);
+	rw_level = (!direct_io || full_coherency || append_write);
 
 	ret = ocfs2_rw_lock(inode, rw_level);
 	if (ret < 0) {
@@ -2312,7 +2219,6 @@ relock:
 		ocfs2_inode_unlock(inode, 1);
 	}
 
-	orig_count = iov_iter_count(from);
 	ret = generic_write_checks(iocb, from);
 	if (ret <= 0) {
 		if (ret)
@@ -2321,9 +2227,7 @@ relock:
 	}
 	count = ret;
 
-	can_do_direct = direct_io;
-	ret = ocfs2_prepare_inode_for_write(file, iocb->ki_pos, count, appending,
-					    &can_do_direct, &has_refcount);
+	ret = ocfs2_prepare_inode_for_write(file, iocb->ki_pos, count);
 	if (ret < 0) {
 		mlog_errno(ret);
 		goto out;
@@ -2331,22 +2235,6 @@ relock:
 
 	if (direct_io && !is_sync_kiocb(iocb))
 		unaligned_dio = ocfs2_is_io_unaligned(inode, count, iocb->ki_pos);
-
-	/*
-	 * We can't complete the direct I/O as requested, fall back to
-	 * buffered I/O.
-	 */
-	if (direct_io && !can_do_direct) {
-		ocfs2_rw_unlock(inode, rw_level);
-
-		rw_level = -1;
-
-		direct_io = 0;
-		iocb->ki_flags &= ~IOCB_DIRECT;
-		iov_iter_reexpand(from, orig_count);
-		dropped_dio = 1;
-		goto relock;
-	}
 
 	if (unaligned_dio) {
 		/*
@@ -2358,13 +2246,6 @@ relock:
 		ocfs2_iocb_set_unaligned_aio(iocb);
 	}
 
-	/*
-	 * To later detect whether a journal commit for sync writes is
-	 * necessary, we sample i_size, and cluster count here.
-	 */
-	old_size = i_size_read(inode);
-	old_clusters = OCFS2_I(inode)->ip_clusters;
-
 	/* communicate with ocfs2_dio_end_io */
 	ocfs2_iocb_set_rw_locked(iocb, rw_level);
 
@@ -2372,11 +2253,25 @@ relock:
 	/* buffered aio wouldn't have proper lock coverage today */
 	BUG_ON(written == -EIOCBQUEUED && !(iocb->ki_flags & IOCB_DIRECT));
 
+	/*
+	 * deep in g_f_a_w_n()->ocfs2_direct_IO we pass in a ocfs2_dio_end_io
+	 * function pointer which is called when o_direct io completes so that
+	 * it can unlock our rw lock.
+	 * Unfortunately there are error cases which call end_io and others
+	 * that don't.  so we don't have to unlock the rw_lock if either an
+	 * async dio is going to do it in the future or an end_io after an
+	 * error has already done it.
+	 */
+	if ((written == -EIOCBQUEUED) || (!ocfs2_iocb_is_rw_locked(iocb))) {
+		rw_level = -1;
+		unaligned_dio = 0;
+	}
+
 	if (unlikely(written <= 0))
 		goto no_sync;
 
 	if (((file->f_flags & O_DSYNC) && !direct_io) ||
-	    IS_SYNC(inode) || dropped_dio) {
+	    IS_SYNC(inode)) {
 		ret = filemap_fdatawrite_range(file->f_mapping,
 					       iocb->ki_pos - written,
 					       iocb->ki_pos - 1);
@@ -2396,21 +2291,7 @@ relock:
 	}
 
 no_sync:
-	/*
-	 * deep in g_f_a_w_n()->ocfs2_direct_IO we pass in a ocfs2_dio_end_io
-	 * function pointer which is called when o_direct io completes so that
-	 * it can unlock our rw lock.
-	 * Unfortunately there are error cases which call end_io and others
-	 * that don't.  so we don't have to unlock the rw_lock if either an
-	 * async dio is going to do it in the future or an end_io after an
-	 * error has already done it.
-	 */
-	if ((ret == -EIOCBQUEUED) || (!ocfs2_iocb_is_rw_locked(iocb))) {
-		rw_level = -1;
-		unaligned_dio = 0;
-	}
-
-	if (unaligned_dio) {
+	if (unaligned_dio && ocfs2_iocb_is_unaligned_aio(iocb)) {
 		ocfs2_iocb_clear_unaligned_aio(iocb);
 		mutex_unlock(&OCFS2_I(inode)->ip_unaligned_aio);
 	}

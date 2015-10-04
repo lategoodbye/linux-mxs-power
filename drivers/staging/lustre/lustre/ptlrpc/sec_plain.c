@@ -46,6 +46,7 @@
 #include "../include/obd_class.h"
 #include "../include/lustre_net.h"
 #include "../include/lustre_sec.h"
+#include "ptlrpc_internal.h"
 
 struct plain_sec {
 	struct ptlrpc_sec       pls_base;
@@ -444,7 +445,7 @@ struct ptlrpc_sec *plain_create_sec(struct obd_import *imp,
 	LASSERT(SPTLRPC_FLVR_POLICY(sf->sf_rpc) == SPTLRPC_POLICY_PLAIN);
 
 	plsec = kzalloc(sizeof(*plsec), GFP_NOFS);
-	if (plsec == NULL)
+	if (!plsec)
 		return NULL;
 
 	/*

@@ -23,14 +23,6 @@
 
 #include <net/cfg802154.h>
 
-/* General MAC frame format:
- *  2 bytes: Frame Control
- *  1 byte:  Sequence Number
- * 20 bytes: Addressing fields
- * 14 bytes: Auxiliary Security Header
- */
-#define MAC802154_FRAME_HARD_HEADER_LEN		(2 + 1 + 20 + 14)
-
 /**
  * enum ieee802154_hw_addr_filt_flags - hardware address filtering flags
  *
@@ -250,6 +242,21 @@ struct ieee802154_ops {
 };
 
 /**
+ * ieee802154_get_fc_from_skb - get the frame control field from an skb
+ * @skb: skb where the frame control field will be get from
+ */
+static inline __le16 ieee802154_get_fc_from_skb(const struct sk_buff *skb)
+{
+	/* return some invalid fc on failure */
+	if (unlikely(skb->len < 2)) {
+		WARN_ON(1);
+		return cpu_to_le16(0);
+	}
+
+	return (__force __le16)__get_unaligned_memmove16(skb_mac_header(skb));
+}
+
+/**
  * ieee802154_be64_to_le64 - copies and convert be64 to le64
  * @le64_dst: le64 destination pointer
  * @be64_src: be64 source pointer
@@ -319,23 +326,6 @@ int ieee802154_register_hw(struct ieee802154_hw *hw);
  * @hw: the hardware to unregister
  */
 void ieee802154_unregister_hw(struct ieee802154_hw *hw);
-
-/**
- * ieee802154_rx - receive frame
- *
- * Use this function to hand received frames to mac802154. The receive
- * buffer in @skb must start with an IEEE 802.15.4 header. In case of a
- * paged @skb is used, the driver is recommended to put the ieee802154
- * header of the frame on the linear part of the @skb to avoid memory
- * allocation and/or memcpy by the stack.
- *
- * This function may not be called in IRQ context. Calls to this function
- * for a single hardware must be synchronized against each other.
- *
- * @hw: the hardware this frame came in on
- * @skb: the buffer to receive, owned by mac802154 after this call
- */
-void ieee802154_rx(struct ieee802154_hw *hw, struct sk_buff *skb);
 
 /**
  * ieee802154_rx_irqsafe - receive frame

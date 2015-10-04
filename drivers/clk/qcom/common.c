@@ -12,6 +12,7 @@
  */
 
 #include <linux/export.h>
+#include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/platform_device.h>
 #include <linux/clk-provider.h>
@@ -21,6 +22,7 @@
 #include "clk-rcg.h"
 #include "clk-regmap.h"
 #include "reset.h"
+#include "gdsc.h"
 
 struct qcom_cc {
 	struct qcom_reset_controller reset;
@@ -45,7 +47,7 @@ EXPORT_SYMBOL_GPL(qcom_find_freq);
 
 int qcom_find_src_index(struct clk_hw *hw, const struct parent_map *map, u8 src)
 {
-	int i, num_parents = __clk_get_num_parents(hw->clk);
+	int i, num_parents = clk_hw_get_num_parents(hw);
 
 	for (i = 0; i < num_parents; i++)
 		if (src == map[i].src)
@@ -120,8 +122,20 @@ int qcom_cc_really_probe(struct platform_device *pdev,
 
 	ret = reset_controller_register(&reset->rcdev);
 	if (ret)
-		of_clk_del_provider(dev->of_node);
+		goto err_reset;
 
+	if (desc->gdscs && desc->num_gdscs) {
+		ret = gdsc_register(dev, desc->gdscs, desc->num_gdscs,
+				    &reset->rcdev, regmap);
+		if (ret)
+			goto err_pd;
+	}
+
+	return 0;
+err_pd:
+	reset_controller_unregister(&reset->rcdev);
+err_reset:
+	of_clk_del_provider(dev->of_node);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(qcom_cc_really_probe);
@@ -140,7 +154,10 @@ EXPORT_SYMBOL_GPL(qcom_cc_probe);
 
 void qcom_cc_remove(struct platform_device *pdev)
 {
+	gdsc_unregister(&pdev->dev);
 	of_clk_del_provider(pdev->dev.of_node);
 	reset_controller_unregister(platform_get_drvdata(pdev));
 }
 EXPORT_SYMBOL_GPL(qcom_cc_remove);
+
+MODULE_LICENSE("GPL v2");

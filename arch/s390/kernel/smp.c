@@ -33,6 +33,7 @@
 #include <linux/crash_dump.h>
 #include <linux/memblock.h>
 #include <asm/asm-offsets.h>
+#include <asm/diag.h>
 #include <asm/switch_to.h>
 #include <asm/facility.h>
 #include <asm/ipl.h>
@@ -375,11 +376,14 @@ int smp_vcpu_scheduled(int cpu)
 
 void smp_yield_cpu(int cpu)
 {
-	if (MACHINE_HAS_DIAG9C)
+	if (MACHINE_HAS_DIAG9C) {
+		diag_stat_inc_norecursion(DIAG_STAT_X09C);
 		asm volatile("diag %0,0,0x9c"
 			     : : "d" (pcpu_devices[cpu].address));
-	else if (MACHINE_HAS_DIAG44)
+	} else if (MACHINE_HAS_DIAG44) {
+		diag_stat_inc_norecursion(DIAG_STAT_X044);
 		asm volatile("diag 0,0,0x44");
+	}
 }
 
 /*
@@ -532,8 +536,8 @@ EXPORT_SYMBOL(smp_ctl_clear_bit);
 
 #ifdef CONFIG_CRASH_DUMP
 
-static void __smp_store_cpu_state(struct save_area_ext *sa_ext, u16 address,
-				  int is_boot_cpu)
+static void __init __smp_store_cpu_state(struct save_area_ext *sa_ext,
+					 u16 address, int is_boot_cpu)
 {
 	void *lc = (void *)(unsigned long) store_prefix();
 	unsigned long vx_sa;

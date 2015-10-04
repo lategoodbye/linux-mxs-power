@@ -15,7 +15,9 @@
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma/pxa-dma.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/mtd/mtd.h>
@@ -33,10 +35,6 @@
 #define ARCH_HAS_DMA
 #endif
 
-#ifdef ARCH_HAS_DMA
-#include <mach/dma.h>
-#endif
-
 #include <linux/platform_data/mtd-nand-pxa3xx.h>
 
 #define	CHIP_DELAY_TIMEOUT	msecs_to_jiffies(200)
@@ -45,10 +43,13 @@
 
 /*
  * Define a buffer size for the initial command that detects the flash device:
- * STATUS, READID and PARAM. The largest of these is the PARAM command,
- * needing 256 bytes.
+ * STATUS, READID and PARAM.
+ * ONFI param page is 256 bytes, and there are three redundant copies
+ * to be read. JEDEC param page is 512 bytes, and there are also three
+ * redundant copies to be read.
+ * Hence this buffer should be at least 512 x 3. Let's pick 2048.
  */
-#define INIT_BUFFER_SIZE	256
+#define INIT_BUFFER_SIZE	2048
 
 /* registers and bit definitions */
 #define NDCR		(0x00) /* Control register */
@@ -75,7 +76,8 @@
 #define NDCR_ND_MODE		(0x3 << 21)
 #define NDCR_NAND_MODE   	(0x0)
 #define NDCR_CLR_PG_CNT		(0x1 << 20)
-#define NDCR_STOP_ON_UNCOR	(0x1 << 19)
+#define NFCV1_NDCR_ARB_CNTL	(0x1 << 19)
+#define NFCV2_NDCR_STOP_ON_UNCOR	(0x1 << 19)
 #define NDCR_RD_ID_CNT_MASK	(0x7 << 16)
 #define NDCR_RD_ID_CNT(x)	(((x) << 16) & NDCR_RD_ID_CNT_MASK)
 
@@ -126,6 +128,13 @@
 #define EXT_CMD_TYPE_LAST_RW	1 /* Last naked read/write */
 #define EXT_CMD_TYPE_MONO	0 /* Monolithic read/write */
 
+/*
+ * This should be large enough to read 'ONFI' and 'JEDEC'.
+ * Let's use 7 bytes, which is the maximum ID count supported
+ * by the controller (see NDCR_RD_ID_CNT_MASK).
+ */
+#define READ_ID_BYTES		7
+
 /* macros for registers read/write */
 #define nand_writel(info, off, val)	\
 	writel_relaxed((val), (info)->mmio_base + (off))
@@ -173,8 +182,6 @@ struct pxa3xx_nand_host {
 	/* calculated from pxa3xx_nand_flash data */
 	unsigned int		col_addr_cycles;
 	unsigned int		row_addr_cycles;
-	size_t			read_id_bytes;
-
 };
 
 struct pxa3xx_nand_info {
@@ -193,6 +200,10 @@ struct pxa3xx_nand_info {
 	unsigned int		oob_buff_pos;
 
 	/* DMA information */
+	struct scatterlist	sg;
+	enum dma_data_direction	dma_dir;
+	struct dma_chan		*dma_chan;
+	dma_cookie_t		dma_cookie;
 	int			drcmr_dat;
 	int			drcmr_cmd;
 
@@ -200,8 +211,6 @@ struct pxa3xx_nand_info {
 	unsigned char		*oob_buff;
 	dma_addr_t 		data_buff_phys;
 	int 			data_dma_ch;
-	struct pxa_dma_desc	*data_desc;
-	dma_addr_t 		data_desc_addr;
 
 	struct pxa3xx_nand_host *host[NUM_CHIP_SELECT];
 	unsigned int		state;
@@ -243,6 +252,30 @@ struct pxa3xx_nand_info {
 static bool use_dma = 1;
 module_param(use_dma, bool, 0444);
 MODULE_PARM_DESC(use_dma, "enable DMA for data transferring to/from NAND HW");
+
+struct pxa3xx_nand_timing {
+	unsigned int	tCH;  /* Enable signal hold time */
+	unsigned int	tCS;  /* Enable signal setup time */
+	unsigned int	tWH;  /* ND_nWE high duration */
+	unsigned int	tWP;  /* ND_nWE pulse time */
+	unsigned int	tRH;  /* ND_nRE high duration */
+	unsigned int	tRP;  /* ND_nRE pulse width */
+	unsigned int	tR;   /* ND_nWE high to ND_nRE low for read */
+	unsigned int	tWHR; /* ND_nWE high to ND_nRE low for status read */
+	unsigned int	tAR;  /* ND_ALE low to ND_nRE low delay */
+};
+
+struct pxa3xx_nand_flash {
+	char		*name;
+	uint32_t	chip_id;
+	unsigned int	page_per_block; /* Pages per block (PG_PER_BLK) */
+	unsigned int	page_size;	/* Page size in bytes (PAGE_SZ) */
+	unsigned int	flash_width;	/* Width of Flash memory (DWIDTH_M) */
+	unsigned int	dfc_width;	/* Width of flash controller(DWIDTH_C) */
+	unsigned int	num_blocks;	/* Number of physical blocks in Flash */
+
+	struct pxa3xx_nand_timing *timing;	/* NAND Flash timing */
+};
 
 static struct pxa3xx_nand_timing timing[] = {
 	{ 40, 80, 60, 100, 80, 100, 90000, 400, 40, },
@@ -439,8 +472,8 @@ static void pxa3xx_nand_start(struct pxa3xx_nand_info *info)
 	ndcr |= NDCR_ND_RUN;
 
 	/* clear status bits and run */
-	nand_writel(info, NDCR, 0);
 	nand_writel(info, NDSR, NDSR_MASK);
+	nand_writel(info, NDCR, 0);
 	nand_writel(info, NDCR, ndcr);
 }
 
@@ -460,6 +493,9 @@ static void pxa3xx_nand_stop(struct pxa3xx_nand_info *info)
 		ndcr &= ~NDCR_ND_RUN;
 		nand_writel(info, NDCR, ndcr);
 	}
+	if (info->dma_chan)
+		dmaengine_terminate_all(info->dma_chan);
+
 	/* clear status bits */
 	nand_writel(info, NDSR, NDSR_MASK);
 }
@@ -551,57 +587,61 @@ static void handle_data_pio(struct pxa3xx_nand_info *info)
 	info->data_size -= do_bytes;
 }
 
-#ifdef ARCH_HAS_DMA
+static void pxa3xx_nand_data_dma_irq(void *data)
+{
+	struct pxa3xx_nand_info *info = data;
+	struct dma_tx_state state;
+	enum dma_status status;
+
+	status = dmaengine_tx_status(info->dma_chan, info->dma_cookie, &state);
+	if (likely(status == DMA_COMPLETE)) {
+		info->state = STATE_DMA_DONE;
+	} else {
+		dev_err(&info->pdev->dev, "DMA error on data channel\n");
+		info->retcode = ERR_DMABUSERR;
+	}
+	dma_unmap_sg(info->dma_chan->device->dev, &info->sg, 1, info->dma_dir);
+
+	nand_writel(info, NDSR, NDSR_WRDREQ | NDSR_RDDREQ);
+	enable_int(info, NDCR_INT_MASK);
+}
+
 static void start_data_dma(struct pxa3xx_nand_info *info)
 {
-	struct pxa_dma_desc *desc = info->data_desc;
-	int dma_len = ALIGN(info->data_size + info->oob_size, 32);
-
-	desc->ddadr = DDADR_STOP;
-	desc->dcmd = DCMD_ENDIRQEN | DCMD_WIDTH4 | DCMD_BURST32 | dma_len;
+	enum dma_transfer_direction direction;
+	struct dma_async_tx_descriptor *tx;
 
 	switch (info->state) {
 	case STATE_DMA_WRITING:
-		desc->dsadr = info->data_buff_phys;
-		desc->dtadr = info->mmio_phys + NDDB;
-		desc->dcmd |= DCMD_INCSRCADDR | DCMD_FLOWTRG;
+		info->dma_dir = DMA_TO_DEVICE;
+		direction = DMA_MEM_TO_DEV;
 		break;
 	case STATE_DMA_READING:
-		desc->dtadr = info->data_buff_phys;
-		desc->dsadr = info->mmio_phys + NDDB;
-		desc->dcmd |= DCMD_INCTRGADDR | DCMD_FLOWSRC;
+		info->dma_dir = DMA_FROM_DEVICE;
+		direction = DMA_DEV_TO_MEM;
 		break;
 	default:
 		dev_err(&info->pdev->dev, "%s: invalid state %d\n", __func__,
 				info->state);
 		BUG();
 	}
+	info->sg.length = info->data_size +
+		(info->oob_size ? info->spare_size + info->ecc_size : 0);
+	dma_map_sg(info->dma_chan->device->dev, &info->sg, 1, info->dma_dir);
 
-	DRCMR(info->drcmr_dat) = DRCMR_MAPVLD | info->data_dma_ch;
-	DDADR(info->data_dma_ch) = info->data_desc_addr;
-	DCSR(info->data_dma_ch) |= DCSR_RUN;
-}
-
-static void pxa3xx_nand_data_dma_irq(int channel, void *data)
-{
-	struct pxa3xx_nand_info *info = data;
-	uint32_t dcsr;
-
-	dcsr = DCSR(channel);
-	DCSR(channel) = dcsr;
-
-	if (dcsr & DCSR_BUSERR) {
-		info->retcode = ERR_DMABUSERR;
+	tx = dmaengine_prep_slave_sg(info->dma_chan, &info->sg, 1, direction,
+				     DMA_PREP_INTERRUPT);
+	if (!tx) {
+		dev_err(&info->pdev->dev, "prep_slave_sg() failed\n");
+		return;
 	}
-
-	info->state = STATE_DMA_DONE;
-	enable_int(info, NDCR_INT_MASK);
-	nand_writel(info, NDSR, NDSR_WRDREQ | NDSR_RDDREQ);
+	tx->callback = pxa3xx_nand_data_dma_irq;
+	tx->callback_param = info;
+	info->dma_cookie = dmaengine_submit(tx);
+	dma_async_issue_pending(info->dma_chan);
+	dev_dbg(&info->pdev->dev, "%s(dir=%d cookie=%x size=%u)\n",
+		__func__, direction, info->dma_cookie, info->sg.length);
 }
-#else
-static void start_data_dma(struct pxa3xx_nand_info *info)
-{}
-#endif
 
 static irqreturn_t pxa3xx_nand_irq_thread(int irq, void *data)
 {
@@ -675,8 +715,14 @@ static irqreturn_t pxa3xx_nand_irq(int irq, void *devid)
 		is_ready = 1;
 	}
 
+	/*
+	 * Clear all status bit before issuing the next command, which
+	 * can and will alter the status bits and will deserve a new
+	 * interrupt on its own. This lets the controller exit the IRQ
+	 */
+	nand_writel(info, NDSR, status);
+
 	if (status & NDSR_WRCMDREQ) {
-		nand_writel(info, NDSR, NDSR_WRCMDREQ);
 		status &= ~NDSR_WRCMDREQ;
 		info->state = STATE_CMD_HANDLE;
 
@@ -697,8 +743,6 @@ static irqreturn_t pxa3xx_nand_irq(int irq, void *devid)
 			nand_writel(info, NDCB0, info->ndcb3);
 	}
 
-	/* clear NDSR to let the controller exit the IRQ */
-	nand_writel(info, NDSR, status);
 	if (is_completed)
 		complete(&info->cmd_complete);
 	if (is_ready)
@@ -899,18 +943,18 @@ static int prepare_set_command(struct pxa3xx_nand_info *info, int command,
 		break;
 
 	case NAND_CMD_PARAM:
-		info->buf_count = 256;
+		info->buf_count = INIT_BUFFER_SIZE;
 		info->ndcb0 |= NDCB0_CMD_TYPE(0)
 				| NDCB0_ADDR_CYC(1)
 				| NDCB0_LEN_OVRD
 				| command;
 		info->ndcb1 = (column & 0xFF);
-		info->ndcb3 = 256;
-		info->data_size = 256;
+		info->ndcb3 = INIT_BUFFER_SIZE;
+		info->data_size = INIT_BUFFER_SIZE;
 		break;
 
 	case NAND_CMD_READID:
-		info->buf_count = host->read_id_bytes;
+		info->buf_count = READ_ID_BYTES;
 		info->ndcb0 |= NDCB0_CMD_TYPE(3)
 				| NDCB0_ADDR_CYC(1)
 				| command;
@@ -1247,9 +1291,6 @@ static int pxa3xx_nand_config_flash(struct pxa3xx_nand_info *info,
 		return -EINVAL;
 	}
 
-	/* calculate flash information */
-	host->read_id_bytes = (f->page_size == 2048) ? 4 : 2;
-
 	/* calculate addressing information */
 	host->col_addr_cycles = (f->page_size == 2048) ? 2 : 1;
 
@@ -1265,7 +1306,7 @@ static int pxa3xx_nand_config_flash(struct pxa3xx_nand_info *info,
 	ndcr |= (f->flash_width == 16) ? NDCR_DWIDTH_M : 0;
 	ndcr |= (f->dfc_width == 16) ? NDCR_DWIDTH_C : 0;
 
-	ndcr |= NDCR_RD_ID_CNT(host->read_id_bytes);
+	ndcr |= NDCR_RD_ID_CNT(READ_ID_BYTES);
 	ndcr |= NDCR_SPARE_EN; /* enable spare by default */
 
 	info->reg_ndcr = ndcr;
@@ -1276,59 +1317,61 @@ static int pxa3xx_nand_config_flash(struct pxa3xx_nand_info *info,
 
 static int pxa3xx_nand_detect_config(struct pxa3xx_nand_info *info)
 {
-	/*
-	 * We set 0 by hard coding here, for we don't support keep_config
-	 * when there is more than one chip attached to the controller
-	 */
-	struct pxa3xx_nand_host *host = info->host[0];
 	uint32_t ndcr = nand_readl(info, NDCR);
 
-	if (ndcr & NDCR_PAGE_SZ) {
-		/* Controller's FIFO size */
-		info->chunk_size = 2048;
-		host->read_id_bytes = 4;
-	} else {
-		info->chunk_size = 512;
-		host->read_id_bytes = 2;
-	}
-
 	/* Set an initial chunk size */
-	info->reg_ndcr = ndcr & ~NDCR_INT_MASK;
+	info->chunk_size = ndcr & NDCR_PAGE_SZ ? 2048 : 512;
+	info->reg_ndcr = ndcr &
+		~(NDCR_INT_MASK | NDCR_ND_ARB_EN | NFCV1_NDCR_ARB_CNTL);
 	info->ndtr0cs0 = nand_readl(info, NDTR0CS0);
 	info->ndtr1cs0 = nand_readl(info, NDTR1CS0);
 	return 0;
 }
 
-#ifdef ARCH_HAS_DMA
 static int pxa3xx_nand_init_buff(struct pxa3xx_nand_info *info)
 {
 	struct platform_device *pdev = info->pdev;
-	int data_desc_offset = info->buf_size - sizeof(struct pxa_dma_desc);
+	struct dma_slave_config	config;
+	dma_cap_mask_t mask;
+	struct pxad_param param;
+	int ret;
 
-	if (use_dma == 0) {
-		info->data_buff = kmalloc(info->buf_size, GFP_KERNEL);
-		if (info->data_buff == NULL)
-			return -ENOMEM;
-		return 0;
-	}
-
-	info->data_buff = dma_alloc_coherent(&pdev->dev, info->buf_size,
-				&info->data_buff_phys, GFP_KERNEL);
-	if (info->data_buff == NULL) {
-		dev_err(&pdev->dev, "failed to allocate dma buffer\n");
+	info->data_buff = kmalloc(info->buf_size, GFP_KERNEL);
+	if (info->data_buff == NULL)
 		return -ENOMEM;
+	if (use_dma == 0)
+		return 0;
+
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
+
+	sg_init_one(&info->sg, info->data_buff, info->buf_size);
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_SLAVE, mask);
+	param.prio = PXAD_PRIO_LOWEST;
+	param.drcmr = info->drcmr_dat;
+	info->dma_chan = dma_request_slave_channel_compat(mask, pxad_filter_fn,
+							  &param, &pdev->dev,
+							  "data");
+	if (!info->dma_chan) {
+		dev_err(&pdev->dev, "unable to request data dma channel\n");
+		return -ENODEV;
 	}
 
-	info->data_desc = (void *)info->data_buff + data_desc_offset;
-	info->data_desc_addr = info->data_buff_phys + data_desc_offset;
-
-	info->data_dma_ch = pxa_request_dma("nand-data", DMA_PRIO_LOW,
-				pxa3xx_nand_data_dma_irq, info);
-	if (info->data_dma_ch < 0) {
-		dev_err(&pdev->dev, "failed to request data dma\n");
-		dma_free_coherent(&pdev->dev, info->buf_size,
-				info->data_buff, info->data_buff_phys);
-		return info->data_dma_ch;
+	memset(&config, 0, sizeof(config));
+	config.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
+	config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
+	config.src_addr = info->mmio_phys + NDDB;
+	config.dst_addr = info->mmio_phys + NDDB;
+	config.src_maxburst = 32;
+	config.dst_maxburst = 32;
+	ret = dmaengine_slave_config(info->dma_chan, &config);
+	if (ret < 0) {
+		dev_err(&info->pdev->dev,
+			"dma channel configuration failed: %d\n",
+			ret);
+		return ret;
 	}
 
 	/*
@@ -1341,29 +1384,12 @@ static int pxa3xx_nand_init_buff(struct pxa3xx_nand_info *info)
 
 static void pxa3xx_nand_free_buff(struct pxa3xx_nand_info *info)
 {
-	struct platform_device *pdev = info->pdev;
 	if (info->use_dma) {
-		pxa_free_dma(info->data_dma_ch);
-		dma_free_coherent(&pdev->dev, info->buf_size,
-				  info->data_buff, info->data_buff_phys);
-	} else {
-		kfree(info->data_buff);
+		dmaengine_terminate_all(info->dma_chan);
+		dma_release_channel(info->dma_chan);
 	}
-}
-#else
-static int pxa3xx_nand_init_buff(struct pxa3xx_nand_info *info)
-{
-	info->data_buff = kmalloc(info->buf_size, GFP_KERNEL);
-	if (info->data_buff == NULL)
-		return -ENOMEM;
-	return 0;
-}
-
-static void pxa3xx_nand_free_buff(struct pxa3xx_nand_info *info)
-{
 	kfree(info->data_buff);
 }
-#endif
 
 static int pxa3xx_nand_sensing(struct pxa3xx_nand_info *info)
 {
@@ -1473,6 +1499,9 @@ static int pxa3xx_nand_scan(struct mtd_info *mtd)
 	if (pdata->keep_config && !pxa3xx_nand_detect_config(info))
 		goto KEEP_CONFIG;
 
+	/* Set a default chunk size */
+	info->chunk_size = 512;
+
 	ret = pxa3xx_nand_sensing(info);
 	if (ret) {
 		dev_info(&info->pdev->dev, "There is no chip on cs %d!\n",
@@ -1492,19 +1521,16 @@ static int pxa3xx_nand_scan(struct mtd_info *mtd)
 		return -EINVAL;
 	}
 
-	num = ARRAY_SIZE(builtin_flash_types) + pdata->num_flash - 1;
+	num = ARRAY_SIZE(builtin_flash_types) - 1;
 	for (i = 0; i < num; i++) {
-		if (i < pdata->num_flash)
-			f = pdata->flash + i;
-		else
-			f = &builtin_flash_types[i - pdata->num_flash + 1];
+		f = &builtin_flash_types[i + 1];
 
 		/* find the chip in default list */
 		if (f->chip_id == id)
 			break;
 	}
 
-	if (i >= (ARRAY_SIZE(builtin_flash_types) + pdata->num_flash - 1)) {
+	if (i >= (ARRAY_SIZE(builtin_flash_types) - 1)) {
 		dev_err(&info->pdev->dev, "ERROR!! flash not defined!!!\n");
 
 		return -EINVAL;
@@ -1529,6 +1555,7 @@ static int pxa3xx_nand_scan(struct mtd_info *mtd)
 	pxa3xx_flash_ids[1].name = NULL;
 	def = pxa3xx_flash_ids;
 KEEP_CONFIG:
+	info->reg_ndcr |= (pdata->enable_arbiter) ? NDCR_ND_ARB_EN : 0;
 	if (info->reg_ndcr & NDCR_DWIDTH_M)
 		chip->options |= NAND_BUSWIDTH_16;
 
@@ -1663,34 +1690,23 @@ static int alloc_nand_resource(struct platform_device *pdev)
 		return ret;
 
 	if (use_dma) {
-		/*
-		 * This is a dirty hack to make this driver work from
-		 * devicetree bindings. It can be removed once we have
-		 * a prober DMA controller framework for DT.
-		 */
-		if (pdev->dev.of_node &&
-		    of_machine_is_compatible("marvell,pxa3xx")) {
-			info->drcmr_dat = 97;
-			info->drcmr_cmd = 99;
-		} else {
-			r = platform_get_resource(pdev, IORESOURCE_DMA, 0);
-			if (r == NULL) {
-				dev_err(&pdev->dev,
-					"no resource defined for data DMA\n");
-				ret = -ENXIO;
-				goto fail_disable_clk;
-			}
-			info->drcmr_dat = r->start;
-
-			r = platform_get_resource(pdev, IORESOURCE_DMA, 1);
-			if (r == NULL) {
-				dev_err(&pdev->dev,
-					"no resource defined for cmd DMA\n");
-				ret = -ENXIO;
-				goto fail_disable_clk;
-			}
-			info->drcmr_cmd = r->start;
+		r = platform_get_resource(pdev, IORESOURCE_DMA, 0);
+		if (r == NULL) {
+			dev_err(&pdev->dev,
+				"no resource defined for data DMA\n");
+			ret = -ENXIO;
+			goto fail_disable_clk;
 		}
+		info->drcmr_dat = r->start;
+
+		r = platform_get_resource(pdev, IORESOURCE_DMA, 1);
+		if (r == NULL) {
+			dev_err(&pdev->dev,
+				"no resource defined for cmd DMA\n");
+			ret = -ENXIO;
+			goto fail_disable_clk;
+		}
+		info->drcmr_cmd = r->start;
 	}
 
 	irq = platform_get_irq(pdev, 0);
@@ -1755,6 +1771,16 @@ static int pxa3xx_nand_remove(struct platform_device *pdev)
 		free_irq(irq, info);
 	pxa3xx_nand_free_buff(info);
 
+	/*
+	 * In the pxa3xx case, the DFI bus is shared between the SMC and NFC.
+	 * In order to prevent a lockup of the system bus, the DFI bus
+	 * arbitration is granted to SMC upon driver removal. This is done by
+	 * setting the x_ARB_CNTL bit, which also prevents the NAND to have
+	 * access to the bus anymore.
+	 */
+	nand_writel(info, NDCR,
+		    (nand_readl(info, NDCR) & ~NDCR_ND_ARB_EN) |
+		    NFCV1_NDCR_ARB_CNTL);
 	clk_disable_unprepare(info->clk);
 
 	for (cs = 0; cs < pdata->num_cs; cs++)
@@ -1801,15 +1827,16 @@ static int pxa3xx_nand_probe(struct platform_device *pdev)
 	struct pxa3xx_nand_platform_data *pdata;
 	struct mtd_part_parser_data ppdata = {};
 	struct pxa3xx_nand_info *info;
-	int ret, cs, probe_success;
+	int ret, cs, probe_success, dma_available;
 
-#ifndef ARCH_HAS_DMA
-	if (use_dma) {
+	dma_available = IS_ENABLED(CONFIG_ARM) &&
+		(IS_ENABLED(CONFIG_ARCH_PXA) || IS_ENABLED(CONFIG_ARCH_MMP));
+	if (use_dma && !dma_available) {
 		use_dma = 0;
 		dev_warn(&pdev->dev,
 			 "This platform can't do DMA on this device\n");
 	}
-#endif
+
 	ret = pxa3xx_nand_probe_dt(pdev);
 	if (ret)
 		return ret;
