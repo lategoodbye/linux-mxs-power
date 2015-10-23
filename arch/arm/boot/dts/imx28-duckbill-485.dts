@@ -1,0 +1,60 @@
+/*
+ * Copyright (C) 2015 I2SE GmbH <info@i2se.com>
+ *
+ * The code contained herein is licensed under the GNU General Public
+ * License. You may obtain a copy of the GNU General Public License
+ * Version 2 or later at the following locations:
+ *
+ * http://www.opensource.org/licenses/gpl-license.html
+ * http://www.gnu.org/copyleft/gpl.html
+ */
+
+/dts-v1/;
+#include <dt-bindings/gpio/gpio.h>
+#include "imx28-duckbill-v2.dtsi"
+
+/ {
+	model = "I2SE Duckbill 485";
+	compatible = "i2se,duckbill", "fsl,imx28";
+
+	apb@80000000 {
+		apbh@80000000 {
+			pinctrl@80018000 {
+				rs485_led_pins: rs485_led_pins@0 {
+					reg = <0>;
+					fsl,pinmux-ids = <
+						MX28_PAD_SSP2_SCK__GPIO_2_16
+						MX28_PAD_SSP2_MISO__GPIO_2_18
+					>;
+					fsl,drive-strength = <MXS_DRIVE_4mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_DISABLE>;
+				};
+			};
+		};
+
+		apbx@80040000 {
+			auart0: serial@8006a000 {
+				pinctrl-names = "default";
+				pinctrl-0 = <&auart0_2pins_a>;
+				status = "okay";
+			};
+		};
+	};
+
+	rs485_leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&rs485_led_pins>;
+
+		rs485_red {
+			label = "duckbill:red:rs485";
+			gpios = <&gpio2 16 GPIO_ACTIVE_LOW>;
+		};
+
+		rs485_green {
+			label = "duckbill:green:rs485";
+			gpios = <&gpio2 18 GPIO_ACTIVE_LOW>;
+		};
+	};
+};

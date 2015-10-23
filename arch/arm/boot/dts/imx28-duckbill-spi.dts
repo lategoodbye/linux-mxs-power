@@ -1,0 +1,60 @@
+/*
+ * Copyright (C) 2015 I2SE GmbH <info@i2se.com>
+ *
+ * The code contained herein is licensed under the GNU General Public
+ * License. You may obtain a copy of the GNU General Public License
+ * Version 2 or later at the following locations:
+ *
+ * http://www.opensource.org/licenses/gpl-license.html
+ * http://www.gnu.org/copyleft/gpl.html
+ */
+
+/dts-v1/;
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "imx28-duckbill-v2.dtsi"
+
+/ {
+	model = "I2SE Duckbill SPI";
+	compatible = "i2se,duckbill", "fsl,imx28";
+
+	apb@80000000 {
+		apbh@80000000 {
+
+			ssp2: ssp@80014000 {
+				compatible = "fsl,imx28-spi";
+				pinctrl-names = "default";
+				pinctrl-0 = <&spi2_pins_a>;
+				status = "okay";
+
+				qca7000: ethernet@0 {
+					compatible = "qca,qca7000";
+					pinctrl-names = "default";
+					pinctrl-0 = <&qca7000_pins>;
+					reg = <0>;
+					interrupt-parent = <&gpio3>;
+					interrupts = <3 IRQ_TYPE_EDGE_RISING>;
+					spi-cpha;
+					spi-cpol;
+					spi-max-frequency = <8000000>;
+				};
+			};
+
+			pinctrl@80018000 {
+				qca7000_pins: qca7000-pins@0 {
+					reg = <0>;
+					fsl,pinmux-ids = <
+						MX28_PAD_AUART0_RTS__GPIO_3_3    /* Interrupt */
+						MX28_PAD_LCD_D13__GPIO_1_13      /* QCA7K reset */
+						MX28_PAD_LCD_D14__GPIO_1_14      /* GPIO 0 */
+						MX28_PAD_LCD_D15__GPIO_1_15      /* GPIO 1 */
+						MX28_PAD_LCD_D18__GPIO_1_18      /* GPIO 2 */
+						MX28_PAD_LCD_D21__GPIO_1_21      /* GPIO 3 */
+					>;
+					fsl,drive-strength = <MXS_DRIVE_4mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_DISABLE>;
+				};
+			};
+		};
+	};
+};
