@@ -23,12 +23,6 @@
 				pinctrl-names = "default";
 				pinctrl-0 = <&spi2_pins_a>;
 				status = "okay";
-
-				spidev: spidev@0 {
-					compatible = "spidev";
-					reg = <0>;
-					spi-max-frequency = <57600000>;
-				};
 			};
 		};
 
