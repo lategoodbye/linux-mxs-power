@@ -1,4 +1,5 @@
 /*
+ * Copyright (C) 2013-2014 Michael Heimpold <mhei@heimpold.de>
  * Copyright (C) 2015 I2SE GmbH <info@i2se.com>
  *
  * The code contained herein is licensed under the GNU General Public
@@ -11,7 +12,7 @@
 
 /dts-v1/;
 #include <dt-bindings/interrupt-controller/irq.h>
-#include "imx28-duckbill-v2.dtsi"
+#include "imx28-duckbill-1-common.dtsi"
 
 / {
 	model = "I2SE Duckbill SPI";
@@ -19,7 +20,6 @@
 
 	apb@80000000 {
 		apbh@80000000 {
-
 			ssp2: ssp@80014000 {
 				compatible = "fsl,imx28-spi";
 				pinctrl-names = "default";

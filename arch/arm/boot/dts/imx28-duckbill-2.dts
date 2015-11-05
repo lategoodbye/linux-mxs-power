@@ -10,10 +10,10 @@
  */
 
 /dts-v1/;
-#include "imx28-duckbill-v2.dtsi"
+#include "imx28-duckbill-2-common.dtsi"
 
 / {
-	model = "I2SE Duckbill v2";
+	model = "I2SE Duckbill 2";
 	compatible = "i2se,duckbill", "fsl,imx28";
 
 	apb@80000000 {

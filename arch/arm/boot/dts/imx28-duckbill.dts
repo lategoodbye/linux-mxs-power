@@ -11,7 +11,7 @@
  */
 
 /dts-v1/;
-#include "imx28-duckbill.dtsi"
+#include "imx28-duckbill-common.dtsi"
 
 / {
 	model = "I2SE Duckbill";

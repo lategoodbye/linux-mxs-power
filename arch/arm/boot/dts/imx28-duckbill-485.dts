@@ -11,7 +11,7 @@
 
 /dts-v1/;
 #include <dt-bindings/gpio/gpio.h>
-#include "imx28-duckbill-v2.dtsi"
+#include "imx28-duckbill-1-common.dtsi"
 
 / {
 	model = "I2SE Duckbill 485";
