@@ -445,14 +445,14 @@ dtb-$(CONFIG_ARCH_MXS) += \
 	imx28-cfa10056.dtb \
 	imx28-cfa10057.dtb \
 	imx28-cfa10058.dtb \
+	imx28-duckbill-2-485.dtb \
+	imx28-duckbill-2.dtb \
+	imx28-duckbill-2-enocean.dtb \
+	imx28-duckbill-2-spi.dtb \
 	imx28-duckbill-485.dtb \
-	imx28-duckbill-485-v1.dtb \
 	imx28-duckbill.dtb \
 	imx28-duckbill-enocean.dtb \
-	imx28-duckbill-enocean-v1.dtb \
 	imx28-duckbill-spi.dtb \
-	imx28-duckbill-spi-v1.dtb \
-	imx28-duckbill-v2.dtb \
 	imx28-eukrea-mbmx283lc.dtb \
 	imx28-eukrea-mbmx287lc.dtb \
 	imx28-evk.dtb \

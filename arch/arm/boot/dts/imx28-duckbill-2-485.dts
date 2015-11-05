@@ -11,10 +11,10 @@
 
 /dts-v1/;
 #include <dt-bindings/gpio/gpio.h>
-#include "imx28-duckbill-v1.dtsi"
+#include "imx28-duckbill-2-common.dtsi"
 
 / {
-	model = "I2SE Duckbill 485";
+	model = "I2SE Duckbill 2 485";
 	compatible = "i2se,duckbill", "fsl,imx28";
 
 	apb@80000000 {
