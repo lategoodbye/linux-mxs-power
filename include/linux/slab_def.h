@@ -69,8 +69,9 @@ struct kmem_cache {
 	 */
 	int obj_offset;
 #endif /* CONFIG_DEBUG_SLAB */
-#ifdef CONFIG_MEMCG_KMEM
-	struct memcg_cache_params *memcg_params;
+
+#ifdef CONFIG_MEMCG
+	struct memcg_cache_params memcg_params;
 #endif
 
 	struct kmem_cache_node *node[MAX_NUMNODES];

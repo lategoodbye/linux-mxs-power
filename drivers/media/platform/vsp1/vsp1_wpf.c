@@ -92,19 +92,20 @@ static int wpf_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
-	/* Sources. If the pipeline has a single input configure it as the
-	 * master layer. Otherwise configure all inputs as sub-layers and
-	 * select the virtual RPF as the master layer.
+	/* Sources. If the pipeline has a single input and BRU is not used,
+	 * configure it as the master layer. Otherwise configure all
+	 * inputs as sub-layers and select the virtual RPF as the master
+	 * layer.
 	 */
 	for (i = 0; i < pipe->num_inputs; ++i) {
 		struct vsp1_rwpf *input = pipe->inputs[i];
 
-		srcrpf |= pipe->num_inputs == 1
+		srcrpf |= (!pipe->bru && pipe->num_inputs == 1)
 			? VI6_WPF_SRCRPF_RPF_ACT_MST(input->entity.index)
 			: VI6_WPF_SRCRPF_RPF_ACT_SUB(input->entity.index);
 	}
 
-	if (pipe->num_inputs > 1)
+	if (pipe->bru || pipe->num_inputs > 1)
 		srcrpf |= VI6_WPF_SRCRPF_VIRACT_MST;
 
 	vsp1_wpf_write(wpf, VI6_WPF_SRCRPF, srcrpf);
@@ -200,9 +201,9 @@ static void wpf_vdev_queue(struct vsp1_video *video,
 	struct vsp1_rwpf *wpf = container_of(video, struct vsp1_rwpf, video);
 
 	vsp1_wpf_write(wpf, VI6_WPF_DSTM_ADDR_Y, buf->addr[0]);
-	if (buf->buf.num_planes > 1)
+	if (buf->buf.vb2_buf.num_planes > 1)
 		vsp1_wpf_write(wpf, VI6_WPF_DSTM_ADDR_C0, buf->addr[1]);
-	if (buf->buf.num_planes > 2)
+	if (buf->buf.vb2_buf.num_planes > 2)
 		vsp1_wpf_write(wpf, VI6_WPF_DSTM_ADDR_C1, buf->addr[2]);
 }
 
@@ -219,7 +220,6 @@ struct vsp1_rwpf *vsp1_wpf_create(struct vsp1_device *vsp1, unsigned int index)
 	struct v4l2_subdev *subdev;
 	struct vsp1_video *video;
 	struct vsp1_rwpf *wpf;
-	unsigned int flags;
 	int ret;
 
 	wpf = devm_kzalloc(vsp1->dev, sizeof(*wpf), GFP_KERNEL);
@@ -275,20 +275,6 @@ struct vsp1_rwpf *vsp1_wpf_create(struct vsp1_device *vsp1, unsigned int index)
 		goto error;
 
 	wpf->entity.video = video;
-
-	/* Connect the video device to the WPF. All connections are immutable
-	 * except for the WPF0 source link if a LIF is present.
-	 */
-	flags = MEDIA_LNK_FL_ENABLED;
-	if (!(vsp1->pdata->features & VSP1_HAS_LIF) || index != 0)
-		flags |= MEDIA_LNK_FL_IMMUTABLE;
-
-	ret = media_entity_create_link(&wpf->entity.subdev.entity,
-				       RWPF_PAD_SOURCE,
-				       &wpf->video.video.entity, 0, flags);
-	if (ret < 0)
-		goto error;
-
 	wpf->entity.sink = &wpf->video.video.entity;
 
 	return wpf;
@@ -296,4 +282,29 @@ struct vsp1_rwpf *vsp1_wpf_create(struct vsp1_device *vsp1, unsigned int index)
 error:
 	vsp1_entity_destroy(&wpf->entity);
 	return ERR_PTR(ret);
+}
+
+/*
+ * vsp1_wpf_create_links() - RPF pads links creation
+ * @vsp1: Pointer to VSP1 device
+ * @entity: Pointer to VSP1 entity
+ *
+ * return negative error code or zero on success
+ */
+int vsp1_wpf_create_links(struct vsp1_device *vsp1,
+			       struct vsp1_entity *entity)
+{
+	struct vsp1_rwpf *wpf = to_rwpf(&entity->subdev);
+	unsigned int flags;
+
+	/* Connect the video device to the WPF. All connections are immutable
+	 * except for the WPF0 source link if a LIF is present.
+	 */
+	flags = MEDIA_LNK_FL_ENABLED;
+	if (!(vsp1->pdata.features & VSP1_HAS_LIF) || entity->index != 0)
+		flags |= MEDIA_LNK_FL_IMMUTABLE;
+
+	return media_create_pad_link(&wpf->entity.subdev.entity,
+				     RWPF_PAD_SOURCE,
+				     &wpf->video.video.entity, 0, flags);
 }

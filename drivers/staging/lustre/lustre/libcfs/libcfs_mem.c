@@ -84,7 +84,7 @@ cfs_percpt_alloc(struct cfs_cpt_table *cptab, unsigned int size)
 	count = cfs_cpt_number(cptab);
 
 	LIBCFS_ALLOC(arr, offsetof(struct cfs_var_array, va_ptrs[count]));
-	if (arr == NULL)
+	if (!arr)
 		return NULL;
 
 	arr->va_size	= size = L1_CACHE_ALIGN(size);
@@ -93,7 +93,7 @@ cfs_percpt_alloc(struct cfs_cpt_table *cptab, unsigned int size)
 
 	for (i = 0; i < count; i++) {
 		LIBCFS_CPT_ALLOC(arr->va_ptrs[i], cptab, i, size);
-		if (arr->va_ptrs[i] == NULL) {
+		if (!arr->va_ptrs[i]) {
 			cfs_percpt_free((void *)&arr->va_ptrs[0]);
 			return NULL;
 		}
@@ -134,7 +134,6 @@ cfs_percpt_current(void *vars)
 
 	return arr->va_ptrs[cpt];
 }
-EXPORT_SYMBOL(cfs_percpt_current);
 
 void *
 cfs_percpt_index(void *vars, int idx)
@@ -146,7 +145,6 @@ cfs_percpt_index(void *vars, int idx)
 	LASSERT(idx >= 0 && idx < arr->va_count);
 	return arr->va_ptrs[idx];
 }
-EXPORT_SYMBOL(cfs_percpt_index);
 
 /*
  * free variable array, see more detail in cfs_array_alloc
@@ -160,7 +158,7 @@ cfs_array_free(void *vars)
 	arr = container_of(vars, struct cfs_var_array, va_ptrs[0]);
 
 	for (i = 0; i < arr->va_count; i++) {
-		if (arr->va_ptrs[i] == NULL)
+		if (!arr->va_ptrs[i])
 			continue;
 
 		LIBCFS_FREE(arr->va_ptrs[i], arr->va_size);
@@ -182,7 +180,7 @@ cfs_array_alloc(int count, unsigned int size)
 	int			i;
 
 	LIBCFS_ALLOC(arr, offsetof(struct cfs_var_array, va_ptrs[count]));
-	if (arr == NULL)
+	if (!arr)
 		return NULL;
 
 	arr->va_count	= count;
@@ -191,7 +189,7 @@ cfs_array_alloc(int count, unsigned int size)
 	for (i = 0; i < count; i++) {
 		LIBCFS_ALLOC(arr->va_ptrs[i], size);
 
-		if (arr->va_ptrs[i] == NULL) {
+		if (!arr->va_ptrs[i]) {
 			cfs_array_free((void *)&arr->va_ptrs[0]);
 			return NULL;
 		}

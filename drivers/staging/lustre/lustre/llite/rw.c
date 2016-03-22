@@ -27,7 +27,7 @@
  * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -45,7 +45,7 @@
 #include <linux/errno.h>
 #include <linux/unistd.h>
 #include <linux/writeback.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include <linux/fs.h>
 #include <linux/pagemap.h>
@@ -115,8 +115,8 @@ static struct ll_cl_context *ll_cl_init(struct file *file,
 		struct inode *inode = vmpage->mapping->host;
 		loff_t pos;
 
-		if (mutex_trylock(&inode->i_mutex)) {
-			mutex_unlock(&(inode)->i_mutex);
+		if (inode_trylock(inode)) {
+			inode_unlock((inode));
 
 			/* this is too bad. Someone is trying to write the
 			 * page w/o holding inode mutex. This means we can
@@ -277,14 +277,6 @@ int ll_commit_write(struct file *file, struct page *vmpage, unsigned from,
 	return result;
 }
 
-struct obd_capa *cl_capa_lookup(struct inode *inode, enum cl_req_type crt)
-{
-	__u64 opc;
-
-	opc = crt == CRT_WRITE ? CAPA_OPC_OSS_WRITE : CAPA_OPC_OSS_RW;
-	return ll_osscapa_get(inode, opc);
-}
-
 static void ll_ra_stats_inc_sbi(struct ll_sb_info *sbi, enum ra_stat which);
 
 /**
@@ -335,6 +327,7 @@ static unsigned long ll_ra_count_get(struct ll_sb_info *sbi,
 	 * the RPC boundary from needing an extra read RPC. */
 	if (ria->ria_pages == 0) {
 		long beyond_rpc = (ria->ria_start + ret) % PTLRPC_MAX_BRW_PAGES;
+
 		if (/* beyond_rpc != 0 && */ beyond_rpc < ret)
 			ret -= beyond_rpc;
 	}
@@ -351,6 +344,7 @@ out:
 void ll_ra_count_put(struct ll_sb_info *sbi, unsigned long len)
 {
 	struct ll_ra_info *ra = &sbi->ll_ra_info;
+
 	atomic_sub(len, &ra->ra_cur_pages);
 }
 
@@ -363,6 +357,7 @@ static void ll_ra_stats_inc_sbi(struct ll_sb_info *sbi, enum ra_stat which)
 void ll_ra_stats_inc(struct address_space *mapping, enum ra_stat which)
 {
 	struct ll_sb_info *sbi = ll_i2sbi(mapping->host);
+
 	ll_ra_stats_inc_sbi(sbi, which);
 }
 
@@ -423,30 +418,6 @@ void ll_ra_read_ex(struct file *f, struct ll_ra_read *rar)
 	spin_lock(&ras->ras_lock);
 	list_del_init(&rar->lrr_linkage);
 	spin_unlock(&ras->ras_lock);
-}
-
-static struct ll_ra_read *ll_ra_read_get_locked(struct ll_readahead_state *ras)
-{
-	struct ll_ra_read *scan;
-
-	list_for_each_entry(scan, &ras->ras_read_beads, lrr_linkage) {
-		if (scan->lrr_reader == current)
-			return scan;
-	}
-	return NULL;
-}
-
-struct ll_ra_read *ll_ra_read_get(struct file *f)
-{
-	struct ll_readahead_state *ras;
-	struct ll_ra_read	 *bead;
-
-	ras = ll_ras_get(f);
-
-	spin_lock(&ras->ras_lock);
-	bead = ll_ra_read_get_locked(ras);
-	spin_unlock(&ras->ras_lock);
-	return bead;
 }
 
 static int cl_read_ahead_page(const struct lu_env *env, struct cl_io *io,
@@ -557,6 +528,7 @@ static inline int stride_io_mode(struct ll_readahead_state *ras)
 {
 	return ras->ras_consecutive_stride_requests > 1;
 }
+
 /* The function calculates how much pages will be read in
  * [off, off + length], in such stride IO area,
  * stride_offset = st_off, stride_length = st_len,
@@ -656,7 +628,7 @@ static int ll_read_ahead_pages(const struct lu_env *env,
 						page_idx, mapping);
 			if (rc == 1) {
 				(*reserved_pages)--;
-				count ++;
+				count++;
 			} else if (rc == -ENOLCK)
 				break;
 		} else if (stride_ria) {
@@ -750,7 +722,7 @@ int ll_readahead(const struct lu_env *env, struct cl_io *io,
 		/* Note: we only trim the RPC, instead of extending the RPC
 		 * to the boundary, so to avoid reading too much pages during
 		 * random reading. */
-		rpc_boundary = ((end + 1) & (~(PTLRPC_MAX_BRW_PAGES - 1)));
+		rpc_boundary = (end + 1) & (~(PTLRPC_MAX_BRW_PAGES - 1));
 		if (rpc_boundary > 0)
 			rpc_boundary--;
 
@@ -890,7 +862,7 @@ static void ras_update_stride_detector(struct ll_readahead_state *ras,
 	if (!stride_io_mode(ras) && (stride_gap != 0 ||
 	     ras->ras_consecutive_stride_requests == 0)) {
 		ras->ras_stride_pages = ras->ras_consecutive_pages;
-		ras->ras_stride_length = stride_gap +ras->ras_consecutive_pages;
+		ras->ras_stride_length = stride_gap+ras->ras_consecutive_pages;
 	}
 	LASSERT(ras->ras_request_index == 0);
 	LASSERT(ras->ras_consecutive_stride_requests == 0);
@@ -902,18 +874,10 @@ static void ras_update_stride_detector(struct ll_readahead_state *ras,
 	}
 
 	ras->ras_stride_pages = ras->ras_consecutive_pages;
-	ras->ras_stride_length = stride_gap +ras->ras_consecutive_pages;
+	ras->ras_stride_length = stride_gap+ras->ras_consecutive_pages;
 
 	RAS_CDEBUG(ras);
 	return;
-}
-
-static unsigned long
-stride_page_count(struct ll_readahead_state *ras, unsigned long len)
-{
-	return stride_pg_count(ras->ras_stride_offset, ras->ras_stride_length,
-			       ras->ras_stride_pages, ras->ras_stride_offset,
-			       len);
 }
 
 /* Stride Read-ahead window will be increased inc_len according to
@@ -949,7 +913,9 @@ static void ras_stride_increase_window(struct ll_readahead_state *ras,
 
 	window_len += step * ras->ras_stride_length + left;
 
-	if (stride_page_count(ras, window_len) <= ra->ra_max_pages_per_file)
+	if (stride_pg_count(ras->ras_stride_offset, ras->ras_stride_length,
+			    ras->ras_stride_pages, ras->ras_stride_offset,
+			    window_len) <= ra->ra_max_pages_per_file)
 		ras->ras_window_len = window_len;
 
 	RAS_CDEBUG(ras);

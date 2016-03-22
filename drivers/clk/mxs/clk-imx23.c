@@ -9,9 +9,8 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
-#include <linux/clk.h>
 #include <linux/clk/mxs.h>
-#include <linux/clkdev.h>
+#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/err.h>
 #include <linux/init.h>
@@ -73,18 +72,16 @@ static void __init clk_misc_init(void)
 	 * 480 MHz seems too high to be ssp clock source directly,
 	 * so set frac to get a 288 MHz ref_io.
 	 */
-	val = readl_relaxed(FRAC);
-	val &= ~(0x3f << BP_FRAC_IOFRAC);
-	val |= 30 << BP_FRAC_IOFRAC;
-	writel_relaxed(val, FRAC);
+	writel_relaxed(0x3f << BP_FRAC_IOFRAC, FRAC + CLR);
+	writel_relaxed(30 << BP_FRAC_IOFRAC, FRAC + SET);
 }
 
-static const char *sel_pll[]  __initconst = { "pll", "ref_xtal", };
-static const char *sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
-static const char *sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
-static const char *sel_io[]   __initconst = { "ref_io", "ref_xtal", };
-static const char *cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
-static const char *emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
+static const char *const sel_pll[]  __initconst = { "pll", "ref_xtal", };
+static const char *const sel_cpu[]  __initconst = { "ref_cpu", "ref_xtal", };
+static const char *const sel_pix[]  __initconst = { "ref_pix", "ref_xtal", };
+static const char *const sel_io[]   __initconst = { "ref_io", "ref_xtal", };
+static const char *const cpu_sels[] __initconst = { "cpu_pll", "cpu_xtal", };
+static const char *const emi_sels[] __initconst = { "emi_pll", "emi_xtal", };
 
 enum imx23_clk {
 	ref_xtal, pll, ref_cpu, ref_emi, ref_pix, ref_io, saif_sel,

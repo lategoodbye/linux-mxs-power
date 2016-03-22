@@ -110,6 +110,7 @@
 #include <linux/io.h>
 #include <linux/uaccess.h>
 #include <linux/mutex.h>
+#include <linux/pagemap.h>
 
 
 static DEFINE_MUTEX(nvram_mutex);
@@ -213,21 +214,8 @@ void nvram_set_checksum(void)
 
 static loff_t nvram_llseek(struct file *file, loff_t offset, int origin)
 {
-	switch (origin) {
-	case 0:
-		/* nothing to do */
-		break;
-	case 1:
-		offset += file->f_pos;
-		break;
-	case 2:
-		offset += NVRAM_BYTES;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return (offset >= 0) ? (file->f_pos = offset) : -EINVAL;
+	return generic_file_llseek_size(file, offset, origin, MAX_LFS_FILESIZE,
+					NVRAM_BYTES);
 }
 
 static ssize_t nvram_read(struct file *file, char __user *buf,
@@ -702,7 +690,7 @@ static void atari_proc_infos(unsigned char *nvram, struct seq_file *seq,
 		seq_printf(seq, "%ds%s\n", nvram[10],
 		    nvram[10] < 8 ? ", no memory test" : "");
 
-	vmode = (nvram[14] << 8) || nvram[15];
+	vmode = (nvram[14] << 8) | nvram[15];
 	seq_printf(seq,
 	    "Video mode       : %s colors, %d columns, %s %s monitor\n",
 	    colors[vmode & 7],

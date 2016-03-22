@@ -243,8 +243,6 @@ static irqreturn_t fsl_lbc_ctrl_irq(int irqno, void *data)
 	if (status & LTESR_CS)
 		dev_err(ctrl->dev, "Chip select error: "
 			"LTESR 0x%08X\n", status);
-	if (status & LTESR_UPM)
-		;
 	if (status & LTESR_FCT) {
 		dev_err(ctrl->dev, "FCM command time-out: "
 			"LTESR 0x%08X\n", status);
@@ -407,4 +405,4 @@ static int __init fsl_lbc_init(void)
 {
 	return platform_driver_register(&fsl_lbc_ctrl_driver);
 }
-module_init(fsl_lbc_init);
+subsys_initcall(fsl_lbc_init);

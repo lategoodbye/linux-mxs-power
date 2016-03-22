@@ -7,6 +7,7 @@ enum pnv_phb_type {
 	PNV_PHB_P5IOC2	= 0,
 	PNV_PHB_IODA1	= 1,
 	PNV_PHB_IODA2	= 2,
+	PNV_PHB_NPU	= 3,
 };
 
 /* Precise PHB model for error management */
@@ -15,6 +16,7 @@ enum pnv_phb_model {
 	PNV_PHB_MODEL_P5IOC2,
 	PNV_PHB_MODEL_P7IOC,
 	PNV_PHB_MODEL_PHB3,
+	PNV_PHB_MODEL_NPU,
 };
 
 #define PNV_PCI_DIAG_BUF_SIZE	8192
@@ -23,6 +25,8 @@ enum pnv_phb_model {
 #define PNV_IODA_PE_BUS_ALL	(1 << 2)	/* PE has subordinate buses	*/
 #define PNV_IODA_PE_MASTER	(1 << 3)	/* Master PE in compound case	*/
 #define PNV_IODA_PE_SLAVE	(1 << 4)	/* Slave PE in compound case	*/
+#define PNV_IODA_PE_VF		(1 << 5)	/* PE for one VF 		*/
+#define PNV_IODA_PE_PEER	(1 << 6)	/* PE has peers			*/
 
 /* Data associated with a PE, including IOMMU tracking etc.. */
 struct pnv_phb;
@@ -30,10 +34,16 @@ struct pnv_ioda_pe {
 	unsigned long		flags;
 	struct pnv_phb		*phb;
 
+#define PNV_IODA_MAX_PEER_PES	8
+	struct pnv_ioda_pe	*peers[PNV_IODA_MAX_PEER_PES];
+
 	/* A PE can be associated with a single device or an
 	 * entire bus (& children). In the former case, pdev
 	 * is populated, in the later case, pbus is.
 	 */
+#ifdef CONFIG_PCI_IOV
+	struct pci_dev          *parent_dev;
+#endif
 	struct pci_dev		*pdev;
 	struct pci_bus		*pbus;
 
@@ -53,8 +63,7 @@ struct pnv_ioda_pe {
 	/* "Base" iommu table, ie, 4K TCEs, 32-bit DMA */
 	int			tce32_seg;
 	int			tce32_segcount;
-	struct iommu_table	tce32_table;
-	phys_addr_t		tce_inval_reg_phys;
+	struct iommu_table_group table_group;
 
 	/* 64-bit TCE bypass region */
 	bool			tce_bypass_enabled;
@@ -75,22 +84,6 @@ struct pnv_ioda_pe {
 	struct list_head	list;
 };
 
-/* IOC dependent EEH operations */
-#ifdef CONFIG_EEH
-struct pnv_eeh_ops {
-	int (*post_init)(struct pci_controller *hose);
-	int (*set_option)(struct eeh_pe *pe, int option);
-	int (*get_state)(struct eeh_pe *pe);
-	int (*reset)(struct eeh_pe *pe, int option);
-	int (*get_log)(struct eeh_pe *pe, int severity,
-		       char *drv_log, unsigned long len);
-	int (*configure_bridge)(struct eeh_pe *pe);
-	int (*err_inject)(struct eeh_pe *pe, int type, int func,
-			  unsigned long addr, unsigned long mask);
-	int (*next_error)(struct eeh_pe **pe);
-};
-#endif /* CONFIG_EEH */
-
 #define PNV_PHB_FLAG_EEH	(1 << 0)
 
 struct pnv_phb {
@@ -103,10 +96,6 @@ struct pnv_phb {
 	void __iomem		*regs;
 	int			initialized;
 	spinlock_t		lock;
-
-#ifdef CONFIG_EEH
-	struct pnv_eeh_ops	*eeh_ops;
-#endif
 
 #ifdef CONFIG_DEBUG_FS
 	int			has_dbgfs;
@@ -122,16 +111,12 @@ struct pnv_phb {
 			 unsigned int hwirq, unsigned int virq,
 			 unsigned int is_64, struct msi_msg *msg);
 	void (*dma_dev_setup)(struct pnv_phb *phb, struct pci_dev *pdev);
-	int (*dma_set_mask)(struct pnv_phb *phb, struct pci_dev *pdev,
-			    u64 dma_mask);
-	u64 (*dma_get_required_mask)(struct pnv_phb *phb,
-				     struct pci_dev *pdev);
 	void (*fixup_phb)(struct pci_controller *hose);
 	u32 (*bdfn_to_pe)(struct pnv_phb *phb, struct pci_bus *bus, u32 devfn);
-	void (*shutdown)(struct pnv_phb *phb);
 	int (*init_m64)(struct pnv_phb *phb);
-	void (*reserve_m64_pe)(struct pnv_phb *phb);
-	int (*pick_m64_pe)(struct pnv_phb *phb, struct pci_bus *bus, int all);
+	void (*reserve_m64_pe)(struct pci_bus *bus,
+			       unsigned long *pe_bitmap, bool all);
+	int (*pick_m64_pe)(struct pci_bus *bus, bool all);
 	int (*get_pe_state)(struct pnv_phb *phb, int pe_no);
 	void (*freeze_pe)(struct pnv_phb *phb, int pe_no);
 	int (*unfreeze_pe)(struct pnv_phb *phb, int pe_no, int opt);
@@ -139,6 +124,7 @@ struct pnv_phb {
 	union {
 		struct {
 			struct iommu_table iommu_table;
+			struct iommu_table_group table_group;
 		} p5ioc2;
 
 		struct {
@@ -165,6 +151,8 @@ struct pnv_phb {
 
 			/* PE allocation bitmap */
 			unsigned long		*pe_alloc;
+			/* PE allocation mutex */
+			struct mutex		pe_alloc_mutex;
 
 			/* M32 & IO segment maps */
 			unsigned int		*m32_segmap;
@@ -179,6 +167,7 @@ struct pnv_phb {
 			 * on the sequence of creation
 			 */
 			struct list_head	pe_list;
+			struct mutex            pe_list_mutex;
 
 			/* Reverse map of PEs, will have to extend if
 			 * we are to support more than 256 PEs, indexed
@@ -199,6 +188,12 @@ struct pnv_phb {
 			 * boot for resource allocation purposes
 			 */
 			struct list_head	pe_dma_list;
+
+			/* TCE cache invalidate registers (physical and
+			 * remapped)
+			 */
+			phys_addr_t		tce_inval_reg_phys;
+			__be64 __iomem		*tce_inval_reg;
 		} ioda;
 	};
 
@@ -213,25 +208,54 @@ struct pnv_phb {
 };
 
 extern struct pci_ops pnv_pci_ops;
-#ifdef CONFIG_EEH
-extern struct pnv_eeh_ops ioda_eeh_ops;
-#endif
+extern int pnv_tce_build(struct iommu_table *tbl, long index, long npages,
+		unsigned long uaddr, enum dma_data_direction direction,
+		struct dma_attrs *attrs);
+extern void pnv_tce_free(struct iommu_table *tbl, long index, long npages);
+extern int pnv_tce_xchg(struct iommu_table *tbl, long index,
+		unsigned long *hpa, enum dma_data_direction *direction);
+extern unsigned long pnv_tce_get(struct iommu_table *tbl, long index);
 
 void pnv_pci_dump_phb_diag_data(struct pci_controller *hose,
 				unsigned char *log_buff);
-int pnv_pci_cfg_read(struct device_node *dn,
+int pnv_pci_cfg_read(struct pci_dn *pdn,
 		     int where, int size, u32 *val);
-int pnv_pci_cfg_write(struct device_node *dn,
+int pnv_pci_cfg_write(struct pci_dn *pdn,
 		      int where, int size, u32 val);
+extern struct iommu_table *pnv_pci_table_alloc(int nid);
+
+extern long pnv_pci_link_table_and_group(int node, int num,
+		struct iommu_table *tbl,
+		struct iommu_table_group *table_group);
+extern void pnv_pci_unlink_table_and_group(struct iommu_table *tbl,
+		struct iommu_table_group *table_group);
 extern void pnv_pci_setup_iommu_table(struct iommu_table *tbl,
 				      void *tce_mem, u64 tce_size,
 				      u64 dma_offset, unsigned page_shift);
 extern void pnv_pci_init_p5ioc2_hub(struct device_node *np);
 extern void pnv_pci_init_ioda_hub(struct device_node *np);
 extern void pnv_pci_init_ioda2_phb(struct device_node *np);
+extern void pnv_pci_init_npu_phb(struct device_node *np);
 extern void pnv_pci_ioda_tce_invalidate(struct iommu_table *tbl,
 					__be64 *startp, __be64 *endp, bool rm);
 extern void pnv_pci_reset_secondary_bus(struct pci_dev *dev);
-extern int ioda_eeh_phb_reset(struct pci_controller *hose, int option);
+extern int pnv_eeh_phb_reset(struct pci_controller *hose, int option);
+
+extern void pnv_pci_dma_dev_setup(struct pci_dev *pdev);
+extern void pnv_pci_dma_bus_setup(struct pci_bus *bus);
+extern int pnv_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type);
+extern void pnv_teardown_msi_irqs(struct pci_dev *pdev);
+
+/* Nvlink functions */
+extern void pnv_npu_tce_invalidate_entire(struct pnv_ioda_pe *npe);
+extern void pnv_npu_tce_invalidate(struct pnv_ioda_pe *npe,
+				       struct iommu_table *tbl,
+				       unsigned long index,
+				       unsigned long npages,
+				       bool rm);
+extern void pnv_npu_init_dma_pe(struct pnv_ioda_pe *npe);
+extern void pnv_npu_setup_dma_pe(struct pnv_ioda_pe *npe);
+extern int pnv_npu_dma_set_bypass(struct pnv_ioda_pe *npe, bool enabled);
+extern int pnv_npu_dma_set_mask(struct pci_dev *npdev, u64 dma_mask);
 
 #endif /* __POWERNV_PCI_H */

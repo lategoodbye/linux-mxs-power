@@ -37,12 +37,12 @@ static void __init emev2_map_io(void)
 	iotable_init(emev2_io_desc, ARRAY_SIZE(emev2_io_desc));
 }
 
-static const char *emev2_boards_compat_dt[] __initconst = {
+static const char *const emev2_boards_compat_dt[] __initconst = {
 	"renesas,emev2",
 	NULL,
 };
 
-extern struct smp_operations emev2_smp_ops;
+extern const struct smp_operations emev2_smp_ops;
 
 DT_MACHINE_START(EMEV2_DT, "Generic Emma Mobile EV2 (Flattened Device Tree)")
 	.smp		= smp_ops(emev2_smp_ops),

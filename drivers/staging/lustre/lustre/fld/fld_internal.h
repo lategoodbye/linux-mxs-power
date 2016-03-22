@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2012, 2013, Intel Corporation.
+ * Copyright (c) 2012, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -42,7 +42,6 @@
 #define __FLD_INTERNAL_H
 
 #include "../include/lustre/lustre_idl.h"
-#include "../include/dt_object.h"
 
 #include "../../include/linux/libcfs/libcfs.h"
 #include "../include/lustre_req_layout.h"
@@ -111,7 +110,7 @@ struct fld_cache {
 
 	/**
 	 * Cache name used for debug and messages. */
-	char		     fci_name[80];
+	char		     fci_name[LUSTRE_MDT_MAXNAMELEN];
 	unsigned int		 fci_no_shrink:1;
 };
 
@@ -142,10 +141,7 @@ extern struct lu_fld_hash fld_hash[];
 int fld_client_rpc(struct obd_export *exp,
 		   struct lu_seq_range *range, __u32 fld_op);
 
-#if defined (CONFIG_PROC_FS)
-extern struct lprocfs_vars fld_client_proc_list[];
-#endif
-
+extern struct lprocfs_vars fld_client_debugfs_list[];
 
 struct fld_cache *fld_cache_init(const char *name,
 				 int cache_size, int cache_threshold);
@@ -160,26 +156,15 @@ int fld_cache_insert(struct fld_cache *cache,
 struct fld_cache_entry
 *fld_cache_entry_create(const struct lu_seq_range *range);
 
-int fld_cache_insert_nolock(struct fld_cache *cache,
-			    struct fld_cache_entry *f_new);
-void fld_cache_delete(struct fld_cache *cache,
-		      const struct lu_seq_range *range);
-void fld_cache_delete_nolock(struct fld_cache *cache,
-			     const struct lu_seq_range *range);
 int fld_cache_lookup(struct fld_cache *cache,
 		     const u64 seq, struct lu_seq_range *range);
 
 struct fld_cache_entry*
 fld_cache_entry_lookup(struct fld_cache *cache, struct lu_seq_range *range);
-void fld_cache_entry_delete(struct fld_cache *cache,
-			    struct fld_cache_entry *node);
-void fld_dump_cache_entries(struct fld_cache *cache);
 
 struct fld_cache_entry
 *fld_cache_entry_lookup_nolock(struct fld_cache *cache,
 			      struct lu_seq_range *range);
-int fld_write_range(const struct lu_env *env, struct dt_object *dt,
-		    const struct lu_seq_range *range, struct thandle *th);
 
 static inline const char *
 fld_target_name(struct lu_fld_target *tar)

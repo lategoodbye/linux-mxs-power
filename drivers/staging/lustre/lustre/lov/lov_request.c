@@ -27,7 +27,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -67,26 +67,14 @@ void lov_finish_set(struct lov_request_set *set)
 		list_del_init(&req->rq_link);
 
 		if (req->rq_oi.oi_oa)
-			OBDO_FREE(req->rq_oi.oi_oa);
-		if (req->rq_oi.oi_md)
-			OBD_FREE_LARGE(req->rq_oi.oi_md, req->rq_buflen);
-		if (req->rq_oi.oi_osfs)
-			OBD_FREE(req->rq_oi.oi_osfs,
-				 sizeof(*req->rq_oi.oi_osfs));
-		OBD_FREE(req, sizeof(*req));
+			kmem_cache_free(obdo_cachep, req->rq_oi.oi_oa);
+		kfree(req->rq_oi.oi_osfs);
+		kfree(req);
 	}
-
-	if (set->set_pga) {
-		int len = set->set_oabufs * sizeof(*set->set_pga);
-		OBD_FREE_LARGE(set->set_pga, len);
-	}
-	if (set->set_lockh)
-		lov_llh_put(set->set_lockh);
-
-	OBD_FREE(set, sizeof(*set));
+	kfree(set);
 }
 
-int lov_set_finished(struct lov_request_set *set, int idempotent)
+static int lov_set_finished(struct lov_request_set *set, int idempotent)
 {
 	int completes = atomic_read(&set->set_completes);
 
@@ -101,8 +89,8 @@ int lov_set_finished(struct lov_request_set *set, int idempotent)
 	return 0;
 }
 
-void lov_update_set(struct lov_request_set *set,
-		    struct lov_request *req, int rc)
+static void lov_update_set(struct lov_request_set *set,
+			   struct lov_request *req, int rc)
 {
 	req->rq_complete = 1;
 	req->rq_rc = rc;
@@ -130,7 +118,8 @@ int lov_update_common_set(struct lov_request_set *set,
 	return rc;
 }
 
-void lov_set_add_req(struct lov_request *req, struct lov_request_set *set)
+static void lov_set_add_req(struct lov_request *req,
+			    struct lov_request_set *set)
 {
 	list_add_tail(&req->rq_link, &set->set_list);
 	set->set_count++;
@@ -156,7 +145,7 @@ static int lov_check_set(struct lov_obd *lov, int idx)
  * If the OSC has not yet had a chance to connect to the OST the first time,
  * wait once for it to connect instead of returning an error.
  */
-int lov_check_and_wait_active(struct lov_obd *lov, int ost_idx)
+static int lov_check_and_wait_active(struct lov_obd *lov, int ost_idx)
 {
 	wait_queue_head_t waitq;
 	struct l_wait_info lwi;
@@ -214,7 +203,7 @@ static int common_attr_done(struct lov_request_set *set)
 	if (!atomic_read(&set->set_success))
 		return -EIO;
 
-	OBDO_ALLOC(tmp_oa);
+	tmp_oa = kmem_cache_alloc(obdo_cachep, GFP_NOFS | __GFP_ZERO);
 	if (tmp_oa == NULL) {
 		rc = -ENOMEM;
 		goto out;
@@ -248,7 +237,7 @@ static int common_attr_done(struct lov_request_set *set)
 	memcpy(set->set_oi->oi_oa, tmp_oa, sizeof(*set->set_oi->oi_oa));
 out:
 	if (tmp_oa)
-		OBDO_FREE(tmp_oa);
+		kmem_cache_free(obdo_cachep, tmp_oa);
 	return rc;
 
 }
@@ -286,8 +275,8 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 	struct lov_obd *lov = &exp->exp_obd->u.lov;
 	int rc = 0, i;
 
-	OBD_ALLOC(set, sizeof(*set));
-	if (set == NULL)
+	set = kzalloc(sizeof(*set), GFP_NOFS);
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -299,6 +288,9 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		struct lov_request *req;
 
 		loi = oinfo->oi_md->lsm_oinfo[i];
+		if (lov_oinfo_is_dummy(loi))
+			continue;
+
 		if (!lov_check_and_wait_active(lov, loi->loi_ost_idx)) {
 			CDEBUG(D_HA, "lov idx %d inactive\n", loi->loi_ost_idx);
 			if (oinfo->oi_oa->o_valid & OBD_MD_FLEPOCH) {
@@ -309,8 +301,8 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 			continue;
 		}
 
-		OBD_ALLOC(req, sizeof(*req));
-		if (req == NULL) {
+		req = kzalloc(sizeof(*req), GFP_NOFS);
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -318,9 +310,10 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		req->rq_stripe = i;
 		req->rq_idx = loi->loi_ost_idx;
 
-		OBDO_ALLOC(req->rq_oi.oi_oa);
+		req->rq_oi.oi_oa = kmem_cache_alloc(obdo_cachep,
+						    GFP_NOFS | __GFP_ZERO);
 		if (req->rq_oi.oi_oa == NULL) {
-			OBD_FREE(req, sizeof(*req));
+			kfree(req);
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -328,7 +321,6 @@ int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		       sizeof(*req->rq_oi.oi_oa));
 		req->rq_oi.oi_oa->o_oi = loi->loi_oi;
 		req->rq_oi.oi_cb_up = cb_getattr_update;
-		req->rq_oi.oi_capa = oinfo->oi_capa;
 
 		lov_set_add_req(req, set);
 	}
@@ -366,8 +358,8 @@ int lov_prep_destroy_set(struct obd_export *exp, struct obd_info *oinfo,
 	struct lov_obd *lov = &exp->exp_obd->u.lov;
 	int rc = 0, i;
 
-	OBD_ALLOC(set, sizeof(*set));
-	if (set == NULL)
+	set = kzalloc(sizeof(*set), GFP_NOFS);
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -384,13 +376,16 @@ int lov_prep_destroy_set(struct obd_export *exp, struct obd_info *oinfo,
 		struct lov_request *req;
 
 		loi = lsm->lsm_oinfo[i];
+		if (lov_oinfo_is_dummy(loi))
+			continue;
+
 		if (!lov_check_and_wait_active(lov, loi->loi_ost_idx)) {
 			CDEBUG(D_HA, "lov idx %d inactive\n", loi->loi_ost_idx);
 			continue;
 		}
 
-		OBD_ALLOC(req, sizeof(*req));
-		if (req == NULL) {
+		req = kzalloc(sizeof(*req), GFP_NOFS);
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -398,9 +393,10 @@ int lov_prep_destroy_set(struct obd_export *exp, struct obd_info *oinfo,
 		req->rq_stripe = i;
 		req->rq_idx = loi->loi_ost_idx;
 
-		OBDO_ALLOC(req->rq_oi.oi_oa);
+		req->rq_oi.oi_oa = kmem_cache_alloc(obdo_cachep,
+						    GFP_NOFS | __GFP_ZERO);
 		if (req->rq_oi.oi_oa == NULL) {
-			OBD_FREE(req, sizeof(*req));
+			kfree(req);
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -482,8 +478,8 @@ int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 	struct lov_obd *lov = &exp->exp_obd->u.lov;
 	int rc = 0, i;
 
-	OBD_ALLOC(set, sizeof(*set));
-	if (set == NULL)
+	set = kzalloc(sizeof(*set), GFP_NOFS);
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -497,22 +493,26 @@ int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		struct lov_oinfo *loi = oinfo->oi_md->lsm_oinfo[i];
 		struct lov_request *req;
 
+		if (lov_oinfo_is_dummy(loi))
+			continue;
+
 		if (!lov_check_and_wait_active(lov, loi->loi_ost_idx)) {
 			CDEBUG(D_HA, "lov idx %d inactive\n", loi->loi_ost_idx);
 			continue;
 		}
 
-		OBD_ALLOC(req, sizeof(*req));
-		if (req == NULL) {
+		req = kzalloc(sizeof(*req), GFP_NOFS);
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
 		req->rq_stripe = i;
 		req->rq_idx = loi->loi_ost_idx;
 
-		OBDO_ALLOC(req->rq_oi.oi_oa);
+		req->rq_oi.oi_oa = kmem_cache_alloc(obdo_cachep,
+						    GFP_NOFS | __GFP_ZERO);
 		if (req->rq_oi.oi_oa == NULL) {
-			OBD_FREE(req, sizeof(*req));
+			kfree(req);
 			rc = -ENOMEM;
 			goto out_set;
 		}
@@ -521,7 +521,6 @@ int lov_prep_setattr_set(struct obd_export *exp, struct obd_info *oinfo,
 		req->rq_oi.oi_oa->o_oi = loi->loi_oi;
 		req->rq_oi.oi_oa->o_stripe_idx = i;
 		req->rq_oi.oi_cb_up = cb_setattr_update;
-		req->rq_oi.oi_capa = oinfo->oi_capa;
 
 		if (oinfo->oi_oa->o_valid & OBD_MD_FLSIZE) {
 			int off = lov_stripe_offset(oinfo->oi_md,
@@ -593,8 +592,9 @@ int lov_fini_statfs_set(struct lov_request_set *set)
 	return rc;
 }
 
-void lov_update_statfs(struct obd_statfs *osfs, struct obd_statfs *lov_sfs,
-		       int success)
+static void lov_update_statfs(struct obd_statfs *osfs,
+			      struct obd_statfs *lov_sfs,
+			      int success)
 {
 	int shift = 0, quit = 0;
 	__u64 tmp;
@@ -610,8 +610,7 @@ void lov_update_statfs(struct obd_statfs *osfs, struct obd_statfs *lov_sfs,
 				if (tmp & 1) {
 					if (quit)
 						break;
-					else
-						quit = 1;
+					quit = 1;
 					shift = 0;
 				}
 				tmp >>= 1;
@@ -707,8 +706,8 @@ int lov_prep_statfs_set(struct obd_device *obd, struct obd_info *oinfo,
 	struct lov_obd *lov = &obd->u.lov;
 	int rc = 0, i;
 
-	OBD_ALLOC(set, sizeof(*set));
-	if (set == NULL)
+	set = kzalloc(sizeof(*set), GFP_NOFS);
+	if (!set)
 		return -ENOMEM;
 	lov_init_set(set);
 
@@ -733,15 +732,16 @@ int lov_prep_statfs_set(struct obd_device *obd, struct obd_info *oinfo,
 			continue;
 		}
 
-		OBD_ALLOC(req, sizeof(*req));
-		if (req == NULL) {
+		req = kzalloc(sizeof(*req), GFP_NOFS);
+		if (!req) {
 			rc = -ENOMEM;
 			goto out_set;
 		}
 
-		OBD_ALLOC(req->rq_oi.oi_osfs, sizeof(*req->rq_oi.oi_osfs));
-		if (req->rq_oi.oi_osfs == NULL) {
-			OBD_FREE(req, sizeof(*req));
+		req->rq_oi.oi_osfs = kzalloc(sizeof(*req->rq_oi.oi_osfs),
+					     GFP_NOFS);
+		if (!req->rq_oi.oi_osfs) {
+			kfree(req);
 			rc = -ENOMEM;
 			goto out_set;
 		}

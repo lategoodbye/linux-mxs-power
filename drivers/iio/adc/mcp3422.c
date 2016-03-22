@@ -58,20 +58,11 @@
 		.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SAMP_FREQ), \
 	}
 
-/* LSB is in nV to eliminate floating point */
-static const u32 rates_to_lsb[] = {1000000, 250000, 62500, 15625};
-
-/*
- *  scales calculated as:
- *  rates_to_lsb[sample_rate] / (1 << pga);
- *  pga is 1 for 0, 2
- */
-
 static const int mcp3422_scales[4][4] = {
-	{ 1000000, 250000, 62500, 15625 },
-	{ 500000 , 125000, 31250, 7812 },
-	{ 250000 , 62500 , 15625, 3906 },
-	{ 125000 , 31250 , 7812 , 1953 } };
+	{ 1000000, 500000, 250000, 125000 },
+	{ 250000 , 125000, 62500 , 31250  },
+	{ 62500  , 31250 , 15625 , 7812   },
+	{ 15625  , 7812  , 3906  , 1953   } };
 
 /* Constant msleep times for data acquisitions */
 static const int mcp3422_read_times[4] = {
@@ -314,6 +305,10 @@ static const struct attribute_group mcp3422_attribute_group = {
 	.attrs = mcp3422_attributes,
 };
 
+static const struct iio_chan_spec mcp3421_channels[] = {
+	MCP3422_CHAN(0),
+};
+
 static const struct iio_chan_spec mcp3422_channels[] = {
 	MCP3422_CHAN(0),
 	MCP3422_CHAN(1),
@@ -361,6 +356,10 @@ static int mcp3422_probe(struct i2c_client *client,
 	indio_dev->info = &mcp3422_info;
 
 	switch (adc->id) {
+	case 1:
+		indio_dev->channels = mcp3421_channels;
+		indio_dev->num_channels = ARRAY_SIZE(mcp3421_channels);
+		break;
 	case 2:
 	case 3:
 	case 6:
@@ -392,6 +391,7 @@ static int mcp3422_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id mcp3422_id[] = {
+	{ "mcp3421", 1 },
 	{ "mcp3422", 2 },
 	{ "mcp3423", 3 },
 	{ "mcp3424", 4 },
@@ -413,7 +413,6 @@ MODULE_DEVICE_TABLE(of, mcp3422_of_match);
 static struct i2c_driver mcp3422_driver = {
 	.driver = {
 		.name = "mcp3422",
-		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(mcp3422_of_match),
 	},
 	.probe = mcp3422_probe,

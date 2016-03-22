@@ -60,7 +60,7 @@ static struct clock_event_device __percpu *gt_evt;
  *  different to the 32-bit upper value read previously, go back to step 2.
  *  Otherwise the 64-bit timer counter value is correct.
  */
-static u64 gt_counter_read(void)
+static u64 notrace _gt_counter_read(void)
 {
 	u64 counter;
 	u32 lower;
@@ -79,6 +79,11 @@ static u64 gt_counter_read(void)
 	return counter;
 }
 
+static u64 gt_counter_read(void)
+{
+	return _gt_counter_read();
+}
+
 /**
  * To ensure that updates to comparator value register do not set the
  * Interrupt Status Register proceed as follows:
@@ -94,39 +99,34 @@ static void gt_compare_set(unsigned long delta, int periodic)
 
 	counter += delta;
 	ctrl = GT_CONTROL_TIMER_ENABLE;
-	writel(ctrl, gt_base + GT_CONTROL);
-	writel(lower_32_bits(counter), gt_base + GT_COMP0);
-	writel(upper_32_bits(counter), gt_base + GT_COMP1);
+	writel_relaxed(ctrl, gt_base + GT_CONTROL);
+	writel_relaxed(lower_32_bits(counter), gt_base + GT_COMP0);
+	writel_relaxed(upper_32_bits(counter), gt_base + GT_COMP1);
 
 	if (periodic) {
-		writel(delta, gt_base + GT_AUTO_INC);
+		writel_relaxed(delta, gt_base + GT_AUTO_INC);
 		ctrl |= GT_CONTROL_AUTO_INC;
 	}
 
 	ctrl |= GT_CONTROL_COMP_ENABLE | GT_CONTROL_IRQ_ENABLE;
-	writel(ctrl, gt_base + GT_CONTROL);
+	writel_relaxed(ctrl, gt_base + GT_CONTROL);
 }
 
-static void gt_clockevent_set_mode(enum clock_event_mode mode,
-				   struct clock_event_device *clk)
+static int gt_clockevent_shutdown(struct clock_event_device *evt)
 {
 	unsigned long ctrl;
 
-	switch (mode) {
-	case CLOCK_EVT_MODE_PERIODIC:
-		gt_compare_set(DIV_ROUND_CLOSEST(gt_clk_rate, HZ), 1);
-		break;
-	case CLOCK_EVT_MODE_ONESHOT:
-	case CLOCK_EVT_MODE_UNUSED:
-	case CLOCK_EVT_MODE_SHUTDOWN:
-		ctrl = readl(gt_base + GT_CONTROL);
-		ctrl &= ~(GT_CONTROL_COMP_ENABLE |
-				GT_CONTROL_IRQ_ENABLE | GT_CONTROL_AUTO_INC);
-		writel(ctrl, gt_base + GT_CONTROL);
-		break;
-	default:
-		break;
-	}
+	ctrl = readl(gt_base + GT_CONTROL);
+	ctrl &= ~(GT_CONTROL_COMP_ENABLE | GT_CONTROL_IRQ_ENABLE |
+		  GT_CONTROL_AUTO_INC);
+	writel(ctrl, gt_base + GT_CONTROL);
+	return 0;
+}
+
+static int gt_clockevent_set_periodic(struct clock_event_device *evt)
+{
+	gt_compare_set(DIV_ROUND_CLOSEST(gt_clk_rate, HZ), 1);
+	return 0;
 }
 
 static int gt_clockevent_set_next_event(unsigned long evt,
@@ -155,7 +155,7 @@ static irqreturn_t gt_clockevent_interrupt(int irq, void *dev_id)
 	 *	the Global Timer flag _after_ having incremented
 	 *	the Comparator register	value to a higher value.
 	 */
-	if (evt->mode == CLOCK_EVT_MODE_ONESHOT)
+	if (clockevent_state_oneshot(evt))
 		gt_compare_set(ULONG_MAX, 0);
 
 	writel_relaxed(GT_INT_STATUS_EVENT_FLAG, gt_base + GT_INT_STATUS);
@@ -171,7 +171,9 @@ static int gt_clockevents_init(struct clock_event_device *clk)
 	clk->name = "arm_global_timer";
 	clk->features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT |
 		CLOCK_EVT_FEAT_PERCPU;
-	clk->set_mode = gt_clockevent_set_mode;
+	clk->set_state_shutdown = gt_clockevent_shutdown;
+	clk->set_state_periodic = gt_clockevent_set_periodic;
+	clk->set_state_oneshot = gt_clockevent_shutdown;
 	clk->set_next_event = gt_clockevent_set_next_event;
 	clk->cpumask = cpumask_of(cpu);
 	clk->rating = 300;
@@ -184,7 +186,7 @@ static int gt_clockevents_init(struct clock_event_device *clk)
 
 static void gt_clockevents_stop(struct clock_event_device *clk)
 {
-	gt_clockevent_set_mode(CLOCK_EVT_MODE_UNUSED, clk);
+	gt_clockevent_shutdown(clk);
 	disable_percpu_irq(clk->irq);
 }
 
@@ -193,18 +195,29 @@ static cycle_t gt_clocksource_read(struct clocksource *cs)
 	return gt_counter_read();
 }
 
+static void gt_resume(struct clocksource *cs)
+{
+	unsigned long ctrl;
+
+	ctrl = readl(gt_base + GT_CONTROL);
+	if (!(ctrl & GT_CONTROL_TIMER_ENABLE))
+		/* re-enable timer on resume */
+		writel(GT_CONTROL_TIMER_ENABLE, gt_base + GT_CONTROL);
+}
+
 static struct clocksource gt_clocksource = {
 	.name	= "arm_global_timer",
 	.rating	= 300,
 	.read	= gt_clocksource_read,
 	.mask	= CLOCKSOURCE_MASK(64),
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
+	.resume = gt_resume,
 };
 
 #ifdef CONFIG_CLKSRC_ARM_GLOBAL_TIMER_SCHED_CLOCK
 static u64 notrace gt_sched_clock_read(void)
 {
-	return gt_counter_read();
+	return _gt_counter_read();
 }
 #endif
 

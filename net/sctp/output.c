@@ -534,7 +534,7 @@ int sctp_packet_transmit(struct sctp_packet *packet)
 	 * by CRC32-C as described in <draft-ietf-tsvwg-sctpcsum-02.txt>.
 	 */
 	if (!sctp_checksum_disable) {
-		if (!(dst->dev->features & NETIF_F_SCTP_CSUM) ||
+		if (!(dst->dev->features & NETIF_F_SCTP_CRC) ||
 		    (dst_xfrm(dst) != NULL) || packet->ipfragok) {
 			sh->checksum = sctp_compute_cksum(nskb, 0);
 		} else {
@@ -599,7 +599,9 @@ out:
 	return err;
 no_route:
 	kfree_skb(nskb);
-	IP_INC_STATS(sock_net(asoc->base.sk), IPSTATS_MIB_OUTNOROUTES);
+
+	if (asoc)
+		IP_INC_STATS(sock_net(asoc->base.sk), IPSTATS_MIB_OUTNOROUTES);
 
 	/* FIXME: Returning the 'err' will effect all the associations
 	 * associated with a socket, although only one of the paths of the

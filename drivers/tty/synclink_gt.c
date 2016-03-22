@@ -89,7 +89,7 @@
  * module identification
  */
 static char *driver_name     = "SyncLink GT";
-static char *tty_driver_name = "synclink_gt";
+static char *slgt_driver_name = "synclink_gt";
 static char *tty_dev_prefix  = "ttySLG";
 MODULE_LICENSE("GPL");
 #define MGSL_MAGIC 0x5401
@@ -671,15 +671,6 @@ static int open(struct tty_struct *tty, struct file *filp)
 	info->port.tty = tty;
 
 	DBGINFO(("%s open, old ref count = %d\n", info->device_name, info->port.count));
-
-	/* If port is closing, signal caller to try again */
-	if (info->port.flags & ASYNC_CLOSING){
-		wait_event_interruptible_tty(tty, info->port.close_wait,
-					     !(info->port.flags & ASYNC_CLOSING));
-		retval = ((info->port.flags & ASYNC_HUP_NOTIFY) ?
-			-EAGAIN : -ERESTARTSYS);
-		goto cleanup;
-	}
 
 	mutex_lock(&info->port.mutex);
 	info->port.low_latency = (info->port.flags & ASYNC_LOW_LATENCY) ? 1 : 0;
@@ -1539,7 +1530,8 @@ static int hdlcdev_open(struct net_device *dev)
 	DBGINFO(("%s hdlcdev_open\n", dev->name));
 
 	/* generic HDLC layer open processing */
-	if ((rc = hdlc_open(dev)))
+	rc = hdlc_open(dev);
+	if (rc)
 		return rc;
 
 	/* arbitrate between network and tty opens */
@@ -1803,7 +1795,8 @@ static int hdlcdev_init(struct slgt_info *info)
 
 	/* allocate and initialize network and HDLC layer objects */
 
-	if (!(dev = alloc_hdlcdev(info))) {
+	dev = alloc_hdlcdev(info);
+	if (!dev) {
 		printk(KERN_ERR "%s hdlc device alloc failure\n", info->device_name);
 		return -ENOMEM;
 	}
@@ -1824,7 +1817,8 @@ static int hdlcdev_init(struct slgt_info *info)
 	hdlc->xmit   = hdlcdev_xmit;
 
 	/* register objects with HDLC layer */
-	if ((rc = register_hdlc_device(dev))) {
+	rc = register_hdlc_device(dev);
+	if (rc) {
 		printk(KERN_WARNING "%s:unable to register hdlc device\n",__FILE__);
 		free_netdev(dev);
 		return rc;
@@ -1879,7 +1873,8 @@ static void rx_async(struct slgt_info *info)
 
 			stat = 0;
 
-			if ((status = *(p+1) & (BIT1 + BIT0))) {
+			status = *(p + 1) & (BIT1 + BIT0);
+			if (status) {
 				if (status & BIT1)
 					icount->parity++;
 				else if (status & BIT0)
@@ -3316,9 +3311,8 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
 		}
 
 		cd = tty_port_carrier_raised(port);
-
- 		if (!(port->flags & ASYNC_CLOSING) && (do_clocal || cd ))
- 			break;
+		if (do_clocal || cd)
+			break;
 
 		if (signal_pending(current)) {
 			retval = -ERESTARTSYS;
@@ -3755,7 +3749,8 @@ static void slgt_cleanup(void)
 	if (serial_driver) {
 		for (info=slgt_device_list ; info != NULL ; info=info->next_device)
 			tty_unregister_device(serial_driver, info->line);
-		if ((rc = tty_unregister_driver(serial_driver)))
+		rc = tty_unregister_driver(serial_driver);
+		if (rc)
 			DBGERR(("tty_unregister_driver error=%d\n", rc));
 		put_tty_driver(serial_driver);
 	}
@@ -3804,7 +3799,7 @@ static int __init slgt_init(void)
 
 	/* Initialize the tty_driver structure */
 
-	serial_driver->driver_name = tty_driver_name;
+	serial_driver->driver_name = slgt_driver_name;
 	serial_driver->name = tty_dev_prefix;
 	serial_driver->major = ttymajor;
 	serial_driver->minor_start = 64;

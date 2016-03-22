@@ -40,7 +40,7 @@ static void proc_evict_inode(struct inode *inode)
 	put_pid(PROC_I(inode)->pid);
 
 	/* Let go of any associated proc directory entry */
-	de = PROC_I(inode)->pde;
+	de = PDE(inode);
 	if (de)
 		pde_put(de);
 	head = PROC_I(inode)->sysctl;
@@ -95,7 +95,8 @@ void __init proc_init_inodecache(void)
 	proc_inode_cachep = kmem_cache_create("proc_inode_cache",
 					     sizeof(struct proc_inode),
 					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD|SLAB_PANIC),
+						SLAB_MEM_SPREAD|SLAB_ACCOUNT|
+						SLAB_PANIC),
 					     init_once);
 }
 
@@ -393,6 +394,27 @@ static const struct file_operations proc_reg_file_ops_no_compat = {
 };
 #endif
 
+static void proc_put_link(void *p)
+{
+	unuse_pde(p);
+}
+
+static const char *proc_get_link(struct dentry *dentry,
+				 struct inode *inode,
+				 struct delayed_call *done)
+{
+	struct proc_dir_entry *pde = PDE(inode);
+	if (unlikely(!use_pde(pde)))
+		return ERR_PTR(-EINVAL);
+	set_delayed_call(done, proc_put_link, pde);
+	return pde->data;
+}
+
+const struct inode_operations proc_link_inode_operations = {
+	.readlink	= generic_readlink,
+	.get_link	= proc_get_link,
+};
+
 struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 {
 	struct inode *inode = new_inode_pseudo(sb);
@@ -402,6 +424,10 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 		inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 		PROC_I(inode)->pde = de;
 
+		if (is_empty_pde(de)) {
+			make_empty_dir_inode(inode);
+			return inode;
+		}
 		if (de->mode) {
 			inode->i_mode = de->mode;
 			inode->i_uid = de->uid;

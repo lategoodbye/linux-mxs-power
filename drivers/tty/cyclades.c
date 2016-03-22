@@ -292,14 +292,14 @@ static void cyz_rx_restart(unsigned long);
 static struct timer_list cyz_rx_full_timer[NR_PORTS];
 #endif				/* CONFIG_CYZ_INTR */
 
-static inline void cyy_writeb(struct cyclades_port *port, u32 reg, u8 val)
+static void cyy_writeb(struct cyclades_port *port, u32 reg, u8 val)
 {
 	struct cyclades_card *card = port->card;
 
 	cy_writeb(port->u.cyy.base_addr + (reg << card->bus_index), val);
 }
 
-static inline u8 cyy_readb(struct cyclades_port *port, u32 reg)
+static u8 cyy_readb(struct cyclades_port *port, u32 reg)
 {
 	struct cyclades_card *card = port->card;
 
@@ -321,7 +321,7 @@ static inline bool cyz_fpga_loaded(struct cyclades_card *card)
 	return __cyz_fpga_loaded(card->ctl_addr.p9060);
 }
 
-static inline bool cyz_is_loaded(struct cyclades_card *card)
+static bool cyz_is_loaded(struct cyclades_card *card)
 {
 	struct FIRM_ID __iomem *fw_id = card->base_addr + ID_ADDRESS;
 
@@ -329,7 +329,7 @@ static inline bool cyz_is_loaded(struct cyclades_card *card)
 			readl(&fw_id->signature) == ZFIRM_ID;
 }
 
-static inline int serial_paranoia_check(struct cyclades_port *info,
+static int serial_paranoia_check(struct cyclades_port *info,
 		const char *name, const char *routine)
 {
 #ifdef SERIAL_PARANOIA_CHECK
@@ -1575,15 +1575,6 @@ static int cy_open(struct tty_struct *tty, struct file *filp)
 	printk(KERN_DEBUG "cyc:cy_open (%d): incrementing count to %d\n",
 		current->pid, info->port.count);
 #endif
-
-	/*
-	 * If the port is the middle of closing, bail out now
-	 */
-	if (info->port.flags & ASYNC_CLOSING) {
-		wait_event_interruptible_tty(tty, info->port.close_wait,
-				!(info->port.flags & ASYNC_CLOSING));
-		return (info->port.flags & ASYNC_HUP_NOTIFY) ? -EAGAIN: -ERESTARTSYS;
-	}
 
 	/*
 	 * Start up serial port
@@ -2861,9 +2852,7 @@ static void cy_throttle(struct tty_struct *tty)
 	unsigned long flags;
 
 #ifdef CY_DEBUG_THROTTLE
-	char buf[64];
-
-	printk(KERN_DEBUG "cyc:throttle %s: %ld...ttyC%d\n", tty_name(tty, buf),
+	printk(KERN_DEBUG "cyc:throttle %s: %ld...ttyC%d\n", tty_name(tty),
 			tty->ldisc.chars_in_buffer(tty), info->line);
 #endif
 
@@ -2902,10 +2891,8 @@ static void cy_unthrottle(struct tty_struct *tty)
 	unsigned long flags;
 
 #ifdef CY_DEBUG_THROTTLE
-	char buf[64];
-
 	printk(KERN_DEBUG "cyc:unthrottle %s: %ld...ttyC%d\n",
-		tty_name(tty, buf), tty_chars_in_buffer(tty), info->line);
+		tty_name(tty), tty_chars_in_buffer(tty), info->line);
 #endif
 
 	if (serial_paranoia_check(info, tty->name, "cy_unthrottle"))

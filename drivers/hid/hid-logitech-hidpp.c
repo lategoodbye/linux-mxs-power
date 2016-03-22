@@ -28,18 +28,37 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Benjamin Tissoires <benjamin.tissoires@gmail.com>");
 MODULE_AUTHOR("Nestor Lopez Casado <nlopezcasad@logitech.com>");
 
+static bool disable_raw_mode;
+module_param(disable_raw_mode, bool, 0644);
+MODULE_PARM_DESC(disable_raw_mode,
+	"Disable Raw mode reporting for touchpads and keep firmware gestures.");
+
+static bool disable_tap_to_click;
+module_param(disable_tap_to_click, bool, 0644);
+MODULE_PARM_DESC(disable_tap_to_click,
+	"Disable Tap-To-Click mode reporting for touchpads (only on the K400 currently).");
+
 #define REPORT_ID_HIDPP_SHORT			0x10
 #define REPORT_ID_HIDPP_LONG			0x11
+#define REPORT_ID_HIDPP_VERY_LONG		0x12
 
 #define HIDPP_REPORT_SHORT_LENGTH		7
 #define HIDPP_REPORT_LONG_LENGTH		20
+#define HIDPP_REPORT_VERY_LONG_LENGTH		64
 
 #define HIDPP_QUIRK_CLASS_WTP			BIT(0)
+#define HIDPP_QUIRK_CLASS_M560			BIT(1)
+#define HIDPP_QUIRK_CLASS_K400			BIT(2)
+#define HIDPP_QUIRK_CLASS_G920			BIT(3)
 
-/* bits 1..20 are reserved for classes */
-#define HIDPP_QUIRK_DELAYED_INIT		BIT(21)
+/* bits 2..20 are reserved for classes */
+#define HIDPP_QUIRK_CONNECT_EVENTS		BIT(21)
 #define HIDPP_QUIRK_WTP_PHYSICAL_BUTTONS	BIT(22)
-#define HIDPP_QUIRK_MULTI_INPUT			BIT(23)
+#define HIDPP_QUIRK_NO_HIDINPUT			BIT(23)
+#define HIDPP_QUIRK_FORCE_OUTPUT_REPORTS	BIT(24)
+
+#define HIDPP_QUIRK_DELAYED_INIT		(HIDPP_QUIRK_NO_HIDINPUT | \
+						 HIDPP_QUIRK_CONNECT_EVENTS)
 
 /*
  * There are two hidpp protocols in use, the first version hidpp10 is known
@@ -66,13 +85,13 @@ MODULE_AUTHOR("Nestor Lopez Casado <nlopezcasad@logitech.com>");
 struct fap {
 	u8 feature_index;
 	u8 funcindex_clientid;
-	u8 params[HIDPP_REPORT_LONG_LENGTH - 4U];
+	u8 params[HIDPP_REPORT_VERY_LONG_LENGTH - 4U];
 };
 
 struct rap {
 	u8 sub_id;
 	u8 reg_address;
-	u8 params[HIDPP_REPORT_LONG_LENGTH - 4U];
+	u8 params[HIDPP_REPORT_VERY_LONG_LENGTH - 4U];
 };
 
 struct hidpp_report {
@@ -89,6 +108,7 @@ struct hidpp_device {
 	struct hid_device *hid_dev;
 	struct mutex send_mutex;
 	void *send_receive_buf;
+	char *name;		/* will never be NULL and should not be freed */
 	wait_queue_head_t wait;
 	bool answer_available;
 	u8 protocol_major;
@@ -105,6 +125,7 @@ struct hidpp_device {
 };
 
 
+/* HID++ 1.0 error codes */
 #define HIDPP_ERROR				0x8f
 #define HIDPP_ERROR_SUCCESS			0x00
 #define HIDPP_ERROR_INVALID_SUBID		0x01
@@ -119,13 +140,18 @@ struct hidpp_device {
 #define HIDPP_ERROR_REQUEST_UNAVAILABLE		0x0a
 #define HIDPP_ERROR_INVALID_PARAM_VALUE		0x0b
 #define HIDPP_ERROR_WRONG_PIN_CODE		0x0c
+/* HID++ 2.0 error codes */
+#define HIDPP20_ERROR				0xff
 
 static void hidpp_connect_event(struct hidpp_device *hidpp_dev);
 
 static int __hidpp_send_report(struct hid_device *hdev,
 				struct hidpp_report *hidpp_report)
 {
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
 	int fields_count, ret;
+
+	hidpp = hid_get_drvdata(hdev);
 
 	switch (hidpp_report->report_id) {
 	case REPORT_ID_HIDPP_SHORT:
@@ -133,6 +159,9 @@ static int __hidpp_send_report(struct hid_device *hdev,
 		break;
 	case REPORT_ID_HIDPP_LONG:
 		fields_count = HIDPP_REPORT_LONG_LENGTH;
+		break;
+	case REPORT_ID_HIDPP_VERY_LONG:
+		fields_count = HIDPP_REPORT_VERY_LONG_LENGTH;
 		break;
 	default:
 		return -ENODEV;
@@ -144,9 +173,13 @@ static int __hidpp_send_report(struct hid_device *hdev,
 	 */
 	hidpp_report->device_index = 0xff;
 
-	ret = hid_hw_raw_request(hdev, hidpp_report->report_id,
-		(u8 *)hidpp_report, fields_count, HID_OUTPUT_REPORT,
-		HID_REQ_SET_REPORT);
+	if (hidpp->quirks & HIDPP_QUIRK_FORCE_OUTPUT_REPORTS) {
+		ret = hid_hw_output_report(hdev, (u8 *)hidpp_report, fields_count);
+	} else {
+		ret = hid_hw_raw_request(hdev, hidpp_report->report_id,
+			(u8 *)hidpp_report, fields_count, HID_OUTPUT_REPORT,
+			HID_REQ_SET_REPORT);
+	}
 
 	return ret == fields_count ? 0 : -1;
 }
@@ -192,9 +225,17 @@ static int hidpp_send_message_sync(struct hidpp_device *hidpp,
 	}
 
 	if (response->report_id == REPORT_ID_HIDPP_SHORT &&
-	    response->fap.feature_index == HIDPP_ERROR) {
+	    response->rap.sub_id == HIDPP_ERROR) {
+		ret = response->rap.params[1];
+		dbg_hid("%s:got hidpp error %02X\n", __func__, ret);
+		goto exit;
+	}
+
+	if ((response->report_id == REPORT_ID_HIDPP_LONG ||
+			response->report_id == REPORT_ID_HIDPP_VERY_LONG) &&
+			response->fap.feature_index == HIDPP20_ERROR) {
 		ret = response->fap.params[1];
-		dbg_hid("__hidpp_send_report got hidpp error %02X\n", ret);
+		dbg_hid("%s:got hidpp 2.0 error %02X\n", __func__, ret);
 		goto exit;
 	}
 
@@ -217,7 +258,11 @@ static int hidpp_send_fap_command_sync(struct hidpp_device *hidpp,
 	message = kzalloc(sizeof(struct hidpp_report), GFP_KERNEL);
 	if (!message)
 		return -ENOMEM;
-	message->report_id = REPORT_ID_HIDPP_LONG;
+
+	if (param_count > (HIDPP_REPORT_LONG_LENGTH - 4))
+		message->report_id = REPORT_ID_HIDPP_VERY_LONG;
+	else
+		message->report_id = REPORT_ID_HIDPP_LONG;
 	message->fap.feature_index = feat_index;
 	message->fap.funcindex_clientid = funcindex_clientid;
 	memcpy(&message->fap.params, params, param_count);
@@ -232,13 +277,23 @@ static int hidpp_send_rap_command_sync(struct hidpp_device *hidpp_dev,
 	struct hidpp_report *response)
 {
 	struct hidpp_report *message;
-	int ret;
+	int ret, max_count;
 
-	if ((report_id != REPORT_ID_HIDPP_SHORT) &&
-	    (report_id != REPORT_ID_HIDPP_LONG))
+	switch (report_id) {
+	case REPORT_ID_HIDPP_SHORT:
+		max_count = HIDPP_REPORT_SHORT_LENGTH - 4;
+		break;
+	case REPORT_ID_HIDPP_LONG:
+		max_count = HIDPP_REPORT_LONG_LENGTH - 4;
+		break;
+	case REPORT_ID_HIDPP_VERY_LONG:
+		max_count = HIDPP_REPORT_VERY_LONG_LENGTH - 4;
+		break;
+	default:
 		return -EINVAL;
+	}
 
-	if (param_count > sizeof(message->rap.params))
+	if (param_count > max_count)
 		return -EINVAL;
 
 	message = kzalloc(sizeof(struct hidpp_report), GFP_KERNEL);
@@ -271,7 +326,8 @@ static inline bool hidpp_match_answer(struct hidpp_report *question,
 static inline bool hidpp_match_error(struct hidpp_report *question,
 		struct hidpp_report *answer)
 {
-	return (answer->fap.feature_index == HIDPP_ERROR) &&
+	return ((answer->rap.sub_id == HIDPP_ERROR) ||
+	    (answer->fap.feature_index == HIDPP20_ERROR)) &&
 	    (answer->fap.funcindex_clientid == question->fap.feature_index) &&
 	    (answer->fap.params[0] == question->fap.funcindex_clientid);
 }
@@ -481,10 +537,19 @@ static int hidpp_devicenametype_get_device_name(struct hidpp_device *hidpp,
 	if (ret)
 		return ret;
 
-	if (response.report_id == REPORT_ID_HIDPP_LONG)
+	switch (response.report_id) {
+	case REPORT_ID_HIDPP_VERY_LONG:
+		count = HIDPP_REPORT_VERY_LONG_LENGTH - 4;
+		break;
+	case REPORT_ID_HIDPP_LONG:
 		count = HIDPP_REPORT_LONG_LENGTH - 4;
-	else
+		break;
+	case REPORT_ID_HIDPP_SHORT:
 		count = HIDPP_REPORT_SHORT_LENGTH - 4;
+		break;
+	default:
+		return -EPROTO;
+	}
 
 	if (len_buf < count)
 		count = len_buf;
@@ -533,6 +598,52 @@ static char *hidpp_get_device_name(struct hidpp_device *hidpp)
 	hidpp_prefix_name(&name, __name_length + 1);
 
 	return name;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 0x6010: Touchpad FW items                                                  */
+/* -------------------------------------------------------------------------- */
+
+#define HIDPP_PAGE_TOUCHPAD_FW_ITEMS			0x6010
+
+#define CMD_TOUCHPAD_FW_ITEMS_SET			0x10
+
+struct hidpp_touchpad_fw_items {
+	uint8_t presence;
+	uint8_t desired_state;
+	uint8_t state;
+	uint8_t persistent;
+};
+
+/**
+ * send a set state command to the device by reading the current items->state
+ * field. items is then filled with the current state.
+ */
+static int hidpp_touchpad_fw_items_set(struct hidpp_device *hidpp,
+				       u8 feature_index,
+				       struct hidpp_touchpad_fw_items *items)
+{
+	struct hidpp_report response;
+	int ret;
+	u8 *params = (u8 *)response.fap.params;
+
+	ret = hidpp_send_fap_command_sync(hidpp, feature_index,
+		CMD_TOUCHPAD_FW_ITEMS_SET, &items->state, 1, &response);
+
+	if (ret > 0) {
+		hid_err(hidpp->hid_dev, "%s: received protocol error 0x%02x\n",
+			__func__, ret);
+		return -EPROTO;
+	}
+	if (ret)
+		return ret;
+
+	items->presence = params[0];
+	items->desired_state = params[1];
+	items->state = params[2];
+	items->persistent = params[3];
+
+	return 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -689,12 +800,6 @@ static int wtp_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 		struct hid_field *field, struct hid_usage *usage,
 		unsigned long **bit, int *max)
 {
-	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
-
-	if ((hidpp->quirks & HIDPP_QUIRK_MULTI_INPUT) &&
-	    (field->application == HID_GD_KEYBOARD))
-		return 0;
-
 	return -1;
 }
 
@@ -702,10 +807,6 @@ static void wtp_populate_input(struct hidpp_device *hidpp,
 		struct input_dev *input_dev, bool origin_is_hid_core)
 {
 	struct wtp_data *wd = hidpp->private_data;
-
-	if ((hidpp->quirks & HIDPP_QUIRK_MULTI_INPUT) && origin_is_hid_core)
-		/* this is the generic hid-input call */
-		return;
 
 	__set_bit(EV_ABS, input_dev->evbit);
 	__set_bit(EV_KEY, input_dev->evbit);
@@ -903,25 +1004,420 @@ static int wtp_allocate(struct hid_device *hdev, const struct hid_device_id *id)
 	return 0;
 };
 
-static void wtp_connect(struct hid_device *hdev, bool connected)
+static int wtp_connect(struct hid_device *hdev, bool connected)
 {
 	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
 	struct wtp_data *wd = hidpp->private_data;
 	int ret;
 
 	if (!connected)
-		return;
+		return 0;
 
 	if (!wd->x_size) {
 		ret = wtp_get_config(hidpp);
 		if (ret) {
 			hid_err(hdev, "Can not get wtp config: %d\n", ret);
-			return;
+			return ret;
 		}
 	}
 
-	hidpp_touchpad_set_raw_report_state(hidpp, wd->mt_feature_index,
+	return hidpp_touchpad_set_raw_report_state(hidpp, wd->mt_feature_index,
 			true, true);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Logitech M560 devices                                                     */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Logitech M560 protocol overview
+ *
+ * The Logitech M560 mouse, is designed for windows 8. When the middle and/or
+ * the sides buttons are pressed, it sends some keyboard keys events
+ * instead of buttons ones.
+ * To complicate things further, the middle button keys sequence
+ * is different from the odd press and the even press.
+ *
+ * forward button -> Super_R
+ * backward button -> Super_L+'d' (press only)
+ * middle button -> 1st time: Alt_L+SuperL+XF86TouchpadOff (press only)
+ *                  2nd time: left-click (press only)
+ * NB: press-only means that when the button is pressed, the
+ * KeyPress/ButtonPress and KeyRelease/ButtonRelease events are generated
+ * together sequentially; instead when the button is released, no event is
+ * generated !
+ *
+ * With the command
+ *	10<xx>0a 3500af03 (where <xx> is the mouse id),
+ * the mouse reacts differently:
+ * - it never sends a keyboard key event
+ * - for the three mouse button it sends:
+ *	middle button               press   11<xx>0a 3500af00...
+ *	side 1 button (forward)     press   11<xx>0a 3500b000...
+ *	side 2 button (backward)    press   11<xx>0a 3500ae00...
+ *	middle/side1/side2 button   release 11<xx>0a 35000000...
+ */
+
+static const u8 m560_config_parameter[] = {0x00, 0xaf, 0x03};
+
+struct m560_private_data {
+	struct input_dev *input;
+};
+
+/* how buttons are mapped in the report */
+#define M560_MOUSE_BTN_LEFT		0x01
+#define M560_MOUSE_BTN_RIGHT		0x02
+#define M560_MOUSE_BTN_WHEEL_LEFT	0x08
+#define M560_MOUSE_BTN_WHEEL_RIGHT	0x10
+
+#define M560_SUB_ID			0x0a
+#define M560_BUTTON_MODE_REGISTER	0x35
+
+static int m560_send_config_command(struct hid_device *hdev, bool connected)
+{
+	struct hidpp_report response;
+	struct hidpp_device *hidpp_dev;
+
+	hidpp_dev = hid_get_drvdata(hdev);
+
+	if (!connected)
+		return -ENODEV;
+
+	return hidpp_send_rap_command_sync(
+		hidpp_dev,
+		REPORT_ID_HIDPP_SHORT,
+		M560_SUB_ID,
+		M560_BUTTON_MODE_REGISTER,
+		(u8 *)m560_config_parameter,
+		sizeof(m560_config_parameter),
+		&response
+	);
+}
+
+static int m560_allocate(struct hid_device *hdev)
+{
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+	struct m560_private_data *d;
+
+	d = devm_kzalloc(&hdev->dev, sizeof(struct m560_private_data),
+			GFP_KERNEL);
+	if (!d)
+		return -ENOMEM;
+
+	hidpp->private_data = d;
+
+	return 0;
+};
+
+static int m560_raw_event(struct hid_device *hdev, u8 *data, int size)
+{
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+	struct m560_private_data *mydata = hidpp->private_data;
+
+	/* sanity check */
+	if (!mydata || !mydata->input) {
+		hid_err(hdev, "error in parameter\n");
+		return -EINVAL;
+	}
+
+	if (size < 7) {
+		hid_err(hdev, "error in report\n");
+		return 0;
+	}
+
+	if (data[0] == REPORT_ID_HIDPP_LONG &&
+	    data[2] == M560_SUB_ID && data[6] == 0x00) {
+		/*
+		 * m560 mouse report for middle, forward and backward button
+		 *
+		 * data[0] = 0x11
+		 * data[1] = device-id
+		 * data[2] = 0x0a
+		 * data[5] = 0xaf -> middle
+		 *	     0xb0 -> forward
+		 *	     0xae -> backward
+		 *	     0x00 -> release all
+		 * data[6] = 0x00
+		 */
+
+		switch (data[5]) {
+		case 0xaf:
+			input_report_key(mydata->input, BTN_MIDDLE, 1);
+			break;
+		case 0xb0:
+			input_report_key(mydata->input, BTN_FORWARD, 1);
+			break;
+		case 0xae:
+			input_report_key(mydata->input, BTN_BACK, 1);
+			break;
+		case 0x00:
+			input_report_key(mydata->input, BTN_BACK, 0);
+			input_report_key(mydata->input, BTN_FORWARD, 0);
+			input_report_key(mydata->input, BTN_MIDDLE, 0);
+			break;
+		default:
+			hid_err(hdev, "error in report\n");
+			return 0;
+		}
+		input_sync(mydata->input);
+
+	} else if (data[0] == 0x02) {
+		/*
+		 * Logitech M560 mouse report
+		 *
+		 * data[0] = type (0x02)
+		 * data[1..2] = buttons
+		 * data[3..5] = xy
+		 * data[6] = wheel
+		 */
+
+		int v;
+
+		input_report_key(mydata->input, BTN_LEFT,
+			!!(data[1] & M560_MOUSE_BTN_LEFT));
+		input_report_key(mydata->input, BTN_RIGHT,
+			!!(data[1] & M560_MOUSE_BTN_RIGHT));
+
+		if (data[1] & M560_MOUSE_BTN_WHEEL_LEFT)
+			input_report_rel(mydata->input, REL_HWHEEL, -1);
+		else if (data[1] & M560_MOUSE_BTN_WHEEL_RIGHT)
+			input_report_rel(mydata->input, REL_HWHEEL, 1);
+
+		v = hid_snto32(hid_field_extract(hdev, data+3, 0, 12), 12);
+		input_report_rel(mydata->input, REL_X, v);
+
+		v = hid_snto32(hid_field_extract(hdev, data+3, 12, 12), 12);
+		input_report_rel(mydata->input, REL_Y, v);
+
+		v = hid_snto32(data[6], 8);
+		input_report_rel(mydata->input, REL_WHEEL, v);
+
+		input_sync(mydata->input);
+	}
+
+	return 1;
+}
+
+static void m560_populate_input(struct hidpp_device *hidpp,
+		struct input_dev *input_dev, bool origin_is_hid_core)
+{
+	struct m560_private_data *mydata = hidpp->private_data;
+
+	mydata->input = input_dev;
+
+	__set_bit(EV_KEY, mydata->input->evbit);
+	__set_bit(BTN_MIDDLE, mydata->input->keybit);
+	__set_bit(BTN_RIGHT, mydata->input->keybit);
+	__set_bit(BTN_LEFT, mydata->input->keybit);
+	__set_bit(BTN_BACK, mydata->input->keybit);
+	__set_bit(BTN_FORWARD, mydata->input->keybit);
+
+	__set_bit(EV_REL, mydata->input->evbit);
+	__set_bit(REL_X, mydata->input->relbit);
+	__set_bit(REL_Y, mydata->input->relbit);
+	__set_bit(REL_WHEEL, mydata->input->relbit);
+	__set_bit(REL_HWHEEL, mydata->input->relbit);
+}
+
+static int m560_input_mapping(struct hid_device *hdev, struct hid_input *hi,
+		struct hid_field *field, struct hid_usage *usage,
+		unsigned long **bit, int *max)
+{
+	return -1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Logitech K400 devices                                                     */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * The Logitech K400 keyboard has an embedded touchpad which is seen
+ * as a mouse from the OS point of view. There is a hardware shortcut to disable
+ * tap-to-click but the setting is not remembered accross reset, annoying some
+ * users.
+ *
+ * We can toggle this feature from the host by using the feature 0x6010:
+ * Touchpad FW items
+ */
+
+struct k400_private_data {
+	u8 feature_index;
+};
+
+static int k400_disable_tap_to_click(struct hidpp_device *hidpp)
+{
+	struct k400_private_data *k400 = hidpp->private_data;
+	struct hidpp_touchpad_fw_items items = {};
+	int ret;
+	u8 feature_type;
+
+	if (!k400->feature_index) {
+		ret = hidpp_root_get_feature(hidpp,
+			HIDPP_PAGE_TOUCHPAD_FW_ITEMS,
+			&k400->feature_index, &feature_type);
+		if (ret)
+			/* means that the device is not powered up */
+			return ret;
+	}
+
+	ret = hidpp_touchpad_fw_items_set(hidpp, k400->feature_index, &items);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int k400_allocate(struct hid_device *hdev)
+{
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+	struct k400_private_data *k400;
+
+	k400 = devm_kzalloc(&hdev->dev, sizeof(struct k400_private_data),
+			    GFP_KERNEL);
+	if (!k400)
+		return -ENOMEM;
+
+	hidpp->private_data = k400;
+
+	return 0;
+};
+
+static int k400_connect(struct hid_device *hdev, bool connected)
+{
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+
+	if (!connected)
+		return 0;
+
+	if (!disable_tap_to_click)
+		return 0;
+
+	return k400_disable_tap_to_click(hidpp);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Logitech G920 Driving Force Racing Wheel for Xbox One                     */
+/* ------------------------------------------------------------------------- */
+
+#define HIDPP_PAGE_G920_FORCE_FEEDBACK			0x8123
+
+/* Using session ID = 1 */
+#define CMD_G920_FORCE_GET_APERTURE			0x51
+#define CMD_G920_FORCE_SET_APERTURE			0x61
+
+struct g920_private_data {
+	u8 force_feature;
+	u16 range;
+};
+
+static ssize_t g920_range_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	struct hid_device *hid = to_hid_device(dev);
+	struct hidpp_device *hidpp = hid_get_drvdata(hid);
+	struct g920_private_data *pdata;
+
+	pdata = hidpp->private_data;
+	if (!pdata) {
+		hid_err(hid, "Private driver data not found!\n");
+		return -EINVAL;
+	}
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", pdata->range);
+}
+
+static ssize_t g920_range_store(struct device *dev, struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct hid_device *hid = to_hid_device(dev);
+	struct hidpp_device *hidpp = hid_get_drvdata(hid);
+	struct g920_private_data *pdata;
+	struct hidpp_report response;
+	u8 params[2];
+	int ret;
+	u16 range = simple_strtoul(buf, NULL, 10);
+
+	pdata = hidpp->private_data;
+	if (!pdata) {
+		hid_err(hid, "Private driver data not found!\n");
+		return -EINVAL;
+	}
+
+	if (range < 180)
+		range = 180;
+	else if (range > 900)
+		range = 900;
+
+	params[0] = range >> 8;
+	params[1] = range & 0x00FF;
+
+	ret = hidpp_send_fap_command_sync(hidpp, pdata->force_feature,
+		CMD_G920_FORCE_SET_APERTURE, params, 2, &response);
+	if (ret)
+		return ret;
+
+	pdata->range = range;
+	return count;
+}
+
+static DEVICE_ATTR(range, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH, g920_range_show, g920_range_store);
+
+static int g920_allocate(struct hid_device *hdev)
+{
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+	struct g920_private_data *pdata;
+
+	pdata = devm_kzalloc(&hdev->dev, sizeof(struct g920_private_data),
+			GFP_KERNEL);
+	if (!pdata)
+		return -ENOMEM;
+
+	hidpp->private_data = pdata;
+
+	return 0;
+}
+
+static int g920_get_config(struct hidpp_device *hidpp)
+{
+	struct g920_private_data *pdata = hidpp->private_data;
+	struct hidpp_report response;
+	u8 feature_type;
+	u8 feature_index;
+	int ret;
+
+	pdata = hidpp->private_data;
+	if (!pdata) {
+		hid_err(hidpp->hid_dev, "Private driver data not found!\n");
+		return -EINVAL;
+	}
+
+	/* Find feature and store for later use */
+	ret = hidpp_root_get_feature(hidpp, HIDPP_PAGE_G920_FORCE_FEEDBACK,
+		&feature_index, &feature_type);
+	if (ret)
+		return ret;
+
+	pdata->force_feature = feature_index;
+
+	/* Read current Range */
+	ret = hidpp_send_fap_command_sync(hidpp, feature_index,
+		CMD_G920_FORCE_GET_APERTURE, NULL, 0, &response);
+	if (ret > 0) {
+		hid_err(hidpp->hid_dev, "%s: received protocol error 0x%02x\n",
+			__func__, ret);
+		return -EPROTO;
+	}
+	if (ret)
+		return ret;
+
+	pdata->range = get_unaligned_be16(&response.fap.params[0]);
+
+	/* Create sysfs interface */
+	ret = device_create_file(&(hidpp->hid_dev->dev), &dev_attr_range);
+	if (ret)
+		hid_warn(hidpp->hid_dev, "Unable to create sysfs interface for \"range\", errno %d\n", ret);
+
+	return 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -936,24 +1432,50 @@ static int hidpp_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 
 	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)
 		return wtp_input_mapping(hdev, hi, field, usage, bit, max);
+	else if (hidpp->quirks & HIDPP_QUIRK_CLASS_M560 &&
+			field->application != HID_GD_MOUSE)
+		return m560_input_mapping(hdev, hi, field, usage, bit, max);
 
 	return 0;
 }
+
+static int hidpp_input_mapped(struct hid_device *hdev, struct hid_input *hi,
+		struct hid_field *field, struct hid_usage *usage,
+		unsigned long **bit, int *max)
+{
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+
+	/* Ensure that Logitech G920 is not given a default fuzz/flat value */
+	if (hidpp->quirks & HIDPP_QUIRK_CLASS_G920) {
+		if (usage->type == EV_ABS && (usage->code == ABS_X ||
+				usage->code == ABS_Y || usage->code == ABS_Z ||
+				usage->code == ABS_RZ)) {
+			field->application = HID_GD_MULTIAXIS;
+		}
+	}
+
+	return 0;
+}
+
 
 static void hidpp_populate_input(struct hidpp_device *hidpp,
 		struct input_dev *input, bool origin_is_hid_core)
 {
 	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)
 		wtp_populate_input(hidpp, input, origin_is_hid_core);
+	else if (hidpp->quirks & HIDPP_QUIRK_CLASS_M560)
+		m560_populate_input(hidpp, input, origin_is_hid_core);
 }
 
-static void hidpp_input_configured(struct hid_device *hdev,
+static int hidpp_input_configured(struct hid_device *hdev,
 				struct hid_input *hidinput)
 {
 	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
 	struct input_dev *input = hidinput->input;
 
 	hidpp_populate_input(hidpp, input, true);
+
+	return 0;
 }
 
 static int hidpp_raw_hidpp_event(struct hidpp_device *hidpp, u8 *data,
@@ -965,7 +1487,7 @@ static int hidpp_raw_hidpp_event(struct hidpp_device *hidpp, u8 *data,
 
 	/*
 	 * If the mutex is locked then we have a pending answer from a
-	 * previoulsly sent command
+	 * previously sent command.
 	 */
 	if (unlikely(mutex_is_locked(&hidpp->send_mutex))) {
 		/*
@@ -990,14 +1512,11 @@ static int hidpp_raw_hidpp_event(struct hidpp_device *hidpp, u8 *data,
 	if (unlikely(hidpp_report_is_connect_event(report))) {
 		atomic_set(&hidpp->connected,
 				!(report->rap.params[0] & (1 << 6)));
-		if ((hidpp->quirks & HIDPP_QUIRK_DELAYED_INIT) &&
+		if ((hidpp->quirks & HIDPP_QUIRK_CONNECT_EVENTS) &&
 		    (schedule_work(&hidpp->work) == 0))
 			dbg_hid("%s: connect event already queued\n", __func__);
 		return 1;
 	}
-
-	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)
-		return wtp_raw_event(hidpp->hid_dev, data, size);
 
 	return 0;
 }
@@ -1006,26 +1525,45 @@ static int hidpp_raw_event(struct hid_device *hdev, struct hid_report *report,
 		u8 *data, int size)
 {
 	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
+	int ret = 0;
 
+	/* Generic HID++ processing. */
 	switch (data[0]) {
+	case REPORT_ID_HIDPP_VERY_LONG:
+		if (size != HIDPP_REPORT_VERY_LONG_LENGTH) {
+			hid_err(hdev, "received hid++ report of bad size (%d)",
+				size);
+			return 1;
+		}
+		ret = hidpp_raw_hidpp_event(hidpp, data, size);
+		break;
 	case REPORT_ID_HIDPP_LONG:
 		if (size != HIDPP_REPORT_LONG_LENGTH) {
 			hid_err(hdev, "received hid++ report of bad size (%d)",
 				size);
 			return 1;
 		}
-		return hidpp_raw_hidpp_event(hidpp, data, size);
+		ret = hidpp_raw_hidpp_event(hidpp, data, size);
+		break;
 	case REPORT_ID_HIDPP_SHORT:
 		if (size != HIDPP_REPORT_SHORT_LENGTH) {
 			hid_err(hdev, "received hid++ report of bad size (%d)",
 				size);
 			return 1;
 		}
-		return hidpp_raw_hidpp_event(hidpp, data, size);
+		ret = hidpp_raw_hidpp_event(hidpp, data, size);
+		break;
 	}
+
+	/* If no report is available for further processing, skip calling
+	 * raw_event of subclasses. */
+	if (ret != 0)
+		return ret;
 
 	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)
 		return wtp_raw_event(hdev, data, size);
+	else if (hidpp->quirks & HIDPP_QUIRK_CLASS_M560)
+		return m560_raw_event(hdev, data, size);
 
 	return 0;
 }
@@ -1045,10 +1583,12 @@ static void hidpp_overwrite_name(struct hid_device *hdev, bool use_unifying)
 	else
 		name = hidpp_get_device_name(hidpp);
 
-	if (!name)
+	if (!name) {
 		hid_err(hdev, "unable to retrieve the name of the device");
-	else
+	} else {
+		dbg_hid("HID++: Got name: %s\n", name);
 		snprintf(hdev->name, sizeof(hdev->name), "%s", name);
+	}
 
 	kfree(name);
 }
@@ -1070,6 +1610,7 @@ static void hidpp_input_close(struct input_dev *dev)
 static struct input_dev *hidpp_allocate_input(struct hid_device *hdev)
 {
 	struct input_dev *input_dev = devm_input_allocate_device(&hdev->dev);
+	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
 
 	if (!input_dev)
 		return NULL;
@@ -1078,7 +1619,7 @@ static struct input_dev *hidpp_allocate_input(struct hid_device *hdev)
 	input_dev->open = hidpp_input_open;
 	input_dev->close = hidpp_input_close;
 
-	input_dev->name = hdev->name;
+	input_dev->name = hidpp->name;
 	input_dev->phys = hdev->phys;
 	input_dev->uniq = hdev->uniq;
 	input_dev->id.bustype = hdev->bus;
@@ -1098,39 +1639,59 @@ static void hidpp_connect_event(struct hidpp_device *hidpp)
 	struct input_dev *input;
 	char *name, *devm_name;
 
-	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)
-		wtp_connect(hdev, connected);
+	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP) {
+		ret = wtp_connect(hdev, connected);
+		if (ret)
+			return;
+	} else if (hidpp->quirks & HIDPP_QUIRK_CLASS_M560) {
+		ret = m560_send_config_command(hdev, connected);
+		if (ret)
+			return;
+	} else if (hidpp->quirks & HIDPP_QUIRK_CLASS_K400) {
+		ret = k400_connect(hdev, connected);
+		if (ret)
+			return;
+	}
 
 	if (!connected || hidpp->delayed_input)
 		return;
 
+	/* the device is already connected, we can ask for its name and
+	 * protocol */
 	if (!hidpp->protocol_major) {
 		ret = !hidpp_is_connected(hidpp);
 		if (ret) {
 			hid_err(hdev, "Can not get the protocol version.\n");
 			return;
 		}
+		hid_info(hdev, "HID++ %u.%u device connected.\n",
+			 hidpp->protocol_major, hidpp->protocol_minor);
 	}
 
-	/* the device is already connected, we can ask for its name and
-	 * protocol */
-	hid_info(hdev, "HID++ %u.%u device connected.\n",
-		 hidpp->protocol_major, hidpp->protocol_minor);
+	if (!(hidpp->quirks & HIDPP_QUIRK_NO_HIDINPUT))
+		/* if HID created the input nodes for us, we can stop now */
+		return;
+
+	if (!hidpp->name || hidpp->name == hdev->name) {
+		name = hidpp_get_device_name(hidpp);
+		if (!name) {
+			hid_err(hdev,
+				"unable to retrieve the name of the device");
+			return;
+		}
+
+		devm_name = devm_kasprintf(&hdev->dev, GFP_KERNEL, "%s", name);
+		kfree(name);
+		if (!devm_name)
+			return;
+
+		hidpp->name = devm_name;
+	}
 
 	input = hidpp_allocate_input(hdev);
 	if (!input) {
 		hid_err(hdev, "cannot allocate new input device: %d\n", ret);
 		return;
-	}
-
-	name = hidpp_get_device_name(hidpp);
-	if (!name) {
-		hid_err(hdev, "unable to retrieve the name of the device");
-	} else {
-		devm_name = devm_kasprintf(&hdev->dev, GFP_KERNEL, "%s", name);
-		if (devm_name)
-			input->name = devm_name;
-		kfree(name);
 	}
 
 	hidpp_populate_input(hidpp, input, false);
@@ -1155,14 +1716,33 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		return -ENOMEM;
 
 	hidpp->hid_dev = hdev;
+	hidpp->name = hdev->name;
 	hid_set_drvdata(hdev, hidpp);
 
 	hidpp->quirks = id->driver_data;
 
+	if (disable_raw_mode) {
+		hidpp->quirks &= ~HIDPP_QUIRK_CLASS_WTP;
+		hidpp->quirks &= ~HIDPP_QUIRK_CONNECT_EVENTS;
+		hidpp->quirks &= ~HIDPP_QUIRK_NO_HIDINPUT;
+	}
+
 	if (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP) {
 		ret = wtp_allocate(hdev, id);
 		if (ret)
-			goto wtp_allocate_fail;
+			goto allocate_fail;
+	} else if (hidpp->quirks & HIDPP_QUIRK_CLASS_M560) {
+		ret = m560_allocate(hdev);
+		if (ret)
+			goto allocate_fail;
+	} else if (hidpp->quirks & HIDPP_QUIRK_CLASS_K400) {
+		ret = k400_allocate(hdev);
+		if (ret)
+			goto allocate_fail;
+	} else if (hidpp->quirks & HIDPP_QUIRK_CLASS_G920) {
+		ret = g920_allocate(hdev);
+		if (ret)
+			goto allocate_fail;
 	}
 
 	INIT_WORK(&hidpp->work, delayed_work_cb);
@@ -1175,15 +1755,34 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto hid_parse_fail;
 	}
 
+	if (hidpp->quirks & HIDPP_QUIRK_NO_HIDINPUT)
+		connect_mask &= ~HID_CONNECT_HIDINPUT;
+
+	if (hidpp->quirks & HIDPP_QUIRK_CLASS_G920) {
+		ret = hid_hw_start(hdev, connect_mask);
+		if (ret) {
+			hid_err(hdev, "hw start failed\n");
+			goto hid_hw_start_fail;
+		}
+		ret = hid_hw_open(hdev);
+		if (ret < 0) {
+			dev_err(&hdev->dev, "%s:hid_hw_open returned error:%d\n",
+				__func__, ret);
+			hid_hw_stop(hdev);
+			goto hid_hw_start_fail;
+		}
+	}
+
+
 	/* Allow incoming packets */
 	hid_device_io_start(hdev);
 
 	connected = hidpp_is_connected(hidpp);
 	if (id->group != HID_GROUP_LOGITECH_DJ_DEVICE) {
 		if (!connected) {
+			ret = -ENODEV;
 			hid_err(hdev, "Device not connected");
-			hid_device_io_stop(hdev);
-			goto hid_parse_fail;
+			goto hid_hw_open_failed;
 		}
 
 		hid_info(hdev, "HID++ %u.%u device connected.\n",
@@ -1196,26 +1795,25 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	if (connected && (hidpp->quirks & HIDPP_QUIRK_CLASS_WTP)) {
 		ret = wtp_get_config(hidpp);
 		if (ret)
-			goto hid_parse_fail;
+			goto hid_hw_open_failed;
+	} else if (connected && (hidpp->quirks & HIDPP_QUIRK_CLASS_G920)) {
+		ret = g920_get_config(hidpp);
+		if (ret)
+			goto hid_hw_open_failed;
 	}
 
 	/* Block incoming packets */
 	hid_device_io_stop(hdev);
 
-	if (hidpp->quirks & HIDPP_QUIRK_DELAYED_INIT)
-		connect_mask &= ~HID_CONNECT_HIDINPUT;
-
-	/* Re-enable hidinput for multi-input devices */
-	if (hidpp->quirks & HIDPP_QUIRK_MULTI_INPUT)
-		connect_mask |= HID_CONNECT_HIDINPUT;
-
-	ret = hid_hw_start(hdev, connect_mask);
-	if (ret) {
-		hid_err(hdev, "%s:hid_hw_start returned error\n", __func__);
-		goto hid_hw_start_fail;
+	if (!(hidpp->quirks & HIDPP_QUIRK_CLASS_G920)) {
+		ret = hid_hw_start(hdev, connect_mask);
+		if (ret) {
+			hid_err(hdev, "%s:hid_hw_start returned error\n", __func__);
+			goto hid_hw_start_fail;
+		}
 	}
 
-	if (hidpp->quirks & HIDPP_QUIRK_DELAYED_INIT) {
+	if (hidpp->quirks & HIDPP_QUIRK_CONNECT_EVENTS) {
 		/* Allow incoming packets */
 		hid_device_io_start(hdev);
 
@@ -1224,11 +1822,18 @@ static int hidpp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	return ret;
 
+hid_hw_open_failed:
+	hid_device_io_stop(hdev);
+	if (hidpp->quirks & HIDPP_QUIRK_CLASS_G920) {
+		device_remove_file(&hdev->dev, &dev_attr_range);
+		hid_hw_close(hdev);
+		hid_hw_stop(hdev);
+	}
 hid_hw_start_fail:
 hid_parse_fail:
 	cancel_work_sync(&hidpp->work);
 	mutex_destroy(&hidpp->send_mutex);
-wtp_allocate_fail:
+allocate_fail:
 	hid_set_drvdata(hdev, NULL);
 	return ret;
 }
@@ -1237,9 +1842,13 @@ static void hidpp_remove(struct hid_device *hdev)
 {
 	struct hidpp_device *hidpp = hid_get_drvdata(hdev);
 
+	if (hidpp->quirks & HIDPP_QUIRK_CLASS_G920) {
+		device_remove_file(&hdev->dev, &dev_attr_range);
+		hid_hw_close(hdev);
+	}
+	hid_hw_stop(hdev);
 	cancel_work_sync(&hidpp->work);
 	mutex_destroy(&hidpp->send_mutex);
-	hid_hw_stop(hdev);
 }
 
 static const struct hid_device_id hidpp_devices[] = {
@@ -1256,14 +1865,20 @@ static const struct hid_device_id hidpp_devices[] = {
 	  HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_LOGITECH,
 		USB_DEVICE_ID_LOGITECH_T651),
 	  .driver_data = HIDPP_QUIRK_CLASS_WTP },
-	{ /* Keyboard TK820 */
+	{ /* Mouse logitech M560 */
 	  HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE,
-		USB_VENDOR_ID_LOGITECH, 0x4102),
-	  .driver_data = HIDPP_QUIRK_DELAYED_INIT | HIDPP_QUIRK_MULTI_INPUT |
-			 HIDPP_QUIRK_CLASS_WTP },
+		USB_VENDOR_ID_LOGITECH, 0x402d),
+	  .driver_data = HIDPP_QUIRK_DELAYED_INIT | HIDPP_QUIRK_CLASS_M560 },
+	{ /* Keyboard logitech K400 */
+	  HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE,
+		USB_VENDOR_ID_LOGITECH, 0x4024),
+	  .driver_data = HIDPP_QUIRK_CONNECT_EVENTS | HIDPP_QUIRK_CLASS_K400 },
 
 	{ HID_DEVICE(BUS_USB, HID_GROUP_LOGITECH_DJ_DEVICE,
 		USB_VENDOR_ID_LOGITECH, HID_ANY_ID)},
+
+	{ HID_USB_DEVICE(USB_VENDOR_ID_LOGITECH, USB_DEVICE_ID_LOGITECH_G920_WHEEL),
+		.driver_data = HIDPP_QUIRK_CLASS_G920 | HIDPP_QUIRK_FORCE_OUTPUT_REPORTS},
 	{}
 };
 
@@ -1277,6 +1892,7 @@ static struct hid_driver hidpp_driver = {
 	.raw_event = hidpp_raw_event,
 	.input_configured = hidpp_input_configured,
 	.input_mapping = hidpp_input_mapping,
+	.input_mapped = hidpp_input_mapped,
 };
 
 module_hid_driver(hidpp_driver);

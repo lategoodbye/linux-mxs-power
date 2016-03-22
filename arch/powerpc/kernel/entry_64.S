@@ -19,6 +19,7 @@
  */
 
 #include <linux/errno.h>
+#include <linux/err.h>
 #include <asm/unistd.h>
 #include <asm/processor.h>
 #include <asm/page.h>
@@ -34,6 +35,7 @@
 #include <asm/ftrace.h>
 #include <asm/hw_irq.h>
 #include <asm/context_tracking.h>
+#include <asm/tm.h>
 
 /*
  * System calls.
@@ -49,10 +51,14 @@ exception_marker:
 	.section	".text"
 	.align 7
 
-#undef SHOW_SYSCALLS
-
 	.globl system_call_common
 system_call_common:
+#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+BEGIN_FTR_SECTION
+	extrdi.	r10, r12, 1, (63-MSR_TS_T_LG) /* transaction active? */
+	bne	tabort_syscall
+END_FTR_SECTION_IFSET(CPU_FTR_TM)
+#endif
 	andi.	r10,r12,MSR_PR
 	mr	r10,r1
 	addi	r1,r1,-INT_FRAME_SIZE
@@ -142,18 +148,10 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_SPLPAR)
 	li	r10,1
 	std	r10,SOFTE(r1)
 
-#ifdef SHOW_SYSCALLS
-	bl	do_show_syscall
-	REST_GPR(0,r1)
-	REST_4GPRS(3,r1)
-	REST_2GPRS(7,r1)
-	addi	r9,r1,STACK_FRAME_OVERHEAD
-#endif
 	CURRENT_THREAD_INFO(r11, r1)
 	ld	r10,TI_FLAGS(r11)
-	andi.	r11,r10,_TIF_SYSCALL_T_OR_A
-	bne	syscall_dotrace
-.Lsyscall_dotrace_cont:
+	andi.	r11,r10,_TIF_SYSCALL_DOTRACE
+	bne	syscall_dotrace		/* does not return */
 	cmpldi	0,r0,NR_syscalls
 	bge-	syscall_enosys
 
@@ -178,12 +176,8 @@ system_call:			/* label this so stack traces look sane */
 	mtctr   r12
 	bctrl			/* Call handler */
 
-syscall_exit:
+.Lsyscall_exit:
 	std	r3,RESULT(r1)
-#ifdef SHOW_SYSCALLS
-	bl	do_show_syscall_exit
-	ld	r3,RESULT(r1)
-#endif
 	CURRENT_THREAD_INFO(r12, r1)
 
 	ld	r8,_MSR(r1)
@@ -213,8 +207,8 @@ syscall_exit:
 #endif /* CONFIG_PPC_BOOK3E */
 
 	ld	r9,TI_FLAGS(r12)
-	li	r11,-_LAST_ERRNO
-	andi.	r0,r9,(_TIF_SYSCALL_T_OR_A|_TIF_SINGLESTEP|_TIF_USER_WORK_MASK|_TIF_PERSYSCALL_MASK)
+	li	r11,-MAX_ERRNO
+	andi.	r0,r9,(_TIF_SYSCALL_DOTRACE|_TIF_SINGLESTEP|_TIF_USER_WORK_MASK|_TIF_PERSYSCALL_MASK)
 	bne-	syscall_exit_work
 	cmpld	r3,r11
 	ld	r5,_CCR(r1)
@@ -229,7 +223,11 @@ END_FTR_SECTION_IFCLR(CPU_FTR_STCX_CHECKS_ADDRESS)
 
 	beq-	1f
 	ACCOUNT_CPU_USER_EXIT(r11, r12)
-	HMT_MEDIUM_LOW_HAS_PPR
+
+BEGIN_FTR_SECTION
+	HMT_MEDIUM_LOW
+END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
+
 	ld	r13,GPR13(r1)	/* only restore r13 if returning to usermode */
 1:	ld	r2,GPR2(r1)
 	ld	r1,GPR1(r1)
@@ -251,26 +249,38 @@ syscall_dotrace:
 	bl	save_nvgprs
 	addi	r3,r1,STACK_FRAME_OVERHEAD
 	bl	do_syscall_trace_enter
+
 	/*
-	 * Restore argument registers possibly just changed.
-	 * We use the return value of do_syscall_trace_enter
-	 * for the call number to look up in the table (r0).
+	 * We use the return value of do_syscall_trace_enter() as the syscall
+	 * number. If the syscall was rejected for any reason do_syscall_trace_enter()
+	 * returns an invalid syscall number and the test below against
+	 * NR_syscalls will fail.
 	 */
 	mr	r0,r3
+
+	/* Restore argument registers just clobbered and/or possibly changed. */
 	ld	r3,GPR3(r1)
 	ld	r4,GPR4(r1)
 	ld	r5,GPR5(r1)
 	ld	r6,GPR6(r1)
 	ld	r7,GPR7(r1)
 	ld	r8,GPR8(r1)
+
+	/* Repopulate r9 and r10 for the system_call path */
 	addi	r9,r1,STACK_FRAME_OVERHEAD
 	CURRENT_THREAD_INFO(r10, r1)
 	ld	r10,TI_FLAGS(r10)
-	b	.Lsyscall_dotrace_cont
+
+	cmpldi	r0,NR_syscalls
+	blt+	system_call
+
+	/* Return code is already in r3 thanks to do_syscall_trace_enter() */
+	b	.Lsyscall_exit
+
 
 syscall_enosys:
 	li	r3,-ENOSYS
-	b	syscall_exit
+	b	.Lsyscall_exit
 	
 syscall_exit_work:
 #ifdef CONFIG_PPC_BOOK3S
@@ -283,7 +293,7 @@ syscall_exit_work:
 	beq+	0f
 	REST_NVGPRS(r1)
 	b	2f
-0:	cmpld	r3,r11		/* r10 is -LAST_ERRNO */
+0:	cmpld	r3,r11		/* r11 is -MAX_ERRNO */
 	blt+	1f
 	andi.	r0,r9,_TIF_NOERROR
 	bne-	1f
@@ -306,8 +316,14 @@ syscall_exit_work:
 	subi	r12,r12,TI_FLAGS
 
 4:	/* Anything else left to do? */
-	SET_DEFAULT_THREAD_PPR(r3, r10)		/* Set thread.ppr = 3 */
-	andi.	r0,r9,(_TIF_SYSCALL_T_OR_A|_TIF_SINGLESTEP)
+BEGIN_FTR_SECTION
+	lis	r3,INIT_PPR@highest	/* Set thread.ppr = 3 */
+	ld	r10,PACACURRENT(r13)
+	sldi	r3,r3,32	/* bits 11-13 are used for ppr */
+	std	r3,TASKTHREADPPR(r10)
+END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
+
+	andi.	r0,r9,(_TIF_SYSCALL_DOTRACE|_TIF_SINGLESTEP)
 	beq	ret_from_except_lite
 
 	/* Re-enable interrupts */
@@ -323,6 +339,34 @@ syscall_exit_work:
 	addi	r3,r1,STACK_FRAME_OVERHEAD
 	bl	do_syscall_trace_leave
 	b	ret_from_except
+
+#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+tabort_syscall:
+	/* Firstly we need to enable TM in the kernel */
+	mfmsr	r10
+	li	r13, 1
+	rldimi	r10, r13, MSR_TM_LG, 63-MSR_TM_LG
+	mtmsrd	r10, 0
+
+	/* tabort, this dooms the transaction, nothing else */
+	li	r13, (TM_CAUSE_SYSCALL|TM_CAUSE_PERSISTENT)
+	TABORT(R13)
+
+	/*
+	 * Return directly to userspace. We have corrupted user register state,
+	 * but userspace will never see that register state. Execution will
+	 * resume after the tbegin of the aborted transaction with the
+	 * checkpointed register state.
+	 */
+	li	r13, MSR_RI
+	andc	r10, r10, r13
+	mtmsrd	r10, 1
+	mtspr	SPRN_SRR0, r11
+	mtspr	SPRN_SRR1, r12
+
+	rfid
+	b	.	/* prevent speculative execution */
+#endif
 
 /* Save non-volatile GPRs, if not already saved. */
 _GLOBAL(save_nvgprs)
@@ -347,33 +391,38 @@ _GLOBAL(save_nvgprs)
 _GLOBAL(ppc_fork)
 	bl	save_nvgprs
 	bl	sys_fork
-	b	syscall_exit
+	b	.Lsyscall_exit
 
 _GLOBAL(ppc_vfork)
 	bl	save_nvgprs
 	bl	sys_vfork
-	b	syscall_exit
+	b	.Lsyscall_exit
 
 _GLOBAL(ppc_clone)
 	bl	save_nvgprs
 	bl	sys_clone
-	b	syscall_exit
+	b	.Lsyscall_exit
 
 _GLOBAL(ppc32_swapcontext)
 	bl	save_nvgprs
 	bl	compat_sys_swapcontext
-	b	syscall_exit
+	b	.Lsyscall_exit
 
 _GLOBAL(ppc64_swapcontext)
 	bl	save_nvgprs
 	bl	sys_swapcontext
-	b	syscall_exit
+	b	.Lsyscall_exit
+
+_GLOBAL(ppc_switch_endian)
+	bl	save_nvgprs
+	bl	sys_switch_endian
+	b	.Lsyscall_exit
 
 _GLOBAL(ret_from_fork)
 	bl	schedule_tail
 	REST_NVGPRS(r1)
 	li	r3,0
-	b	syscall_exit
+	b	.Lsyscall_exit
 
 _GLOBAL(ret_from_kernel_thread)
 	bl	schedule_tail
@@ -385,7 +434,7 @@ _GLOBAL(ret_from_kernel_thread)
 #endif
 	blrl
 	li	r3,0
-	b	syscall_exit
+	b	.Lsyscall_exit
 
 /*
  * This routine switches between two different tasks.  The process
@@ -413,42 +462,10 @@ _GLOBAL(_switch)
 	/* r3-r13 are caller saved -- Cort */
 	SAVE_8GPRS(14, r1)
 	SAVE_10GPRS(22, r1)
-	mflr	r20		/* Return to switch caller */
-	mfmsr	r22
-	li	r0, MSR_FP
-#ifdef CONFIG_VSX
-BEGIN_FTR_SECTION
-	oris	r0,r0,MSR_VSX@h	/* Disable VSX */
-END_FTR_SECTION_IFSET(CPU_FTR_VSX)
-#endif /* CONFIG_VSX */
-#ifdef CONFIG_ALTIVEC
-BEGIN_FTR_SECTION
-	oris	r0,r0,MSR_VEC@h	/* Disable altivec */
-	mfspr	r24,SPRN_VRSAVE	/* save vrsave register value */
-	std	r24,THREAD_VRSAVE(r3)
-END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
-#endif /* CONFIG_ALTIVEC */
-	and.	r0,r0,r22
-	beq+	1f
-	andc	r22,r22,r0
-	MTMSRD(r22)
-	isync
-1:	std	r20,_NIP(r1)
+	std	r0,_NIP(r1)	/* Return to switch caller */
 	mfcr	r23
 	std	r23,_CCR(r1)
 	std	r1,KSP(r3)	/* Set old stack pointer */
-
-#ifdef CONFIG_PPC_BOOK3S_64
-BEGIN_FTR_SECTION
-	/* Event based branch registers */
-	mfspr	r0, SPRN_BESCR
-	std	r0, THREAD_BESCR(r3)
-	mfspr	r0, SPRN_EBBHR
-	std	r0, THREAD_EBBHR(r3)
-	mfspr	r0, SPRN_EBBRR
-	std	r0, THREAD_EBBRR(r3)
-END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
-#endif
 
 #ifdef CONFIG_SMP
 	/* We need a sync somewhere here to make sure that if the
@@ -536,47 +553,6 @@ END_MMU_FTR_SECTION_IFSET(MMU_FTR_1T_SEGMENT)
 
 	mr	r1,r8		/* start using new stack pointer */
 	std	r7,PACAKSAVE(r13)
-
-#ifdef CONFIG_PPC_BOOK3S_64
-BEGIN_FTR_SECTION
-	/* Event based branch registers */
-	ld	r0, THREAD_BESCR(r4)
-	mtspr	SPRN_BESCR, r0
-	ld	r0, THREAD_EBBHR(r4)
-	mtspr	SPRN_EBBHR, r0
-	ld	r0, THREAD_EBBRR(r4)
-	mtspr	SPRN_EBBRR, r0
-
-	ld	r0,THREAD_TAR(r4)
-	mtspr	SPRN_TAR,r0
-END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
-#endif
-
-#ifdef CONFIG_ALTIVEC
-BEGIN_FTR_SECTION
-	ld	r0,THREAD_VRSAVE(r4)
-	mtspr	SPRN_VRSAVE,r0		/* if G4, restore VRSAVE reg */
-END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
-#endif /* CONFIG_ALTIVEC */
-#ifdef CONFIG_PPC64
-BEGIN_FTR_SECTION
-	lwz	r6,THREAD_DSCR_INHERIT(r4)
-	ld	r0,THREAD_DSCR(r4)
-	cmpwi	r6,0
-	bne	1f
-	ld	r0,PACA_DSCR(r13)
-1:
-BEGIN_FTR_SECTION_NESTED(70)
-	mfspr	r8, SPRN_FSCR
-	rldimi	r8, r6, FSCR_DSCR_LG, (63 - FSCR_DSCR_LG)
-	mtspr	SPRN_FSCR, r8
-END_FTR_SECTION_NESTED(CPU_FTR_ARCH_207S, CPU_FTR_ARCH_207S, 70)
-	cmpd	r0,r25
-	beq	2f
-	mtspr	SPRN_DSCR,r0
-2:
-END_FTR_SECTION_IFSET(CPU_FTR_DSCR)
-#endif
 
 	ld	r6,_CCR(r1)
 	mtcrf	0xFF,r6

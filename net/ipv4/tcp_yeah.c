@@ -92,7 +92,7 @@ static void tcp_yeah_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 
 	} else {
 		/* Reno */
-		tcp_cong_avoid_ai(tp, tp->snd_cwnd);
+		tcp_cong_avoid_ai(tp, tp->snd_cwnd, 1);
 	}
 
 	/* The key players are v_vegas.beg_snd_una and v_beg_snd_nxt.
@@ -219,7 +219,7 @@ static u32 tcp_yeah_ssthresh(struct sock *sk)
 	yeah->fast_count = 0;
 	yeah->reno_count = max(yeah->reno_count>>1, 2U);
 
-	return tp->snd_cwnd - reduction;
+	return max_t(int, tp->snd_cwnd - reduction, 2);
 }
 
 static struct tcp_congestion_ops tcp_yeah __read_mostly = {

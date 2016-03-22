@@ -30,10 +30,10 @@
 #include <linux/i2c.h>
 #include <linux/usb.h>
 #include <media/tuner.h>
-#include <media/msp3400.h>
-#include <media/saa7115.h>
-#include <media/tvp5150.h>
-#include <media/tvaudio.h>
+#include <media/drv-intf/msp3400.h>
+#include <media/i2c/saa7115.h>
+#include <media/i2c/tvp5150.h>
+#include <media/i2c/tvaudio.h>
 #include <media/i2c-addr.h>
 #include <media/tveeprom.h>
 #include <media/v4l2-common.h>
@@ -1051,8 +1051,12 @@ struct em28xx_board em28xx_boards[] = {
 	},
 	[EM2870_BOARD_TERRATEC_XS_MT2060] = {
 		.name         = "Terratec Cinergy T XS (MT2060)",
-		.valid        = EM28XX_BOARD_NOT_VALIDATED,
+		.xclk         = EM28XX_XCLK_IR_RC5_MODE |
+				EM28XX_XCLK_FREQUENCY_12MHZ,
+		.i2c_speed    = EM28XX_I2C_CLK_WAIT_ENABLE,
 		.tuner_type   = TUNER_ABSENT, /* MT2060 */
+		.has_dvb      = 1,
+		.tuner_gpio   = default_tuner_gpio,
 	},
 	[EM2870_BOARD_KWORLD_350U] = {
 		.name         = "Kworld 350 U DVB-T",
@@ -1150,6 +1154,15 @@ struct em28xx_board em28xx_boards[] = {
 	},
 	[EM2884_BOARD_CINERGY_HTC_STICK] = {
 		.name         = "Terratec Cinergy HTC Stick",
+		.has_dvb      = 1,
+		.ir_codes     = RC_MAP_NEC_TERRATEC_CINERGY_XS,
+		.tuner_type   = TUNER_ABSENT,
+		.def_i2c_bus  = 1,
+		.i2c_speed    = EM28XX_I2C_CLK_WAIT_ENABLE |
+				EM28XX_I2C_FREQ_400_KHZ,
+	},
+	[EM2884_BOARD_ELGATO_EYETV_HYBRID_2008] = {
+		.name         = "Elgato EyeTV Hybrid 2008 INT",
 		.has_dvb      = 1,
 		.ir_codes     = RC_MAP_NEC_TERRATEC_CINERGY_XS,
 		.tuner_type   = TUNER_ABSENT,
@@ -2359,7 +2372,7 @@ struct usb_device_id em28xx_id_table[] = {
 	{ USB_DEVICE(0x0ccd, 0x0042),
 			.driver_info = EM2882_BOARD_TERRATEC_HYBRID_XS },
 	{ USB_DEVICE(0x0ccd, 0x0043),
-			.driver_info = EM2870_BOARD_TERRATEC_XS },
+			.driver_info = EM2870_BOARD_TERRATEC_XS_MT2060 },
 	{ USB_DEVICE(0x0ccd, 0x008e),	/* Cinergy HTC USB XS Rev. 1 */
 			.driver_info = EM2884_BOARD_TERRATEC_HTC_USB_XS },
 	{ USB_DEVICE(0x0ccd, 0x00ac),	/* Cinergy HTC USB XS Rev. 2 */
@@ -2378,8 +2391,10 @@ struct usb_device_id em28xx_id_table[] = {
 			.driver_info = EM2860_BOARD_TERRATEC_GRABBY },
 	{ USB_DEVICE(0x0ccd, 0x00b2),
 			.driver_info = EM2884_BOARD_CINERGY_HTC_STICK },
+	{ USB_DEVICE(0x0fd9, 0x0018),
+			.driver_info = EM2884_BOARD_ELGATO_EYETV_HYBRID_2008 },
 	{ USB_DEVICE(0x0fd9, 0x0033),
-			.driver_info = EM2860_BOARD_ELGATO_VIDEO_CAPTURE},
+			.driver_info = EM2860_BOARD_ELGATO_VIDEO_CAPTURE },
 	{ USB_DEVICE(0x185b, 0x2870),
 			.driver_info = EM2870_BOARD_COMPRO_VIDEOMATE },
 	{ USB_DEVICE(0x185b, 0x2041),
@@ -2459,6 +2474,8 @@ struct usb_device_id em28xx_id_table[] = {
 	{ USB_DEVICE(0x2013, 0x0258),
 			.driver_info = EM28178_BOARD_PCTV_461E },
 	{ USB_DEVICE(0x2013, 0x025f),
+			.driver_info = EM28178_BOARD_PCTV_292E },
+	{ USB_DEVICE(0x2040, 0x0264), /* Hauppauge WinTV-soloHD */
 			.driver_info = EM28178_BOARD_PCTV_292E },
 	{ USB_DEVICE(0x0413, 0x6f07),
 			.driver_info = EM2861_BOARD_LEADTEK_VC100 },

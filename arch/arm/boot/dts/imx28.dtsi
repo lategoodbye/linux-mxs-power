@@ -38,23 +38,12 @@
 	};
 
 	cpus {
-		#address-cells = <1>;
+		#address-cells = <0>;
 		#size-cells = <0>;
 
-		cpu@0 {
+		cpu {
 			compatible = "arm,arm926ej-s";
 			device_type = "cpu";
-			reg = <0x0>;
-			operating-points = <
-				/* kHz	uV */
-				261819  1350000
-				360000  1350000
-				392728  1450000
-				454737  1550000
-			>;
-			clocks = <&clks 4>;
-			clock-latency = <61036>; /* two CLK32 periods */
-			cpu-supply = <&reg_vddd>;
 		};
 	};
 
@@ -416,6 +405,17 @@
 					fsl,pull-up = <MXS_PULL_DISABLE>;
 				};
 
+				auart4_2pins_b: auart4@1 {
+					reg = <1>;
+					fsl,pinmux-ids = <
+						MX28_PAD_AUART0_CTS__AUART4_RX
+						MX28_PAD_AUART0_RTS__AUART4_TX
+					>;
+					fsl,drive-strength = <MXS_DRIVE_4mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_DISABLE>;
+				};
+
 				mac0_pins_a: mac0@0 {
 					reg = <0>;
 					fsl,pinmux-ids = <
@@ -652,16 +652,6 @@
 					fsl,pull-up = <MXS_PULL_DISABLE>;
 				};
 
-				pwm0_pins_b: pwm0@1 {
-					reg = <1>;
-					fsl,pinmux-ids = <
-						MX28_PAD_AUART1_RX__PWM_0
-					>;
-					fsl,drive-strength = <MXS_DRIVE_4mA>;
-					fsl,voltage = <MXS_VOLTAGE_HIGH>;
-					fsl,pull-up = <MXS_PULL_DISABLE>;
-				};
-
 				pwm2_pins_a: pwm2@0 {
 					reg = <0>;
 					fsl,pinmux-ids = <
@@ -850,6 +840,19 @@
 					fsl,pull-up = <MXS_PULL_DISABLE>;
 				};
 
+				spi3_pins_b: spi3@1 {
+					reg = <1>;
+					fsl,pinmux-ids = <
+						MX28_PAD_SSP3_SCK__SSP3_SCK
+						MX28_PAD_SSP3_MOSI__SSP3_CMD
+						MX28_PAD_SSP3_MISO__SSP3_D0
+						MX28_PAD_SSP3_SS0__SSP3_D3
+					>;
+					fsl,drive-strength = <MXS_DRIVE_8mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_ENABLE>;
+				};
+
 				usb0_pins_a: usb0@0 {
 					reg = <0>;
 					fsl,pinmux-ids = <
@@ -921,7 +924,7 @@
 					      80 81 68 69
 					      70 71 72 73
 					      74 75 76 77>;
-				interrupt-names = "auart4-rx", "aurat4-tx", "spdif-tx", "empty",
+				interrupt-names = "auart4-rx", "auart4-tx", "spdif-tx", "empty",
 						  "saif0", "saif1", "i2c0", "i2c1",
 						  "auart0-rx", "auart0-tx", "auart1-rx", "auart1-tx",
 						  "auart2-rx", "auart2-tx", "auart3-rx", "auart3-tx";
@@ -944,9 +947,11 @@
 			};
 
 			ocotp: ocotp@8002c000 {
-				compatible = "fsl,ocotp";
+				compatible = "fsl,imx28-ocotp", "fsl,ocotp";
+				#address-cells = <1>;
+				#size-cells = <1>;
 				reg = <0x8002c000 0x2000>;
-				status = "disabled";
+				clocks = <&clks 25>;
 			};
 
 			axi-ahb@8002e000 {
@@ -1043,60 +1048,8 @@
 			};
 
 			power: power@80044000 {
-				compatible = "fsl,imx28-power";
-				#address-cells = <1>;
-				#size-cells = <1>;
 				reg = <0x80044000 0x2000>;
-				interrupts = <6>;
-				ranges;
-
-				reg_vddd: regulator@80044040 {
-					reg = <0x80044040 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
-					compatible = "fsl,imx28-vddd";
-					regulator-name = "vddd";
-					regulator-min-microvolt = <1350000>;
-					regulator-max-microvolt = <1550000>;
-					vddd-supply = <&reg_vdda>;
-					regulator-boot-on;
-					regulator-always-on;
-				};
-
-				reg_vdda: regulator@80044050 {
-					reg = <0x80044050 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
-					compatible = "fsl,imx28-vdda";
-					regulator-name = "vdda";
-					regulator-min-microvolt = <1725000>;
-					regulator-max-microvolt = <1950000>;
-					vdda-supply = <&reg_vddio>;
-					regulator-boot-on;
-					regulator-always-on;
-				};
-
-				reg_vddio: regulator@80044060 {
-					reg = <0x80044060 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
-					compatible = "fsl,imx28-vddio";
-					regulator-name = "vddio";
-					regulator-min-microvolt = <3000000>;
-					regulator-max-microvolt = <3550000>;
-					regulator-microvolt-offset = <80000>;
-					regulator-boot-on;
-					regulator-always-on;
-				};
+				status = "disabled";
 			};
 
 			saif1: saif@80046000 {
@@ -1270,6 +1223,7 @@
 			interrupts = <92>;
 			clocks = <&clks 61>;
 			fsl,usbphy = <&usbphy1>;
+			dr_mode = "host";
 			status = "disabled";
 		};
 

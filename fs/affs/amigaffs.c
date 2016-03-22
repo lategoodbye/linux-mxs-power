@@ -8,6 +8,7 @@
  *  Please send bug reports to: hjw@zvw.de
  */
 
+#include <linux/math64.h>
 #include "affs.h"
 
 /*
@@ -30,7 +31,7 @@ affs_insert_hash(struct inode *dir, struct buffer_head *bh)
 	ino = bh->b_blocknr;
 	offset = affs_hash_name(sb, AFFS_TAIL(sb, bh)->name + 1, AFFS_TAIL(sb, bh)->name[0]);
 
-	pr_debug("%s(dir=%u, ino=%d)\n", __func__, (u32)dir->i_ino, ino);
+	pr_debug("%s(dir=%lu, ino=%d)\n", __func__, dir->i_ino, ino);
 
 	dir_bh = affs_bread(sb, dir->i_ino);
 	if (!dir_bh)
@@ -80,8 +81,8 @@ affs_remove_hash(struct inode *dir, struct buffer_head *rem_bh)
 	sb = dir->i_sb;
 	rem_ino = rem_bh->b_blocknr;
 	offset = affs_hash_name(sb, AFFS_TAIL(sb, rem_bh)->name+1, AFFS_TAIL(sb, rem_bh)->name[0]);
-	pr_debug("%s(dir=%d, ino=%d, hashval=%d)\n",
-		 __func__, (u32)dir->i_ino, rem_ino, offset);
+	pr_debug("%s(dir=%lu, ino=%d, hashval=%d)\n", __func__, dir->i_ino,
+		 rem_ino, offset);
 
 	bh = affs_bread(sb, dir->i_ino);
 	if (!bh)
@@ -138,9 +139,9 @@ affs_fix_dcache(struct inode *inode, u32 entry_ino)
 static int
 affs_remove_link(struct dentry *dentry)
 {
-	struct inode *dir, *inode = dentry->d_inode;
+	struct inode *dir, *inode = d_inode(dentry);
 	struct super_block *sb = inode->i_sb;
-	struct buffer_head *bh = NULL, *link_bh = NULL;
+	struct buffer_head *bh, *link_bh = NULL;
 	u32 link_ino, ino;
 	int retval;
 
@@ -268,11 +269,11 @@ affs_remove_header(struct dentry *dentry)
 	struct buffer_head *bh = NULL;
 	int retval;
 
-	dir = dentry->d_parent->d_inode;
+	dir = d_inode(dentry->d_parent);
 	sb = dir->i_sb;
 
 	retval = -ENOENT;
-	inode = dentry->d_inode;
+	inode = d_inode(dentry);
 	if (!inode)
 		goto done;
 
@@ -366,22 +367,22 @@ affs_fix_checksum(struct super_block *sb, struct buffer_head *bh)
 }
 
 void
-secs_to_datestamp(time_t secs, struct affs_date *ds)
+secs_to_datestamp(time64_t secs, struct affs_date *ds)
 {
 	u32	 days;
 	u32	 minute;
+	s32	 rem;
 
 	secs -= sys_tz.tz_minuteswest * 60 + ((8 * 365 + 2) * 24 * 60 * 60);
 	if (secs < 0)
 		secs = 0;
-	days    = secs / 86400;
-	secs   -= days * 86400;
-	minute  = secs / 60;
-	secs   -= minute * 60;
+	days    = div_s64_rem(secs, 86400, &rem);
+	minute  = rem / 60;
+	rem    -= minute * 60;
 
 	ds->days = cpu_to_be32(days);
 	ds->mins = cpu_to_be32(minute);
-	ds->ticks = cpu_to_be32(secs * 50);
+	ds->ticks = cpu_to_be32(rem * 50);
 }
 
 umode_t
@@ -471,9 +472,9 @@ affs_warning(struct super_block *sb, const char *function, const char *fmt, ...)
 bool
 affs_nofilenametruncate(const struct dentry *dentry)
 {
-	struct inode *inode = dentry->d_inode;
-	return AFFS_SB(inode->i_sb)->s_flags & SF_NO_TRUNCATE;
+	struct inode *inode = d_inode(dentry);
 
+	return affs_test_opt(AFFS_SB(inode->i_sb)->s_flags, SF_NO_TRUNCATE);
 }
 
 /* Check if the name is valid for a affs object. */
@@ -483,11 +484,10 @@ affs_check_name(const unsigned char *name, int len, bool notruncate)
 {
 	int	 i;
 
-	if (len > 30) {
+	if (len > AFFSNAMEMAX) {
 		if (notruncate)
 			return -ENAMETOOLONG;
-		else
-			len = 30;
+		len = AFFSNAMEMAX;
 	}
 	for (i = 0; i < len; i++) {
 		if (name[i] < ' ' || name[i] == ':'
@@ -508,7 +508,7 @@ affs_check_name(const unsigned char *name, int len, bool notruncate)
 int
 affs_copy_name(unsigned char *bstr, struct dentry *dentry)
 {
-	int len = min(dentry->d_name.len, 30u);
+	u32 len = min(dentry->d_name.len, AFFSNAMEMAX);
 
 	*bstr++ = len;
 	memcpy(bstr, dentry->d_name.name, len);

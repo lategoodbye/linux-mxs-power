@@ -106,9 +106,10 @@ static void ima_rdwr_violation_check(struct file *file,
 	*pathname = ima_d_path(&file->f_path, pathbuf);
 
 	if (send_tomtou)
-		ima_add_violation(file, *pathname, "invalid_pcr", "ToMToU");
+		ima_add_violation(file, *pathname, iint,
+				  "invalid_pcr", "ToMToU");
 	if (send_writers)
-		ima_add_violation(file, *pathname,
+		ima_add_violation(file, *pathname, iint,
 				  "invalid_pcr", "open_writers");
 }
 
@@ -120,7 +121,7 @@ static void ima_check_last_writer(struct integrity_iint_cache *iint,
 	if (!(mode & FMODE_WRITE))
 		return;
 
-	mutex_lock(&inode->i_mutex);
+	inode_lock(inode);
 	if (atomic_read(&inode->i_writecount) == 1) {
 		if ((iint->version != inode->i_version) ||
 		    (iint->flags & IMA_NEW_FILE)) {
@@ -129,7 +130,7 @@ static void ima_check_last_writer(struct integrity_iint_cache *iint,
 				ima_update_xattr(iint, file);
 		}
 	}
-	mutex_unlock(&inode->i_mutex);
+	inode_unlock(inode);
 }
 
 /**
@@ -185,7 +186,7 @@ static int process_measurement(struct file *file, int mask, int function,
 	if (action & IMA_FILE_APPRAISE)
 		function = FILE_CHECK;
 
-	mutex_lock(&inode->i_mutex);
+	inode_lock(inode);
 
 	if (action) {
 		iint = integrity_inode_get(inode);
@@ -249,7 +250,7 @@ out_free:
 	if (pathbuf)
 		__putname(pathbuf);
 out:
-	mutex_unlock(&inode->i_mutex);
+	inode_unlock(inode);
 	if ((rc && must_appraise) && (ima_appraise & IMA_APPRAISE_ENFORCE))
 		return -EACCES;
 	return 0;

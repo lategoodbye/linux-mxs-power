@@ -400,10 +400,63 @@ skip_feed_stop:
 	return ret;
 }
 
+static int dvb_usbv2_media_device_init(struct dvb_usb_adapter *adap)
+{
+#ifdef CONFIG_MEDIA_CONTROLLER_DVB
+	struct media_device *mdev;
+	struct dvb_usb_device *d = adap_to_d(adap);
+	struct usb_device *udev = d->udev;
+
+	mdev = kzalloc(sizeof(*mdev), GFP_KERNEL);
+	if (!mdev)
+		return -ENOMEM;
+
+	mdev->dev = &udev->dev;
+	strlcpy(mdev->model, d->name, sizeof(mdev->model));
+	if (udev->serial)
+		strlcpy(mdev->serial, udev->serial, sizeof(mdev->serial));
+	strcpy(mdev->bus_info, udev->devpath);
+	mdev->hw_revision = le16_to_cpu(udev->descriptor.bcdDevice);
+	mdev->driver_version = LINUX_VERSION_CODE;
+
+	media_device_init(mdev);
+
+	dvb_register_media_controller(&adap->dvb_adap, mdev);
+
+	dev_info(&d->udev->dev, "media controller created\n");
+#endif
+	return 0;
+}
+
+static int dvb_usbv2_media_device_register(struct dvb_usb_adapter *adap)
+{
+#ifdef CONFIG_MEDIA_CONTROLLER_DVB
+	return media_device_register(adap->dvb_adap.mdev);
+#else
+	return 0;
+#endif
+}
+
+static void dvb_usbv2_media_device_unregister(struct dvb_usb_adapter *adap)
+{
+#ifdef CONFIG_MEDIA_CONTROLLER_DVB
+
+	if (!adap->dvb_adap.mdev)
+		return;
+
+	media_device_unregister(adap->dvb_adap.mdev);
+	media_device_cleanup(adap->dvb_adap.mdev);
+	kfree(adap->dvb_adap.mdev);
+	adap->dvb_adap.mdev = NULL;
+
+#endif
+}
+
 static int dvb_usbv2_adapter_dvb_init(struct dvb_usb_adapter *adap)
 {
 	int ret;
 	struct dvb_usb_device *d = adap_to_d(adap);
+
 	dev_dbg(&d->udev->dev, "%s: adap=%d\n", __func__, adap->id);
 
 	ret = dvb_register_adapter(&adap->dvb_adap, d->name, d->props->owner,
@@ -415,6 +468,13 @@ static int dvb_usbv2_adapter_dvb_init(struct dvb_usb_adapter *adap)
 	}
 
 	adap->dvb_adap.priv = adap;
+
+	ret = dvb_usbv2_media_device_init(adap);
+	if (ret < 0) {
+		dev_dbg(&d->udev->dev, "%s: dvb_usbv2_media_device_init() failed=%d\n",
+				__func__, ret);
+		goto err_dvb_register_mc;
+	}
 
 	if (d->props->read_mac_address) {
 		ret = d->props->read_mac_address(adap,
@@ -464,6 +524,8 @@ err_dvb_net_init:
 err_dvb_dmxdev_init:
 	dvb_dmx_release(&adap->demux);
 err_dvb_dmx_init:
+	dvb_usbv2_media_device_unregister(adap);
+err_dvb_register_mc:
 	dvb_unregister_adapter(&adap->dvb_adap);
 err_dvb_register_adapter:
 	adap->dvb_adap.priv = NULL;
@@ -643,7 +705,13 @@ static int dvb_usbv2_adapter_frontend_init(struct dvb_usb_adapter *adap)
 		}
 	}
 
-	return 0;
+	ret = dvb_create_media_graph(&adap->dvb_adap, true);
+	if (ret < 0)
+		goto err_dvb_unregister_frontend;
+
+	ret = dvb_usbv2_media_device_register(adap);
+
+	return ret;
 
 err_dvb_unregister_frontend:
 	for (i = count_registered - 1; i >= 0; i--)
@@ -783,6 +851,7 @@ static int dvb_usbv2_adapter_exit(struct dvb_usb_device *d)
 			dvb_usbv2_adapter_dvb_exit(&d->adapter[i]);
 			dvb_usbv2_adapter_stream_exit(&d->adapter[i]);
 			dvb_usbv2_adapter_frontend_exit(&d->adapter[i]);
+			dvb_usbv2_media_device_unregister(&d->adapter[i]);
 		}
 	}
 
@@ -868,6 +937,7 @@ int dvb_usbv2_probe(struct usb_interface *intf,
 		goto err;
 	}
 
+	d->intf = intf;
 	d->name = driver_info->name;
 	d->rc_map = driver_info->rc_map;
 	d->udev = udev;
@@ -954,6 +1024,7 @@ void dvb_usbv2_disconnect(struct usb_interface *intf)
 	struct dvb_usb_device *d = usb_get_intfdata(intf);
 	const char *name = d->name;
 	struct device dev = d->udev->dev;
+
 	dev_dbg(&d->udev->dev, "%s: bInterfaceNumber=%d\n", __func__,
 			intf->cur_altsetting->desc.bInterfaceNumber);
 

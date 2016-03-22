@@ -87,11 +87,7 @@ static void pgd_ctor(void *addr)
 
 static void pmd_ctor(void *addr)
 {
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	memset(addr, 0, PMD_TABLE_SIZE * 2);
-#else
 	memset(addr, 0, PMD_TABLE_SIZE);
-#endif
 }
 
 struct kmem_cache *pgtable_cache[MAX_PGTABLE_INDEX_SIZE];
@@ -132,6 +128,7 @@ void pgtable_cache_add(unsigned shift, void (*ctor)(void *))
 	align = max_t(unsigned long, align, minalign);
 	name = kasprintf(GFP_KERNEL, "pgtable-2^%d", shift);
 	new = kmem_cache_create(name, table_size, align, 0, ctor);
+	kfree(name);
 	pgtable_cache[shift - 1] = new;
 	pr_debug("Allocated pgtable cache for order %d\n", shift);
 }

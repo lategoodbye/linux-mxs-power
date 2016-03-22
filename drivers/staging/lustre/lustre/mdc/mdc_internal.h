@@ -27,7 +27,7 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, Intel Corporation.
+ * Copyright (c) 2011, 2015 Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -40,27 +40,16 @@
 #include "../include/lustre_mdc.h"
 #include "../include/lustre_mds.h"
 
-#if defined CONFIG_PROC_FS
 void lprocfs_mdc_init_vars(struct lprocfs_static_vars *lvars);
-#else
-static inline void lprocfs_mdc_init_vars(struct lprocfs_static_vars *lvars)
-{
-	memset(lvars, 0, sizeof(*lvars));
-}
-#endif
 
 void mdc_pack_body(struct ptlrpc_request *req, const struct lu_fid *fid,
-		   struct obd_capa *oc, __u64 valid, int ea_size,
-		   __u32 suppgid, int flags);
-void mdc_pack_capa(struct ptlrpc_request *req,
-		   const struct req_msg_field *field, struct obd_capa *oc);
-int mdc_pack_req(struct ptlrpc_request *req, int version, int opc);
+		   __u64 valid, int ea_size, __u32 suppgid, int flags);
 void mdc_is_subdir_pack(struct ptlrpc_request *req, const struct lu_fid *pfid,
 			const struct lu_fid *cfid, int flags);
 void mdc_swap_layouts_pack(struct ptlrpc_request *req,
 			   struct md_op_data *op_data);
 void mdc_readdir_pack(struct ptlrpc_request *req, __u64 pgoff, __u32 size,
-		      const struct lu_fid *fid, struct obd_capa *oc);
+		      const struct lu_fid *fid);
 void mdc_getattr_pack(struct ptlrpc_request *req, __u64 valid, int flags,
 		      struct md_op_data *data, int ea_size);
 void mdc_setattr_pack(struct ptlrpc_request *req, struct md_op_data *op_data,
@@ -72,7 +61,6 @@ void mdc_open_pack(struct ptlrpc_request *req, struct md_op_data *op_data,
 		   __u32 mode, __u64 rdev, __u64 flags, const void *data,
 		   int datalen);
 void mdc_unlink_pack(struct ptlrpc_request *req, struct md_op_data *op_data);
-void mdc_getxattr_pack(struct ptlrpc_request *req, struct md_op_data *op_data);
 void mdc_link_pack(struct ptlrpc_request *req, struct md_op_data *op_data);
 void mdc_rename_pack(struct ptlrpc_request *req, struct md_op_data *op_data,
 		     const char *old, int oldlen, const char *new, int newlen);
@@ -107,25 +95,12 @@ int mdc_resource_get_unused(struct obd_export *exp, const struct lu_fid *fid,
 /* mdc/mdc_request.c */
 int mdc_fid_alloc(struct obd_export *exp, struct lu_fid *fid,
 		  struct md_op_data *op_data);
-
-int mdc_open(struct obd_export *exp, u64 ino, int type, int flags,
-	     struct lov_mds_md *lmm, int lmm_size, struct lustre_handle *fh,
-	     struct ptlrpc_request **);
-
 struct obd_client_handle;
-
-int mdc_get_lustre_md(struct obd_export *md_exp, struct ptlrpc_request *req,
-		      struct obd_export *dt_exp, struct obd_export *lmv_exp,
-		      struct lustre_md *md);
-
-int mdc_free_lustre_md(struct obd_export *exp, struct lustre_md *md);
 
 int mdc_set_open_replay_data(struct obd_export *exp,
 			     struct obd_client_handle *och,
 			     struct lookup_intent *it);
 
-int mdc_clear_open_replay_data(struct obd_export *exp,
-			       struct obd_client_handle *och);
 void mdc_commit_open(struct ptlrpc_request *req);
 void mdc_replay_open(struct ptlrpc_request *req);
 
@@ -146,17 +121,6 @@ int mdc_unlink(struct obd_export *exp, struct md_op_data *op_data,
 int mdc_cancel_unused(struct obd_export *exp, const struct lu_fid *fid,
 		      ldlm_policy_data_t *policy, ldlm_mode_t mode,
 		      ldlm_cancel_flags_t flags, void *opaque);
-
-static inline void mdc_set_capa_size(struct ptlrpc_request *req,
-				     const struct req_msg_field *field,
-				     struct obd_capa *oc)
-{
-	if (oc == NULL)
-		req_capsule_set_size(&req->rq_pill, field, RCL_CLIENT, 0);
-	else
-		/* it is already calculated as sizeof struct obd_capa */
-		;
-}
 
 int mdc_revalidate_lock(struct obd_export *exp, struct lookup_intent *it,
 			struct lu_fid *fid, __u64 *bits);

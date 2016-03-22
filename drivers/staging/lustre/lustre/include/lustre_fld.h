@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2013, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -61,7 +61,6 @@ enum {
 	LUSTRE_CLI_FLD_HASH_RRB
 };
 
-
 struct lu_fld_target {
 	struct list_head	       ft_chain;
 	struct obd_export       *ft_exp;
@@ -70,14 +69,6 @@ struct lu_fld_target {
 };
 
 struct lu_server_fld {
-	/**
-	 * Fld dir proc entry. */
-	struct proc_dir_entry    *lsf_proc_dir;
-
-	/**
-	 * /fld file object device */
-	struct dt_object	*lsf_obj;
-
 	/**
 	 * super sequence controller export, needed to forward fld
 	 * lookup  request. */
@@ -93,14 +84,14 @@ struct lu_server_fld {
 
 	/**
 	 * Fld service name in form "fld-srv-lustre-MDTXXX" */
-	char		     lsf_name[80];
+	char		     lsf_name[LUSTRE_MDT_MAXNAMELEN];
 
 };
 
 struct lu_client_fld {
 	/**
-	 * Client side proc entry. */
-	struct proc_dir_entry    *lcf_proc_dir;
+	 * Client side debugfs entry. */
+	struct dentry		*lcf_debugfs_entry;
 
 	/**
 	 * List of exports client FLD knows about. */
@@ -123,10 +114,10 @@ struct lu_client_fld {
 	struct fld_cache	*lcf_cache;
 
 	/**
-	 * Client fld proc entry name. */
-	char		     lcf_name[80];
+	 * Client fld debugfs entry name. */
+	char			 lcf_name[LUSTRE_MDT_MAXNAMELEN];
 
-	int		      lcf_flags;
+	int			 lcf_flags;
 };
 
 /* Client methods */
@@ -153,7 +144,7 @@ int fld_client_add_target(struct lu_client_fld *fld,
 int fld_client_del_target(struct lu_client_fld *fld,
 			  __u64 idx);
 
-void fld_client_proc_fini(struct lu_client_fld *fld);
+void fld_client_debugfs_fini(struct lu_client_fld *fld);
 
 /** @} fld */
 

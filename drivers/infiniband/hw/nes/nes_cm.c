@@ -134,7 +134,7 @@ static void record_ird_ord(struct nes_cm_node *, u16, u16);
 /* External CM API Interface */
 /* instance of function pointers for client API */
 /* set address of this instance to cm_core->cm_ops at cm_core alloc */
-static struct nes_cm_ops nes_cm_api = {
+static const struct nes_cm_ops nes_cm_api = {
 	mini_cm_accelerated,
 	mini_cm_listen,
 	mini_cm_del_listen,
@@ -596,27 +596,52 @@ static void nes_form_reg_msg(struct nes_vnic *nesvnic,
 	memcpy(pm_msg->if_name, nesvnic->netdev->name, IWPM_IFNAME_SIZE);
 }
 
+static void record_sockaddr_info(struct sockaddr_storage *addr_info,
+					nes_addr_t *ip_addr, u16 *port_num)
+{
+	struct sockaddr_in *in_addr = (struct sockaddr_in *)addr_info;
+
+	if (in_addr->sin_family == AF_INET) {
+		*ip_addr = ntohl(in_addr->sin_addr.s_addr);
+		*port_num = ntohs(in_addr->sin_port);
+	}
+}
+
 /*
  * nes_record_pm_msg - Save the received mapping info
  */
 static void nes_record_pm_msg(struct nes_cm_info *cm_info,
 			struct iwpm_sa_data *pm_msg)
 {
-	struct sockaddr_in *mapped_loc_addr =
-			(struct sockaddr_in *)&pm_msg->mapped_loc_addr;
-	struct sockaddr_in *mapped_rem_addr =
-			(struct sockaddr_in *)&pm_msg->mapped_rem_addr;
+	record_sockaddr_info(&pm_msg->mapped_loc_addr,
+		&cm_info->mapped_loc_addr, &cm_info->mapped_loc_port);
 
-	if (mapped_loc_addr->sin_family == AF_INET) {
-		cm_info->mapped_loc_addr =
-			ntohl(mapped_loc_addr->sin_addr.s_addr);
-		cm_info->mapped_loc_port = ntohs(mapped_loc_addr->sin_port);
-	}
-	if (mapped_rem_addr->sin_family == AF_INET) {
-		cm_info->mapped_rem_addr =
-			ntohl(mapped_rem_addr->sin_addr.s_addr);
-		cm_info->mapped_rem_port = ntohs(mapped_rem_addr->sin_port);
-	}
+	record_sockaddr_info(&pm_msg->mapped_rem_addr,
+		&cm_info->mapped_rem_addr, &cm_info->mapped_rem_port);
+}
+
+/*
+ * nes_get_reminfo - Get the address info of the remote connecting peer
+ */
+static int nes_get_remote_addr(struct nes_cm_node *cm_node)
+{
+	struct sockaddr_storage mapped_loc_addr, mapped_rem_addr;
+	struct sockaddr_storage remote_addr;
+	int ret;
+
+	nes_create_sockaddr(htonl(cm_node->mapped_loc_addr),
+			htons(cm_node->mapped_loc_port), &mapped_loc_addr);
+	nes_create_sockaddr(htonl(cm_node->mapped_rem_addr),
+			htons(cm_node->mapped_rem_port), &mapped_rem_addr);
+
+	ret = iwpm_get_remote_info(&mapped_loc_addr, &mapped_rem_addr,
+				&remote_addr, RDMA_NL_NES);
+	if (ret)
+		nes_debug(NES_DBG_CM, "Unable to find remote peer address info\n");
+	else
+		record_sockaddr_info(&remote_addr, &cm_node->rem_addr,
+				&cm_node->rem_port);
+	return ret;
 }
 
 /**
@@ -1495,8 +1520,9 @@ static int nes_addr_resolve_neigh(struct nes_vnic *nesvnic, u32 dst_ip, int arpi
 	int rc = arpindex;
 	struct net_device *netdev;
 	struct nes_adapter *nesadapter = nesvnic->nesdev->nesadapter;
+	__be32 dst_ipaddr = htonl(dst_ip);
 
-	rt = ip_route_output(&init_net, htonl(dst_ip), 0, 0, 0);
+	rt = ip_route_output(&init_net, dst_ipaddr, nesvnic->local_ipaddr, 0, 0);
 	if (IS_ERR(rt)) {
 		printk(KERN_ERR "%s: ip_route_output_key failed for 0x%08X\n",
 		       __func__, dst_ip);
@@ -1508,7 +1534,7 @@ static int nes_addr_resolve_neigh(struct nes_vnic *nesvnic, u32 dst_ip, int arpi
 	else
 		netdev = nesvnic->netdev;
 
-	neigh = neigh_lookup(&arp_tbl, &rt->rt_gateway, netdev);
+	neigh = dst_neigh_lookup(&rt->dst, &dst_ipaddr);
 
 	rcu_read_lock();
 	if (neigh) {
@@ -1566,9 +1592,14 @@ static struct nes_cm_node *make_cm_node(struct nes_cm_core *cm_core,
 		return NULL;
 
 	/* set our node specific transport info */
-	cm_node->loc_addr = cm_info->loc_addr;
+	if (listener) {
+		cm_node->loc_addr = listener->loc_addr;
+		cm_node->loc_port = listener->loc_port;
+	} else {
+		cm_node->loc_addr = cm_info->loc_addr;
+		cm_node->loc_port = cm_info->loc_port;
+	}
 	cm_node->rem_addr = cm_info->rem_addr;
-	cm_node->loc_port = cm_info->loc_port;
 	cm_node->rem_port = cm_info->rem_port;
 
 	cm_node->mapped_loc_addr = cm_info->mapped_loc_addr;
@@ -1586,6 +1617,8 @@ static struct nes_cm_node *make_cm_node(struct nes_cm_core *cm_core,
 		  &cm_node->loc_addr, cm_node->loc_port,
 		  &cm_node->rem_addr, cm_node->rem_port);
 	cm_node->listener = listener;
+	if (listener)
+		cm_node->tos = listener->tos;
 	cm_node->netdev = nesvnic->netdev;
 	cm_node->cm_id = cm_info->cm_id;
 	memcpy(cm_node->loc_mac, nesvnic->netdev->dev_addr, ETH_ALEN);
@@ -2151,6 +2184,7 @@ static int handle_ack_pkt(struct nes_cm_node *cm_node, struct sk_buff *skb,
 		cm_node->state = NES_CM_STATE_ESTABLISHED;
 		if (datasize) {
 			cm_node->tcp_cntxt.rcv_nxt = inc_sequence + datasize;
+			nes_get_remote_addr(cm_node);
 			handle_rcv_mpa(cm_node, skb);
 		} else { /* rcvd ACK only */
 			dev_kfree_skb_any(skb);
@@ -2907,6 +2941,9 @@ static int nes_cm_init_tsa_conn(struct nes_qp *nesqp, struct nes_cm_node *cm_nod
 
 	nesqp->nesqp_context->misc2 |= cpu_to_le32(64 << NES_QPCONTEXT_MISC2_TTL_SHIFT);
 
+	nesqp->nesqp_context->misc2 |= cpu_to_le32(
+		cm_node->tos << NES_QPCONTEXT_MISC2_TOS_SHIFT);
+
 	nesqp->nesqp_context->mss |= cpu_to_le32(((u32)cm_node->tcp_cntxt.mss) << 16);
 
 	nesqp->nesqp_context->tcp_state_flow_label |= cpu_to_le32(
@@ -3195,7 +3232,6 @@ int nes_accept(struct iw_cm_id *cm_id, struct iw_cm_conn_param *conn_param)
 	int passive_state;
 	struct nes_ib_device *nesibdev;
 	struct ib_mr *ibmr = NULL;
-	struct ib_phys_buf ibphysbuf;
 	struct nes_pd *nespd;
 	u64 tagged_offset;
 	u8 mpa_frame_offset = 0;
@@ -3279,21 +3315,19 @@ int nes_accept(struct iw_cm_id *cm_id, struct iw_cm_conn_param *conn_param)
 		u64temp = (unsigned long)nesqp;
 		nesibdev = nesvnic->nesibdev;
 		nespd = nesqp->nespd;
-		ibphysbuf.addr = nesqp->ietf_frame_pbase + mpa_frame_offset;
-		ibphysbuf.size = buff_len;
 		tagged_offset = (u64)(unsigned long)*start_buff;
-		ibmr = nesibdev->ibdev.reg_phys_mr((struct ib_pd *)nespd,
-						   &ibphysbuf, 1,
-						   IB_ACCESS_LOCAL_WRITE,
-						   &tagged_offset);
-		if (!ibmr) {
+		ibmr = nes_reg_phys_mr(&nespd->ibpd,
+				nesqp->ietf_frame_pbase + mpa_frame_offset,
+				buff_len, IB_ACCESS_LOCAL_WRITE,
+				&tagged_offset);
+		if (IS_ERR(ibmr)) {
 			nes_debug(NES_DBG_CM, "Unable to register memory region"
 				  "for lSMM for cm_node = %p \n",
 				  cm_node);
 			pci_free_consistent(nesdev->pcidev,
 					    nesqp->private_data_len + nesqp->ietf_frame_size,
 					    nesqp->ietf_frame, nesqp->ietf_frame_pbase);
-			return -ENOMEM;
+			return PTR_ERR(ibmr);
 		}
 
 		ibmr->pd = &nespd->ibpd;
@@ -3581,6 +3615,7 @@ int nes_connect(struct iw_cm_id *cm_id, struct iw_cm_conn_param *conn_param)
 		cm_node->ord_size = 1;
 
 	cm_node->apbvt_set = apbvt_set;
+	cm_node->tos = cm_id->tos;
 	nesqp->cm_node = cm_node;
 	cm_node->nesqp = nesqp;
 	nes_add_ref(&nesqp->ibqp);
@@ -3635,6 +3670,7 @@ int nes_create_listen(struct iw_cm_id *cm_id, int backlog)
 	}
 
 	cm_id->provider_data = cm_node;
+	cm_node->tos = cm_id->tos;
 
 	if (!cm_node->reused_node) {
 		if (nes_create_mapinfo(&cm_info))

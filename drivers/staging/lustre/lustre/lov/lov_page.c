@@ -27,7 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -208,7 +208,6 @@ out:
 	return rc;
 }
 
-
 static const struct cl_page_operations lov_empty_page_ops = {
 	.cpo_fini   = lov_empty_page_fini,
 	.cpo_print  = lov_page_print
@@ -227,6 +226,5 @@ int lov_page_init_empty(const struct lu_env *env, struct cl_object *obj,
 	cl_page_export(env, page, 1);
 	return 0;
 }
-
 
 /** @} lov */

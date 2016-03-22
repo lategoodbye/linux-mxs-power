@@ -323,8 +323,6 @@ EXPORT_SYMBOL(mipi_dsi_packet_format_is_long);
 int mipi_dsi_create_packet(struct mipi_dsi_packet *packet,
 			   const struct mipi_dsi_msg *msg)
 {
-	const u8 *tx = msg->tx_buf;
-
 	if (!packet || !msg)
 		return -EINVAL;
 
@@ -353,8 +351,10 @@ int mipi_dsi_create_packet(struct mipi_dsi_packet *packet,
 		packet->header[2] = (msg->tx_len >> 8) & 0xff;
 
 		packet->payload_length = msg->tx_len;
-		packet->payload = tx;
+		packet->payload = msg->tx_buf;
 	} else {
+		const u8 *tx = msg->tx_buf;
+
 		packet->header[1] = (msg->tx_len > 0) ? tx[0] : 0;
 		packet->header[2] = (msg->tx_len > 1) ? tx[1] : 0;
 	}
@@ -364,6 +364,44 @@ int mipi_dsi_create_packet(struct mipi_dsi_packet *packet,
 	return 0;
 }
 EXPORT_SYMBOL(mipi_dsi_create_packet);
+
+/**
+ * mipi_dsi_shutdown_peripheral() - sends a Shutdown Peripheral command
+ * @dsi: DSI peripheral device
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int mipi_dsi_shutdown_peripheral(struct mipi_dsi_device *dsi)
+{
+	struct mipi_dsi_msg msg = {
+		.channel = dsi->channel,
+		.type = MIPI_DSI_SHUTDOWN_PERIPHERAL,
+		.tx_buf = (u8 [2]) { 0, 0 },
+		.tx_len = 2,
+	};
+
+	return mipi_dsi_device_transfer(dsi, &msg);
+}
+EXPORT_SYMBOL(mipi_dsi_shutdown_peripheral);
+
+/**
+ * mipi_dsi_turn_on_peripheral() - sends a Turn On Peripheral command
+ * @dsi: DSI peripheral device
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int mipi_dsi_turn_on_peripheral(struct mipi_dsi_device *dsi)
+{
+	struct mipi_dsi_msg msg = {
+		.channel = dsi->channel,
+		.type = MIPI_DSI_TURN_ON_PERIPHERAL,
+		.tx_buf = (u8 [2]) { 0, 0 },
+		.tx_len = 2,
+	};
+
+	return mipi_dsi_device_transfer(dsi, &msg);
+}
+EXPORT_SYMBOL(mipi_dsi_turn_on_peripheral);
 
 /*
  * mipi_dsi_set_maximum_return_packet_size() - specify the maximum size of the

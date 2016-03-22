@@ -6,11 +6,11 @@
 #include "perf.h"
 #include "util/cache.h"
 #include "builtin.h"
-#include "util/exec_cmd.h"
+#include <subcmd/exec-cmd.h>
 #include "common-cmds.h"
-#include "util/parse-options.h"
-#include "util/run-command.h"
-#include "util/help.h"
+#include <subcmd/parse-options.h>
+#include <subcmd/run-command.h>
+#include <subcmd/help.h>
 #include "util/debug.h"
 
 static struct man_viewer_list {
@@ -407,7 +407,7 @@ static int get_html_page_path(struct strbuf *page_path, const char *page)
 #ifndef open_html
 static void open_html(const char *path)
 {
-	execl_perf_cmd("web--browse", "-c", "help.browser", path, NULL);
+	execl_cmd("web--browse", "-c", "help.browser", path, NULL);
 }
 #endif
 
@@ -437,7 +437,18 @@ int cmd_help(int argc, const char **argv, const char *prefix __maybe_unused)
 			HELP_FORMAT_INFO),
 	OPT_END(),
 	};
-	const char * const builtin_help_usage[] = {
+	const char * const builtin_help_subcommands[] = {
+		"buildid-cache", "buildid-list", "diff", "evlist", "help", "list",
+		"record", "report", "bench", "stat", "timechart", "top", "annotate",
+		"script", "sched", "kmem", "lock", "kvm", "test", "inject", "mem", "data",
+#ifdef HAVE_LIBELF_SUPPORT
+		"probe",
+#endif
+#ifdef HAVE_LIBAUDIT_SUPPORT
+		"trace",
+#endif
+	NULL };
+	const char *builtin_help_usage[] = {
 		"perf help [--all] [--man|--web|--info] [command]",
 		NULL
 	};
@@ -448,11 +459,11 @@ int cmd_help(int argc, const char **argv, const char *prefix __maybe_unused)
 
 	perf_config(perf_help_config, &help_format);
 
-	argc = parse_options(argc, argv, builtin_help_options,
-			builtin_help_usage, 0);
+	argc = parse_options_subcommand(argc, argv, builtin_help_options,
+			builtin_help_subcommands, builtin_help_usage, 0);
 
 	if (show_all) {
-		printf("\n usage: %s\n\n", perf_usage_string);
+		printf("\n Usage: %s\n\n", perf_usage_string);
 		list_commands("perf commands", &main_cmds, &other_cmds);
 		printf(" %s\n\n", perf_more_info_string);
 		return 0;

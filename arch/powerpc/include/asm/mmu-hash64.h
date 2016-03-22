@@ -14,13 +14,14 @@
 
 #include <asm/asm-compat.h>
 #include <asm/page.h>
+#include <asm/bug.h>
 
 /*
  * This is necessary to get the definition of PGTABLE_RANGE which we
  * need for various slices related matters. Note that this isn't the
  * complete pgtable.h but only a portion of it.
  */
-#include <asm/pgtable-ppc64.h>
+#include <asm/book3s/64/pgtable.h>
 #include <asm/bug.h>
 #include <asm/processor.h>
 
@@ -112,6 +113,7 @@
 #define TLBIEL_INVAL_SET_SHIFT	12
 
 #define POWER7_TLB_SETS		128	/* # sets in POWER7 TLB */
+#define POWER8_TLB_SETS		512	/* # sets in POWER8 TLB */
 
 #ifndef __ASSEMBLY__
 
@@ -534,6 +536,9 @@ typedef struct {
 #ifdef CONFIG_PPC_64K_PAGES
 	/* for 4K PTE fragment support */
 	void *pte_frag;
+#endif
+#ifdef CONFIG_SPAPR_TCE_IOMMU
+	struct list_head iommu_group_mem_list;
 #endif
 } mm_context_t;
 

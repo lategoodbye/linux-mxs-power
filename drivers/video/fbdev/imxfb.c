@@ -170,7 +170,7 @@ struct imxfb_info {
 	struct regulator	*lcd_pwr;
 };
 
-static struct platform_device_id imxfb_devtype[] = {
+static const struct platform_device_id imxfb_devtype[] = {
 	{
 		.name = "imx1-fb",
 		.driver_data = IMX1_FB,
@@ -183,7 +183,7 @@ static struct platform_device_id imxfb_devtype[] = {
 };
 MODULE_DEVICE_TABLE(platform, imxfb_devtype);
 
-static struct of_device_id imxfb_of_dev_id[] = {
+static const struct of_device_id imxfb_of_dev_id[] = {
 	{
 		.compatible = "fsl,imx1-fb",
 		.data = &imxfb_devtype[IMX1_FB],
@@ -901,6 +901,21 @@ static int imxfb_probe(struct platform_device *pdev)
 		ret = PTR_ERR(fbi->clk_ipg);
 		goto failed_getclock;
 	}
+
+	/*
+	 * The LCDC controller does not have an enable bit. The
+	 * controller starts directly when the clocks are enabled.
+	 * If the clocks are enabled when the controller is not yet
+	 * programmed with proper register values (enabled at the
+	 * bootloader, for example) then it just goes into some undefined
+	 * state.
+	 * To avoid this issue, let's enable and disable LCDC IPG clock
+	 * so that we force some kind of 'reset' to the LCDC block.
+	 */
+	ret = clk_prepare_enable(fbi->clk_ipg);
+	if (ret)
+		goto failed_getclock;
+	clk_disable_unprepare(fbi->clk_ipg);
 
 	fbi->clk_ahb = devm_clk_get(&pdev->dev, "ahb");
 	if (IS_ERR(fbi->clk_ahb)) {

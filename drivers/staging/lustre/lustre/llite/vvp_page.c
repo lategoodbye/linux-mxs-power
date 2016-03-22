@@ -27,7 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -40,7 +40,6 @@
  */
 
 #define DEBUG_SUBSYSTEM S_LLITE
-
 
 #include "../include/obd.h"
 #include "../include/lustre_lite.h"
@@ -227,11 +226,16 @@ static int vvp_page_prep_write(const struct lu_env *env,
 			       struct cl_io *unused)
 {
 	struct page *vmpage = cl2vm_page(slice);
+	struct cl_page *pg = slice->cpl_page;
 
 	LASSERT(PageLocked(vmpage));
 	LASSERT(!PageDirty(vmpage));
 
-	set_page_writeback(vmpage);
+	/* ll_writepage path is not a sync write, so need to set page writeback
+	 * flag */
+	if (!pg->cp_sync_io)
+		set_page_writeback(vmpage);
+
 	vvp_write_pending(cl2ccc(slice->cpl_obj), cl2ccc_page(slice));
 
 	return 0;
@@ -298,9 +302,6 @@ static void vvp_page_completion_write(const struct lu_env *env,
 	struct cl_page  *pg     = slice->cpl_page;
 	struct page      *vmpage = cp->cpg_page;
 
-	LASSERT(ergo(pg->cp_sync_io != NULL, PageLocked(vmpage)));
-	LASSERT(PageWriteback(vmpage));
-
 	CL_PAGE_HEADER(D_PAGE, env, pg, "completing WRITE with %d\n", ioret);
 
 	/*
@@ -316,14 +317,19 @@ static void vvp_page_completion_write(const struct lu_env *env,
 	cp->cpg_write_queued = 0;
 	vvp_write_complete(cl2ccc(slice->cpl_obj), cp);
 
-	/*
-	 * Only mark the page error only when it's an async write because
-	 * applications won't wait for IO to finish.
-	 */
-	if (pg->cp_sync_io == NULL)
+	if (pg->cp_sync_io != NULL) {
+		LASSERT(PageLocked(vmpage));
+		LASSERT(!PageWriteback(vmpage));
+	} else {
+		LASSERT(PageWriteback(vmpage));
+		/*
+		 * Only mark the page error only when it's an async write
+		 * because applications won't wait for IO to finish.
+		 */
 		vvp_vmpage_error(ccc_object_inode(pg->cp_obj), vmpage, ioret);
 
-	end_page_writeback(vmpage);
+		end_page_writeback(vmpage);
+	}
 }
 
 /**
@@ -422,7 +428,7 @@ static void vvp_transient_page_verify(const struct cl_page *page)
 {
 	struct inode *inode = ccc_object_inode(page->cp_obj);
 
-	LASSERT(!mutex_trylock(&inode->i_mutex));
+	LASSERT(!inode_trylock(inode));
 }
 
 static int vvp_transient_page_own(const struct lu_env *env,
@@ -474,9 +480,9 @@ static int vvp_transient_page_is_vmlocked(const struct lu_env *env,
 	struct inode    *inode = ccc_object_inode(slice->cpl_obj);
 	int	locked;
 
-	locked = !mutex_trylock(&inode->i_mutex);
+	locked = !inode_trylock(inode);
 	if (!locked)
-		mutex_unlock(&inode->i_mutex);
+		inode_unlock(inode);
 	return locked ? -EBUSY : -ENODATA;
 }
 
@@ -496,7 +502,7 @@ static void vvp_transient_page_fini(const struct lu_env *env,
 	struct ccc_object *clobj = cl2ccc(clp->cp_obj);
 
 	vvp_page_fini_common(cp);
-	LASSERT(!mutex_trylock(&clobj->cob_inode->i_mutex));
+	LASSERT(!inode_trylock(clobj->cob_inode));
 	clobj->cob_transient_pages--;
 }
 
@@ -542,7 +548,7 @@ int vvp_page_init(const struct lu_env *env, struct cl_object *obj,
 	} else {
 		struct ccc_object *clobj = cl2ccc(obj);
 
-		LASSERT(!mutex_trylock(&clobj->cob_inode->i_mutex));
+		LASSERT(!inode_trylock(clobj->cob_inode));
 		cl_page_slice_add(page, &cpg->cpg_cl, obj,
 				&vvp_transient_page_ops);
 		clobj->cob_transient_pages++;

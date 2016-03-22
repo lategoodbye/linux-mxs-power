@@ -106,11 +106,22 @@ static int rpf_s_stream(struct v4l2_subdev *subdev, int enable)
 			+ crop->left * fmtinfo->bpp[0] / 8;
 	pstride = format->plane_fmt[0].bytesperline
 		<< VI6_RPF_SRCM_PSTRIDE_Y_SHIFT;
+
+	vsp1_rpf_write(rpf, VI6_RPF_SRCM_ADDR_Y,
+		       rpf->buf_addr[0] + rpf->offsets[0]);
+
 	if (format->num_planes > 1) {
 		rpf->offsets[1] = crop->top * format->plane_fmt[1].bytesperline
 				+ crop->left * fmtinfo->bpp[1] / 8;
 		pstride |= format->plane_fmt[1].bytesperline
 			<< VI6_RPF_SRCM_PSTRIDE_C_SHIFT;
+
+		vsp1_rpf_write(rpf, VI6_RPF_SRCM_ADDR_C0,
+			       rpf->buf_addr[1] + rpf->offsets[1]);
+
+		if (format->num_planes > 2)
+			vsp1_rpf_write(rpf, VI6_RPF_SRCM_ADDR_C1,
+				       rpf->buf_addr[2] + rpf->offsets[1]);
 	}
 
 	vsp1_rpf_write(rpf, VI6_RPF_SRCM_PSTRIDE, pstride);
@@ -179,13 +190,20 @@ static void rpf_vdev_queue(struct vsp1_video *video,
 			   struct vsp1_video_buffer *buf)
 {
 	struct vsp1_rwpf *rpf = container_of(video, struct vsp1_rwpf, video);
+	unsigned int i;
+
+	for (i = 0; i < 3; ++i)
+		rpf->buf_addr[i] = buf->addr[i];
+
+	if (!vsp1_entity_is_streaming(&rpf->entity))
+		return;
 
 	vsp1_rpf_write(rpf, VI6_RPF_SRCM_ADDR_Y,
 		       buf->addr[0] + rpf->offsets[0]);
-	if (buf->buf.num_planes > 1)
+	if (buf->buf.vb2_buf.num_planes > 1)
 		vsp1_rpf_write(rpf, VI6_RPF_SRCM_ADDR_C0,
 			       buf->addr[1] + rpf->offsets[1]);
-	if (buf->buf.num_planes > 2)
+	if (buf->buf.vb2_buf.num_planes > 2)
 		vsp1_rpf_write(rpf, VI6_RPF_SRCM_ADDR_C1,
 			       buf->addr[2] + rpf->offsets[1]);
 }
@@ -259,18 +277,29 @@ struct vsp1_rwpf *vsp1_rpf_create(struct vsp1_device *vsp1, unsigned int index)
 
 	rpf->entity.video = video;
 
-	/* Connect the video device to the RPF. */
-	ret = media_entity_create_link(&rpf->video.video.entity, 0,
-				       &rpf->entity.subdev.entity,
-				       RWPF_PAD_SINK,
-				       MEDIA_LNK_FL_ENABLED |
-				       MEDIA_LNK_FL_IMMUTABLE);
-	if (ret < 0)
-		goto error;
-
 	return rpf;
 
 error:
 	vsp1_entity_destroy(&rpf->entity);
 	return ERR_PTR(ret);
+}
+
+/*
+ * vsp1_rpf_create_links() - RPF pads links creation
+ * @vsp1: Pointer to VSP1 device
+ * @entity: Pointer to VSP1 entity
+ *
+ * return negative error code or zero on success
+ */
+int vsp1_rpf_create_links(struct vsp1_device *vsp1,
+			       struct vsp1_entity *entity)
+{
+	struct vsp1_rwpf *rpf = to_rwpf(&entity->subdev);
+
+	/* Connect the video device to the RPF. */
+	return media_create_pad_link(&rpf->video.video.entity, 0,
+				     &rpf->entity.subdev.entity,
+				     RWPF_PAD_SINK,
+				     MEDIA_LNK_FL_ENABLED |
+				     MEDIA_LNK_FL_IMMUTABLE);
 }

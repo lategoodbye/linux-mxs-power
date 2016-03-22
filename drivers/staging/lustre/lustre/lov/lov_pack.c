@@ -27,7 +27,7 @@
  * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -98,26 +98,6 @@ void lov_dump_lmm_v3(int level, struct lov_mds_md_v3 *lmm)
 	CDEBUG(level, "pool_name "LOV_POOLNAMEF"\n", lmm->lmm_pool_name);
 	lov_dump_lmm_objects(level, lmm->lmm_objects,
 			     le16_to_cpu(lmm->lmm_stripe_count));
-}
-
-void lov_dump_lmm(int level, void *lmm)
-{
-	int magic;
-
-	magic = le32_to_cpu(((struct lov_mds_md *)lmm)->lmm_magic);
-	switch (magic) {
-	case LOV_MAGIC_V1:
-		lov_dump_lmm_v1(level, (struct lov_mds_md_v1 *)lmm);
-		break;
-	case LOV_MAGIC_V3:
-		lov_dump_lmm_v3(level, (struct lov_mds_md_v3 *)lmm);
-		break;
-	default:
-		CDEBUG(level, "unrecognized lmm_magic %x, assuming %x\n",
-		       magic, LOV_MAGIC_V1);
-		lov_dump_lmm_common(level, lmm);
-		break;
-	}
 }
 
 /* Pack LOV object metadata for disk storage.  It is packed in LE byte
@@ -192,13 +172,13 @@ int lov_packmd(struct obd_export *exp, struct lov_mds_md **lmmp,
 	if (*lmmp && !lsm) {
 		stripe_count = le16_to_cpu((*lmmp)->lmm_stripe_count);
 		lmm_size = lov_mds_md_size(stripe_count, lmm_magic);
-		OBD_FREE_LARGE(*lmmp, lmm_size);
+		kvfree(*lmmp);
 		*lmmp = NULL;
 		return 0;
 	}
 
 	if (!*lmmp) {
-		OBD_ALLOC_LARGE(*lmmp, lmm_size);
+		*lmmp = libcfs_kvzalloc(lmm_size, GFP_NOFS);
 		if (!*lmmp)
 			return -ENOMEM;
 	}
@@ -273,28 +253,14 @@ __u16 lov_get_stripecnt(struct lov_obd *lov, __u32 magic, __u16 stripe_count)
 	return stripe_count;
 }
 
-
 static int lov_verify_lmm(void *lmm, int lmm_bytes, __u16 *stripe_count)
 {
 	int rc;
 
 	if (lsm_op_find(le32_to_cpu(*(__u32 *)lmm)) == NULL) {
-		char *buffer;
-		int sz;
-
 		CERROR("bad disk LOV MAGIC: 0x%08X; dumping LMM (size=%d):\n",
 		       le32_to_cpu(*(__u32 *)lmm), lmm_bytes);
-		sz = lmm_bytes * 2 + 1;
-		OBD_ALLOC_LARGE(buffer, sz);
-		if (buffer != NULL) {
-			int i;
-
-			for (i = 0; i < lmm_bytes; i++)
-				sprintf(buffer+2*i, "%.2X", ((char *)lmm)[i]);
-			buffer[sz - 1] = '\0';
-			CERROR("%s\n", buffer);
-			OBD_FREE_LARGE(buffer, sz);
-		}
+		CERROR("%*phN\n", lmm_bytes, lmm);
 		return -EINVAL;
 	}
 	rc = lsm_op_find(le32_to_cpu(*(__u32 *)lmm))->lsm_lmm_verify(lmm,
@@ -347,7 +313,6 @@ int lov_free_memmd(struct lov_stripe_md **lsmp)
 	return refc;
 }
 
-
 /* Unpack LOV object metadata from disk storage.  It is packed in LE byte
  * order and is opaque to the networking layer.
  */
@@ -367,9 +332,11 @@ int lov_unpackmd(struct obd_export *exp,  struct lov_stripe_md **lsmp,
 		if (rc)
 			return rc;
 		magic = le32_to_cpu(lmm->lmm_magic);
+		pattern = le32_to_cpu(lmm->lmm_pattern);
 	} else {
 		magic = LOV_MAGIC;
 		stripe_count = lov_get_stripecnt(lov, magic, 0);
+		pattern = LOV_PATTERN_RAID0;
 	}
 
 	/* If we aren't passed an lsmp struct, we just want the size */
@@ -384,7 +351,6 @@ int lov_unpackmd(struct obd_export *exp,  struct lov_stripe_md **lsmp,
 		return 0;
 	}
 
-	pattern = le32_to_cpu(lmm->lmm_pattern);
 	lsm_size = lov_alloc_memmd(lsmp, stripe_count, pattern, magic);
 	if (lsm_size < 0)
 		return lsm_size;

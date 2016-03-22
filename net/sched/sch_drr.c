@@ -331,7 +331,7 @@ static struct drr_class *drr_classify(struct sk_buff *skb, struct Qdisc *sch,
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
 	fl = rcu_dereference_bh(q->filter_list);
-	result = tc_classify(skb, fl, &res);
+	result = tc_classify(skb, fl, &res, false);
 	if (result >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
@@ -403,6 +403,8 @@ static struct sk_buff *drr_dequeue(struct Qdisc *sch)
 		if (len <= cl->deficit) {
 			cl->deficit -= len;
 			skb = qdisc_dequeue_peeked(cl->qdisc);
+			if (unlikely(skb == NULL))
+				goto out;
 			if (cl->qdisc->q.qlen == 0)
 				list_del(&cl->alist);
 

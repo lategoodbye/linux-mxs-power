@@ -27,23 +27,12 @@
 	};
 
 	cpus {
-		#address-cells = <1>;
+		#address-cells = <0>;
 		#size-cells = <0>;
 
-		cpu@0 {
+		cpu {
 			compatible = "arm,arm926ej-s";
 			device_type = "cpu";
-			reg = <0x0>;
-			operating-points = <
-				/* kHz	uV */
-				261819  1350000
-				360000  1350000
-				392728  1450000
-				454737  1550000
-			>;
-			clocks = <&clks 2>;
-			clock-latency = <61036>; /* two CLK32 periods */
-			cpu-supply = <&reg_vddd>;
 		};
 	};
 
@@ -319,6 +308,39 @@
 					fsl,voltage = <MXS_VOLTAGE_HIGH>;
 					fsl,pull-up = <MXS_PULL_ENABLE>;
 				};
+
+				i2c_pins_a: i2c@0 {
+					reg = <0>;
+					fsl,pinmux-ids = <
+						MX23_PAD_I2C_SCL__I2C_SCL
+						MX23_PAD_I2C_SDA__I2C_SDA
+					>;
+					fsl,drive-strength = <MXS_DRIVE_8mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_ENABLE>;
+				};
+
+				i2c_pins_b: i2c@1 {
+					reg = <1>;
+					fsl,pinmux-ids = <
+						MX23_PAD_LCD_ENABLE__I2C_SCL
+						MX23_PAD_LCD_HSYNC__I2C_SDA
+					>;
+					fsl,drive-strength = <MXS_DRIVE_8mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_ENABLE>;
+				};
+
+				i2c_pins_c: i2c@2 {
+					reg = <2>;
+					fsl,pinmux-ids = <
+						MX23_PAD_SSP1_DATA1__I2C_SCL
+						MX23_PAD_SSP1_DATA2__I2C_SDA
+					>;
+					fsl,drive-strength = <MXS_DRIVE_8mA>;
+					fsl,voltage = <MXS_VOLTAGE_HIGH>;
+					fsl,pull-up = <MXS_PULL_ENABLE>;
+				};
 			};
 
 			digctl@8001c000 {
@@ -361,9 +383,11 @@
 			};
 
 			ocotp@8002c000 {
-				compatible = "fsl,ocotp";
+				compatible = "fsl,imx23-ocotp", "fsl,ocotp";
+				#address-cells = <1>;
+				#size-cells = <1>;
 				reg = <0x8002c000 0x2000>;
-				status = "disabled";
+				clocks = <&clks 15>;
 			};
 
 			axi-ahb@8002e000 {
@@ -392,7 +416,7 @@
 				reg = <0x80038000 0x2000>;
 				status = "disabled";
 			};
-		};
+                };
 
 		apbx@80040000 {
 			compatible = "simple-bus";
@@ -415,60 +439,8 @@
 			};
 
 			power@80044000 {
-				compatible = "fsl,imx23-power";
-				#address-cells = <1>;
-				#size-cells = <1>;
 				reg = <0x80044000 0x2000>;
-				interrupts = <3>;
-				ranges;
-
-				reg_vddd: regulator@80044040 {
-					reg = <0x80044040 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
-					compatible = "fsl,imx23-vddd";
-					regulator-name = "vddd";
-					regulator-min-microvolt = <1350000>;
-					regulator-max-microvolt = <1550000>;
-					vddd-supply = <&reg_vdda>;
-					regulator-boot-on;
-					regulator-always-on;
-				};
-
-				reg_vdda: regulator@80044050 {
-					reg = <0x80044050 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
-					compatible = "fsl,imx23-vdda";
-					regulator-name = "vdda";
-					regulator-min-microvolt = <1725000>;
-					regulator-max-microvolt = <1950000>;
-					vdda-supply = <&reg_vddio>;
-					regulator-boot-on;
-					regulator-always-on;
-				};
-
-				reg_vddio: regulator@80044060 {
-					reg = <0x80044060 0x10>,
-					      <0x80044010 0x10>,
-					      <0x800440c0 0x10>;
-					reg-names = "base-address",
-						    "v5ctrl-address",
-						    "status-address";
-					compatible = "fsl,imx23-vddio";
-					regulator-name = "vddio";
-					regulator-min-microvolt = <3000000>;
-					regulator-max-microvolt = <3575000>;
-					regulator-microvolt-offset = <80000>;
-					regulator-boot-on;
-					regulator-always-on;
-				};
+				status = "disabled";
 			};
 
 			saif1: saif@80046000 {
@@ -498,6 +470,7 @@
 				interrupts = <36 37 38 39 40 41 42 43 44>;
 				status = "disabled";
 				clocks = <&clks 26>;
+				#io-channel-cells = <1>;
 			};
 
 			spdif@80054000 {
@@ -507,8 +480,13 @@
 				status = "disabled";
 			};
 
-			i2c@80058000 {
+			i2c: i2c@80058000 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				compatible = "fsl,imx23-i2c";
 				reg = <0x80058000 0x2000>;
+				interrupts = <27>;
+				clock-frequency = <100000>;
 				dmas = <&dma_apbx 3>;
 				dma-names = "rx-tx";
 				status = "disabled";

@@ -17,7 +17,6 @@
 #include <linux/clkdev.h>
 #include <linux/io.h>
 #include <linux/of.h>
-#include <mach/pxa25x.h>
 #include <mach/pxa2xx-regs.h>
 
 #include <dt-bindings/clock/pxa-clock.h>
@@ -79,7 +78,7 @@ unsigned int pxa25x_get_clk_frequency_khz(int info)
 			clks[3] / 1000000, (clks[3] % 1000000) / 10000);
 	}
 
-	return (unsigned int)clks[0];
+	return (unsigned int)clks[0] / KHz;
 }
 
 static unsigned long clk_pxa25x_memory_get_rate(struct clk_hw *hw,

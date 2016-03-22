@@ -596,25 +596,6 @@ _GLOBAL(copy_page)
 	b	2b
 
 /*
- * void atomic_clear_mask(atomic_t mask, atomic_t *addr)
- * void atomic_set_mask(atomic_t mask, atomic_t *addr);
- */
-_GLOBAL(atomic_clear_mask)
-10:	lwarx	r5,0,r4
-	andc	r5,r5,r3
-	PPC405_ERR77(0,r4)
-	stwcx.	r5,0,r4
-	bne-	10b
-	blr
-_GLOBAL(atomic_set_mask)
-10:	lwarx	r5,0,r4
-	or	r5,r5,r3
-	PPC405_ERR77(0,r4)
-	stwcx.	r5,0,r4
-	bne-	10b
-	blr
-
-/*
  * Extended precision shifts.
  *
  * Updated to be valid for shift counts from 0 to 63 inclusive.
@@ -762,6 +743,8 @@ relocate_new_kernel:
 	/* Check for 47x cores */
 	mfspr	r3,SPRN_PVR
 	srwi	r3,r3,16
+	cmplwi	cr0,r3,PVR_476FPE@h
+	beq	setup_map_47x
 	cmplwi	cr0,r3,PVR_476@h
 	beq	setup_map_47x
 	cmplwi	cr0,r3,PVR_476_ISS@h

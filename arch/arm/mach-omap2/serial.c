@@ -203,7 +203,7 @@ static int __init omap_serial_early_init(void)
 		if (cmdline_find_option(uart_name)) {
 			console_uart_id = uart->num;
 
-			if (console_loglevel >= 10) {
+			if (console_loglevel >= CONSOLE_LOGLEVEL_DEBUG) {
 				uart_debug = true;
 				pr_info("%s used as console in debug mode: uart%d clocks will not be gated",
 					uart_name, uart->num);
@@ -213,7 +213,7 @@ static int __init omap_serial_early_init(void)
 
 	return 0;
 }
-omap_core_initcall(omap_serial_early_init);
+omap_postcore_initcall(omap_serial_early_init);
 
 /**
  * omap_serial_init_port() - initialize single serial port

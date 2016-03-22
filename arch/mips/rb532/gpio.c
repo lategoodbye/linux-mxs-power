@@ -89,7 +89,7 @@ static int rb532_gpio_get(struct gpio_chip *chip, unsigned offset)
 	struct rb532_gpio_chip	*gpch;
 
 	gpch = container_of(chip, struct rb532_gpio_chip, chip);
-	return rb532_get_bit(offset, gpch->regbase + GPIOD);
+	return !!rb532_get_bit(offset, gpch->regbase + GPIOD);
 }
 
 /*
@@ -140,6 +140,11 @@ static int rb532_gpio_direction_output(struct gpio_chip *chip,
 	return 0;
 }
 
+static int rb532_gpio_to_irq(struct gpio_chip *chip, unsigned gpio)
+{
+	return 8 + 4 * 32 + gpio;
+}
+
 static struct rb532_gpio_chip rb532_gpio_chip[] = {
 	[0] = {
 		.chip = {
@@ -148,6 +153,7 @@ static struct rb532_gpio_chip rb532_gpio_chip[] = {
 			.direction_output	= rb532_gpio_direction_output,
 			.get			= rb532_gpio_get,
 			.set			= rb532_gpio_set,
+			.to_irq			= rb532_gpio_to_irq,
 			.base			= 0,
 			.ngpio			= 32,
 		},

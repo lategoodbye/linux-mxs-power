@@ -27,7 +27,7 @@
  * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -40,7 +40,7 @@
 #include <linux/stat.h>
 #include <linux/errno.h>
 #include <linux/unistd.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include <linux/fs.h>
 #include <linux/pagemap.h>
@@ -258,8 +258,6 @@ out:
 	return result;
 }
 
-
-
 static inline int to_fault_error(int result)
 {
 	switch (result) {
@@ -312,7 +310,7 @@ static int ll_fault0(struct vm_area_struct *vma, struct vm_fault *vmf)
 		vio->u.fault.ft_vmpage    = NULL;
 		vio->u.fault.fault.ft_vmf = vmf;
 		vio->u.fault.fault.ft_flags = 0;
-		vio->u.fault.fault.ft_flags_valid = 0;
+		vio->u.fault.fault.ft_flags_valid = false;
 
 		result = cl_io_loop(env, io);
 

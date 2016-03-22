@@ -61,6 +61,33 @@ static int regmap_mmio_regbits_check(size_t reg_bits)
 	}
 }
 
+static int regmap_mmio_get_min_stride(size_t val_bits)
+{
+	int min_stride;
+
+	switch (val_bits) {
+	case 8:
+		/* The core treats 0 as 1 */
+		min_stride = 0;
+		return 0;
+	case 16:
+		min_stride = 2;
+		break;
+	case 32:
+		min_stride = 4;
+		break;
+#ifdef CONFIG_64BIT
+	case 64:
+		min_stride = 8;
+		break;
+#endif
+	default:
+		return -EINVAL;
+	}
+
+	return min_stride;
+}
+
 static inline void regmap_mmio_count_check(size_t count, u32 offset)
 {
 	BUG_ON(count <= offset);
@@ -231,26 +258,9 @@ static struct regmap_mmio_context *regmap_mmio_gen_context(struct device *dev,
 	if (config->pad_bits)
 		return ERR_PTR(-EINVAL);
 
-	switch (config->val_bits) {
-	case 8:
-		/* The core treats 0 as 1 */
-		min_stride = 0;
-		break;
-	case 16:
-		min_stride = 2;
-		break;
-	case 32:
-		min_stride = 4;
-		break;
-#ifdef CONFIG_64BIT
-	case 64:
-		min_stride = 8;
-		break;
-#endif
-		break;
-	default:
-		return ERR_PTR(-EINVAL);
-	}
+	min_stride = regmap_mmio_get_min_stride(config->val_bits);
+	if (min_stride < 0)
+		return ERR_PTR(min_stride);
 
 	if (config->reg_stride < min_stride)
 		return ERR_PTR(-EINVAL);
@@ -296,20 +306,11 @@ err_free:
 	return ERR_PTR(ret);
 }
 
-/**
- * regmap_init_mmio_clk(): Initialise register map with register clock
- *
- * @dev: Device that will be interacted with
- * @clk_id: register clock consumer ID
- * @regs: Pointer to memory-mapped IO region
- * @config: Configuration for register map
- *
- * The return value will be an ERR_PTR() on error or a valid pointer to
- * a struct regmap.
- */
-struct regmap *regmap_init_mmio_clk(struct device *dev, const char *clk_id,
-				    void __iomem *regs,
-				    const struct regmap_config *config)
+struct regmap *__regmap_init_mmio_clk(struct device *dev, const char *clk_id,
+				      void __iomem *regs,
+				      const struct regmap_config *config,
+				      struct lock_class_key *lock_key,
+				      const char *lock_name)
 {
 	struct regmap_mmio_context *ctx;
 
@@ -317,25 +318,17 @@ struct regmap *regmap_init_mmio_clk(struct device *dev, const char *clk_id,
 	if (IS_ERR(ctx))
 		return ERR_CAST(ctx);
 
-	return regmap_init(dev, &regmap_mmio, ctx, config);
+	return __regmap_init(dev, &regmap_mmio, ctx, config,
+			     lock_key, lock_name);
 }
-EXPORT_SYMBOL_GPL(regmap_init_mmio_clk);
+EXPORT_SYMBOL_GPL(__regmap_init_mmio_clk);
 
-/**
- * devm_regmap_init_mmio_clk(): Initialise managed register map with clock
- *
- * @dev: Device that will be interacted with
- * @clk_id: register clock consumer ID
- * @regs: Pointer to memory-mapped IO region
- * @config: Configuration for register map
- *
- * The return value will be an ERR_PTR() on error or a valid pointer
- * to a struct regmap.  The regmap will be automatically freed by the
- * device management code.
- */
-struct regmap *devm_regmap_init_mmio_clk(struct device *dev, const char *clk_id,
-					 void __iomem *regs,
-					 const struct regmap_config *config)
+struct regmap *__devm_regmap_init_mmio_clk(struct device *dev,
+					   const char *clk_id,
+					   void __iomem *regs,
+					   const struct regmap_config *config,
+					   struct lock_class_key *lock_key,
+					   const char *lock_name)
 {
 	struct regmap_mmio_context *ctx;
 
@@ -343,8 +336,9 @@ struct regmap *devm_regmap_init_mmio_clk(struct device *dev, const char *clk_id,
 	if (IS_ERR(ctx))
 		return ERR_CAST(ctx);
 
-	return devm_regmap_init(dev, &regmap_mmio, ctx, config);
+	return __devm_regmap_init(dev, &regmap_mmio, ctx, config,
+				  lock_key, lock_name);
 }
-EXPORT_SYMBOL_GPL(devm_regmap_init_mmio_clk);
+EXPORT_SYMBOL_GPL(__devm_regmap_init_mmio_clk);
 
 MODULE_LICENSE("GPL v2");

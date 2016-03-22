@@ -34,7 +34,7 @@
 #include <sound/pcm_params.h>
 #include <sound/rawmidi.h>
 
-#include "../amdtp.h"
+#include "../amdtp-am824.h"
 #include "../iso-resources.h"
 #include "../lib.h"
 #include "dice-interface.h"
@@ -44,6 +44,9 @@ struct snd_dice {
 	struct fw_unit *unit;
 	spinlock_t lock;
 	struct mutex mutex;
+
+	bool registered;
+	struct delayed_work dwork;
 
 	/* Offsets for sub-addresses */
 	unsigned int global_offset;

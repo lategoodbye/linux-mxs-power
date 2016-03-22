@@ -60,30 +60,20 @@ LIST_HEAD(iw_nodev_conns);
 static void rds_iw_add_one(struct ib_device *device)
 {
 	struct rds_iw_device *rds_iwdev;
-	struct ib_device_attr *dev_attr;
 
 	/* Only handle iwarp devices */
 	if (device->node_type != RDMA_NODE_RNIC)
 		return;
 
-	dev_attr = kmalloc(sizeof *dev_attr, GFP_KERNEL);
-	if (!dev_attr)
-		return;
-
-	if (ib_query_device(device, dev_attr)) {
-		rdsdebug("Query device failed for %s\n", device->name);
-		goto free_attr;
-	}
-
 	rds_iwdev = kmalloc(sizeof *rds_iwdev, GFP_KERNEL);
 	if (!rds_iwdev)
-		goto free_attr;
+		return;
 
 	spin_lock_init(&rds_iwdev->spinlock);
 
-	rds_iwdev->dma_local_lkey = !!(dev_attr->device_cap_flags & IB_DEVICE_LOCAL_DMA_LKEY);
-	rds_iwdev->max_wrs = dev_attr->max_qp_wr;
-	rds_iwdev->max_sge = min(dev_attr->max_sge, RDS_IW_MAX_SGE);
+	rds_iwdev->dma_local_lkey = !!(device->attrs.device_cap_flags & IB_DEVICE_LOCAL_DMA_LKEY);
+	rds_iwdev->max_wrs = device->attrs.max_qp_wr;
+	rds_iwdev->max_sge = min(device->attrs.max_sge, RDS_IW_MAX_SGE);
 
 	rds_iwdev->dev = device;
 	rds_iwdev->pd = ib_alloc_pd(device);
@@ -111,8 +101,7 @@ static void rds_iw_add_one(struct ib_device *device)
 	list_add_tail(&rds_iwdev->list, &rds_iw_devices);
 
 	ib_set_client_data(device, &rds_iw_client, rds_iwdev);
-
-	goto free_attr;
+	return;
 
 err_mr:
 	if (rds_iwdev->mr)
@@ -121,16 +110,13 @@ err_pd:
 	ib_dealloc_pd(rds_iwdev->pd);
 free_dev:
 	kfree(rds_iwdev);
-free_attr:
-	kfree(dev_attr);
 }
 
-static void rds_iw_remove_one(struct ib_device *device)
+static void rds_iw_remove_one(struct ib_device *device, void *client_data)
 {
-	struct rds_iw_device *rds_iwdev;
+	struct rds_iw_device *rds_iwdev = client_data;
 	struct rds_iw_cm_id *i_cm_id, *next;
 
-	rds_iwdev = ib_get_client_data(device, &rds_iw_client);
 	if (!rds_iwdev)
 		return;
 
@@ -149,10 +135,7 @@ static void rds_iw_remove_one(struct ib_device *device)
 	if (rds_iwdev->mr)
 		ib_dereg_mr(rds_iwdev->mr);
 
-	while (ib_dealloc_pd(rds_iwdev->pd)) {
-		rdsdebug("Failed to dealloc pd %p\n", rds_iwdev->pd);
-		msleep(1);
-	}
+	ib_dealloc_pd(rds_iwdev->pd);
 
 	list_del(&rds_iwdev->list);
 	kfree(rds_iwdev);
@@ -218,7 +201,7 @@ static void rds_iw_ic_info(struct socket *sock, unsigned int len,
  * allowed to influence which paths have priority.  We could call userspace
  * asserting this policy "routing".
  */
-static int rds_iw_laddr_check(__be32 addr)
+static int rds_iw_laddr_check(struct net *net, __be32 addr)
 {
 	int ret;
 	struct rdma_cm_id *cm_id;
@@ -227,7 +210,7 @@ static int rds_iw_laddr_check(__be32 addr)
 	/* Create a CMA ID and try to bind it. This catches both
 	 * IB and iWARP capable NICs.
 	 */
-	cm_id = rdma_create_id(NULL, NULL, RDMA_PS_TCP, IB_QPT_RC);
+	cm_id = rdma_create_id(&init_net, NULL, NULL, RDMA_PS_TCP, IB_QPT_RC);
 	if (IS_ERR(cm_id))
 		return PTR_ERR(cm_id);
 

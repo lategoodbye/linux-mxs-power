@@ -27,7 +27,7 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -71,13 +71,6 @@
 })
 #endif
 
-struct lov_lock_handles {
-	struct portals_handle   llh_handle;
-	atomic_t	    llh_refcount;
-	int		     llh_stripe_count;
-	struct lustre_handle    llh_handles[0];
-};
-
 struct lov_request {
 	struct obd_info	  rq_oi;
 	struct lov_request_set  *rq_rqset;
@@ -88,7 +81,6 @@ struct lov_request {
 	int		      rq_stripe;     /* stripe number */
 	int		      rq_complete;
 	int		      rq_rc;
-	int		      rq_buflen;     /* length of sub_md */
 
 	u32		      rq_oabufs;
 	u32		      rq_pgaidx;
@@ -109,9 +101,6 @@ struct lov_request_set {
 	struct llog_cookie		*set_cookies;
 	int				set_cookie_sent;
 	struct obd_trans_info		*set_oti;
-	u32				set_oabufs;
-	struct brw_page			*set_pga;
-	struct lov_lock_handles		*set_lockh;
 	struct list_head			set_list;
 	wait_queue_head_t			set_waitq;
 	spinlock_t			set_lock;
@@ -134,32 +123,6 @@ static inline void lov_put_reqset(struct lov_request_set *set)
 {
 	if (atomic_dec_and_test(&set->set_refcount))
 		lov_finish_set(set);
-}
-
-static inline struct lov_lock_handles *
-lov_handle2llh(struct lustre_handle *handle)
-{
-	LASSERT(handle != NULL);
-	return class_handle2object(handle->cookie);
-}
-
-static inline void lov_llh_put(struct lov_lock_handles *llh)
-{
-	CDEBUG(D_INFO, "PUTting llh %p : new refcount %d\n", llh,
-	       atomic_read(&llh->llh_refcount) - 1);
-	LASSERT(atomic_read(&llh->llh_refcount) > 0 &&
-		atomic_read(&llh->llh_refcount) < 0x5a5a);
-	if (atomic_dec_and_test(&llh->llh_refcount)) {
-		class_handle_unhash(&llh->llh_handle);
-		/* The structure may be held by other threads because RCU.
-		 *   -jxiong */
-		if (atomic_read(&llh->llh_refcount))
-			return;
-
-		OBD_FREE_RCU(llh, sizeof(*llh) +
-			     sizeof(*llh->llh_handles) * llh->llh_stripe_count,
-			     &llh->llh_handle);
-	}
 }
 
 #define lov_uuid2str(lv, index) \
@@ -188,23 +151,10 @@ int lov_stripe_number(struct lov_stripe_md *lsm, u64 lov_off);
 /* lov_qos.c */
 #define LOV_USES_ASSIGNED_STRIPE	0
 #define LOV_USES_DEFAULT_STRIPE	 1
-int qos_add_tgt(struct obd_device *obd, __u32 index);
-int qos_del_tgt(struct obd_device *obd, struct lov_tgt_desc *tgt);
-void qos_shrink_lsm(struct lov_request_set *set);
-int qos_prep_create(struct obd_export *exp, struct lov_request_set *set);
-void qos_update(struct lov_obd *lov);
-void qos_statfs_done(struct lov_obd *lov);
-void qos_statfs_update(struct obd_device *obd, __u64 max_age, int wait);
-int qos_remedy_create(struct lov_request_set *set, struct lov_request *req);
 
 /* lov_request.c */
-void lov_set_add_req(struct lov_request *req, struct lov_request_set *set);
-int lov_set_finished(struct lov_request_set *set, int idempotent);
-void lov_update_set(struct lov_request_set *set,
-		    struct lov_request *req, int rc);
 int lov_update_common_set(struct lov_request_set *set,
 			  struct lov_request *req, int rc);
-int lov_check_and_wait_active(struct lov_obd *lov, int ost_idx);
 int lov_prep_getattr_set(struct obd_export *exp, struct obd_info *oinfo,
 			 struct lov_request_set **reqset);
 int lov_fini_getattr_set(struct lov_request_set *set);
@@ -221,8 +171,6 @@ int lov_update_setattr_set(struct lov_request_set *set,
 int lov_fini_setattr_set(struct lov_request_set *set);
 int lov_prep_statfs_set(struct obd_device *obd, struct obd_info *oinfo,
 			struct lov_request_set **reqset);
-void lov_update_statfs(struct obd_statfs *osfs, struct obd_statfs *lov_sfs,
-		       int success);
 int lov_fini_statfs(struct obd_device *obd, struct obd_statfs *osfs,
 		    int success);
 int lov_fini_statfs_set(struct lov_request_set *set);
@@ -257,7 +205,6 @@ int lov_free_memmd(struct lov_stripe_md **lsmp);
 void lov_dump_lmm_v1(int level, struct lov_mds_md_v1 *lmm);
 void lov_dump_lmm_v3(int level, struct lov_mds_md_v3 *lmm);
 void lov_dump_lmm_common(int level, void *lmmp);
-void lov_dump_lmm(int level, void *lmm);
 
 /* lov_ea.c */
 struct lov_stripe_md *lsm_alloc_plain(__u16 stripe_count, int *size);
@@ -265,21 +212,14 @@ void lsm_free_plain(struct lov_stripe_md *lsm);
 void dump_lsm(unsigned int level, const struct lov_stripe_md *lsm);
 
 /* lproc_lov.c */
-#if defined (CONFIG_PROC_FS)
 extern const struct file_operations lov_proc_target_fops;
 void lprocfs_lov_init_vars(struct lprocfs_static_vars *lvars);
-#else
-static inline void lprocfs_lov_init_vars(struct lprocfs_static_vars *lvars)
-{
-	memset(lvars, 0, sizeof(*lvars));
-}
-#endif
 
 /* lov_cl.c */
 extern struct lu_device_type lov_device_type;
 
 /* pools */
-extern cfs_hash_ops_t pool_hash_operations;
+extern struct cfs_hash_ops pool_hash_operations;
 /* ost_pool methods */
 int lov_ost_pool_init(struct ost_pool *op, unsigned int count);
 int lov_ost_pool_extend(struct ost_pool *op, unsigned int min_count);
@@ -292,7 +232,6 @@ int lov_pool_new(struct obd_device *obd, char *poolname);
 int lov_pool_del(struct obd_device *obd, char *poolname);
 int lov_pool_add(struct obd_device *obd, char *poolname, char *ostname);
 int lov_pool_remove(struct obd_device *obd, char *poolname, char *ostname);
-void lov_dump_pool(int level, struct pool_desc *pool);
 struct pool_desc *lov_find_pool(struct lov_obd *lov, char *poolname);
 int lov_check_index_in_pool(__u32 idx, struct pool_desc *pool);
 void lov_pool_putref(struct pool_desc *pool);
@@ -302,6 +241,17 @@ static inline struct lov_stripe_md *lsm_addref(struct lov_stripe_md *lsm)
 	LASSERT(atomic_read(&lsm->lsm_refc) > 0);
 	atomic_inc(&lsm->lsm_refc);
 	return lsm;
+}
+
+static inline bool lov_oinfo_is_dummy(const struct lov_oinfo *loi)
+{
+	if (unlikely(loi->loi_oi.oi.oi_id == 0 &&
+		     loi->loi_oi.oi.oi_seq == 0 &&
+		     loi->loi_ost_idx == 0 &&
+		     loi->loi_ost_gen == 0))
+		return true;
+
+	return false;
 }
 
 #endif

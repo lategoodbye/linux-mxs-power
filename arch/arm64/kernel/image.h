@@ -47,7 +47,10 @@
 #define __HEAD_FLAG_BE	0
 #endif
 
-#define __HEAD_FLAGS	(__HEAD_FLAG_BE << 0)
+#define __HEAD_FLAG_PAGE_SIZE ((PAGE_SHIFT - 10) / 2)
+
+#define __HEAD_FLAGS	((__HEAD_FLAG_BE << 0) |	\
+			 (__HEAD_FLAG_PAGE_SIZE << 1))
 
 /*
  * These will output as part of the Image header, which should be little-endian
@@ -58,5 +61,49 @@
 	_kernel_size_le		= DATA_LE64(_end - _text);	\
 	_kernel_offset_le	= DATA_LE64(TEXT_OFFSET);	\
 	_kernel_flags_le	= DATA_LE64(__HEAD_FLAGS);
+
+#ifdef CONFIG_EFI
+
+/*
+ * Prevent the symbol aliases below from being emitted into the kallsyms
+ * table, by forcing them to be absolute symbols (which are conveniently
+ * ignored by scripts/kallsyms) rather than section relative symbols.
+ * The distinction is only relevant for partial linking, and only for symbols
+ * that are defined within a section declaration (which is not the case for
+ * the definitions below) so the resulting values will be identical.
+ */
+#define KALLSYMS_HIDE(sym)	ABSOLUTE(sym)
+
+/*
+ * The EFI stub has its own symbol namespace prefixed by __efistub_, to
+ * isolate it from the kernel proper. The following symbols are legally
+ * accessed by the stub, so provide some aliases to make them accessible.
+ * Only include data symbols here, or text symbols of functions that are
+ * guaranteed to be safe when executed at another offset than they were
+ * linked at. The routines below are all implemented in assembler in a
+ * position independent manner
+ */
+__efistub_memcmp		= KALLSYMS_HIDE(__pi_memcmp);
+__efistub_memchr		= KALLSYMS_HIDE(__pi_memchr);
+__efistub_memcpy		= KALLSYMS_HIDE(__pi_memcpy);
+__efistub_memmove		= KALLSYMS_HIDE(__pi_memmove);
+__efistub_memset		= KALLSYMS_HIDE(__pi_memset);
+__efistub_strlen		= KALLSYMS_HIDE(__pi_strlen);
+__efistub_strnlen		= KALLSYMS_HIDE(__pi_strnlen);
+__efistub_strcmp		= KALLSYMS_HIDE(__pi_strcmp);
+__efistub_strncmp		= KALLSYMS_HIDE(__pi_strncmp);
+__efistub___flush_dcache_area	= KALLSYMS_HIDE(__pi___flush_dcache_area);
+
+#ifdef CONFIG_KASAN
+__efistub___memcpy		= KALLSYMS_HIDE(__pi_memcpy);
+__efistub___memmove		= KALLSYMS_HIDE(__pi_memmove);
+__efistub___memset		= KALLSYMS_HIDE(__pi_memset);
+#endif
+
+__efistub__text			= KALLSYMS_HIDE(_text);
+__efistub__end			= KALLSYMS_HIDE(_end);
+__efistub__edata		= KALLSYMS_HIDE(_edata);
+
+#endif
 
 #endif /* __ASM_IMAGE_H */

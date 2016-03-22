@@ -45,10 +45,10 @@ struct eventfd_ctx {
  *
  * This function is supposed to be called by the kernel in paths that do not
  * allow sleeping. In this function we allow the counter to reach the ULLONG_MAX
- * value, and we signal this as overflow condition by returining a POLLERR
+ * value, and we signal this as overflow condition by returning a POLLERR
  * to poll(2).
  *
- * Returns the amount by which the counter was incrememnted.  This will be less
+ * Returns the amount by which the counter was incremented.  This will be less
  * than @n if the counter has overflowed.
  */
 __u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n)
@@ -118,18 +118,18 @@ static unsigned int eventfd_poll(struct file *file, poll_table *wait)
 {
 	struct eventfd_ctx *ctx = file->private_data;
 	unsigned int events = 0;
-	unsigned long flags;
+	u64 count;
 
 	poll_wait(file, &ctx->wqh, wait);
+	smp_rmb();
+	count = ctx->count;
 
-	spin_lock_irqsave(&ctx->wqh.lock, flags);
-	if (ctx->count > 0)
+	if (count > 0)
 		events |= POLLIN;
-	if (ctx->count == ULLONG_MAX)
+	if (count == ULLONG_MAX)
 		events |= POLLERR;
-	if (ULLONG_MAX - 1 > ctx->count)
+	if (ULLONG_MAX - 1 > count)
 		events |= POLLOUT;
-	spin_unlock_irqrestore(&ctx->wqh.lock, flags);
 
 	return events;
 }

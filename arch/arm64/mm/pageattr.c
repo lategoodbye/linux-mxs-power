@@ -14,6 +14,7 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/vmalloc.h>
 
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -44,15 +45,35 @@ static int change_memory_common(unsigned long addr, int numpages,
 	unsigned long end = start + size;
 	int ret;
 	struct page_change_data data;
+	struct vm_struct *area;
 
-	if (!IS_ALIGNED(addr, PAGE_SIZE)) {
+	if (!PAGE_ALIGNED(addr)) {
 		start &= PAGE_MASK;
 		end = start + size;
 		WARN_ON_ONCE(1);
 	}
 
-	if (!is_module_address(start) || !is_module_address(end - 1))
+	/*
+	 * Kernel VA mappings are always live, and splitting live section
+	 * mappings into page mappings may cause TLB conflicts. This means
+	 * we have to ensure that changing the permission bits of the range
+	 * we are operating on does not result in such splitting.
+	 *
+	 * Let's restrict ourselves to mappings created by vmalloc (or vmap).
+	 * Those are guaranteed to consist entirely of page mappings, and
+	 * splitting is never needed.
+	 *
+	 * So check whether the [addr, addr + size) interval is entirely
+	 * covered by precisely one VM area that has the VM_ALLOC flag set.
+	 */
+	area = find_vm_area((void *)addr);
+	if (!area ||
+	    end > (unsigned long)area->addr + area->size ||
+	    !(area->flags & VM_ALLOC))
 		return -EINVAL;
+
+	if (!numpages)
+		return 0;
 
 	data.set_mask = set_mask;
 	data.clear_mask = clear_mask;
@@ -70,7 +91,6 @@ int set_memory_ro(unsigned long addr, int numpages)
 					__pgprot(PTE_RDONLY),
 					__pgprot(PTE_WRITE));
 }
-EXPORT_SYMBOL_GPL(set_memory_ro);
 
 int set_memory_rw(unsigned long addr, int numpages)
 {
@@ -78,7 +98,6 @@ int set_memory_rw(unsigned long addr, int numpages)
 					__pgprot(PTE_WRITE),
 					__pgprot(PTE_RDONLY));
 }
-EXPORT_SYMBOL_GPL(set_memory_rw);
 
 int set_memory_nx(unsigned long addr, int numpages)
 {

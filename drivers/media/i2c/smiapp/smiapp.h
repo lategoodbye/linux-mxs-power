@@ -14,12 +14,6 @@
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #ifndef __SMIAPP_PRIV_H_
@@ -28,7 +22,7 @@
 #include <linux/mutex.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
-#include <media/smiapp.h>
+#include <media/i2c/smiapp.h>
 
 #include "smiapp-pll.h"
 #include "smiapp-reg.h"
@@ -222,7 +216,6 @@ struct smiapp_sensor {
 	u8 scaling_mode;
 
 	u8 hvflip_inv_mask; /* H/VFLIP inversion due to sensor orientation */
-	u8 flash_capability;
 	u8 frame_skip;
 
 	int power_count;

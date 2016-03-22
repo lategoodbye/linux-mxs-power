@@ -21,7 +21,10 @@
 #include <linux/module.h>
 #include <linux/gpio.h>
 
-#include <asm/mach-ar7/gpio.h>
+#include <asm/mach-ar7/ar7.h>
+
+#define AR7_GPIO_MAX 32
+#define TITAN_GPIO_MAX 51
 
 struct ar7_gpio_chip {
 	void __iomem		*regs;
@@ -34,7 +37,7 @@ static int ar7_gpio_get_value(struct gpio_chip *chip, unsigned gpio)
 				container_of(chip, struct ar7_gpio_chip, chip);
 	void __iomem *gpio_in = gpch->regs + AR7_GPIO_INPUT;
 
-	return readl(gpio_in) & (1 << gpio);
+	return !!(readl(gpio_in) & (1 << gpio));
 }
 
 static int titan_gpio_get_value(struct gpio_chip *chip, unsigned gpio)

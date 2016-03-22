@@ -61,12 +61,10 @@ EXPORT_SYMBOL_GPL(iio_map_array_register);
 int iio_map_array_unregister(struct iio_dev *indio_dev)
 {
 	int ret = -ENODEV;
-	struct iio_map_internal *mapi;
-	struct list_head *pos, *tmp;
+	struct iio_map_internal *mapi, *next;
 
 	mutex_lock(&iio_map_list_lock);
-	list_for_each_safe(pos, tmp, &iio_map_list) {
-		mapi = list_entry(pos, struct iio_map_internal, l);
+	list_for_each_entry_safe(mapi, next, &iio_map_list, l) {
 		if (indio_dev == mapi->indio_dev) {
 			list_del(&mapi->l);
 			kfree(mapi);
@@ -116,8 +114,11 @@ static int __of_iio_simple_xlate(struct iio_dev *indio_dev,
 	if (!iiospec->args_count)
 		return 0;
 
-	if (iiospec->args[0] >= indio_dev->num_channels)
+	if (iiospec->args[0] >= indio_dev->num_channels) {
+		dev_err(&indio_dev->dev, "invalid channel index %u\n",
+			iiospec->args[0]);
 		return -EINVAL;
+	}
 
 	return iiospec->args[0];
 }
@@ -348,6 +349,8 @@ EXPORT_SYMBOL_GPL(iio_channel_get);
 
 void iio_channel_release(struct iio_channel *channel)
 {
+	if (!channel)
+		return;
 	iio_device_put(channel->indio_dev);
 	kfree(channel);
 }
@@ -634,3 +637,28 @@ err_unlock:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iio_get_channel_type);
+
+static int iio_channel_write(struct iio_channel *chan, int val, int val2,
+			     enum iio_chan_info_enum info)
+{
+	return chan->indio_dev->info->write_raw(chan->indio_dev,
+						chan->channel, val, val2, info);
+}
+
+int iio_write_channel_raw(struct iio_channel *chan, int val)
+{
+	int ret;
+
+	mutex_lock(&chan->indio_dev->info_exist_lock);
+	if (chan->indio_dev->info == NULL) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+
+	ret = iio_channel_write(chan, val, 0, IIO_CHAN_INFO_RAW);
+err_unlock:
+	mutex_unlock(&chan->indio_dev->info_exist_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(iio_write_channel_raw);

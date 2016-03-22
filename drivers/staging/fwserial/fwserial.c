@@ -893,11 +893,10 @@ static void fwserial_destroy(struct kref *kref)
 	kfree(serial);
 }
 
-void fwtty_port_put(struct fwtty_port *port)
+static void fwtty_port_put(struct fwtty_port *port)
 {
 	kref_put(&port->serial->kref, fwserial_destroy);
 }
-EXPORT_SYMBOL(fwtty_port_put);
 
 static void fwtty_port_dtr_rts(struct tty_port *tty_port, int on)
 {
@@ -1186,7 +1185,7 @@ static void fwtty_unthrottle(struct tty_struct *tty)
 {
 	struct fwtty_port *port = tty->driver_data;
 
-	fwtty_dbg(port, "CRTSCTS: %d\n", (C_CRTSCTS(tty) != 0));
+	fwtty_dbg(port, "CRTSCTS: %d\n", C_CRTSCTS(tty) != 0);
 
 	fwtty_profile_fifo(port, port->stats.unthrottle);
 
@@ -2815,13 +2814,14 @@ static int __init fwserial_init(void)
 	/* num_ttys/num_ports must not be set above the static alloc avail */
 	if (num_ttys + num_loops > MAX_CARD_PORTS)
 		num_ttys = MAX_CARD_PORTS - num_loops;
+
 	num_ports = num_ttys + num_loops;
 
 	fwtty_driver = tty_alloc_driver(MAX_TOTAL_PORTS, TTY_DRIVER_REAL_RAW
 					| TTY_DRIVER_DYNAMIC_DEV);
 	if (IS_ERR(fwtty_driver)) {
 		err = PTR_ERR(fwtty_driver);
-		return err;
+		goto remove_debugfs;
 	}
 
 	fwtty_driver->driver_name	= KBUILD_MODNAME;
@@ -2923,7 +2923,9 @@ unregister_driver:
 	tty_unregister_driver(fwtty_driver);
 put_tty:
 	put_tty_driver(fwtty_driver);
+remove_debugfs:
 	debugfs_remove_recursive(fwserial_debugfs);
+
 	return err;
 }
 

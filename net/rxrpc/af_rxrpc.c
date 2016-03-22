@@ -67,7 +67,7 @@ static void rxrpc_write_space(struct sock *sk)
 	if (rxrpc_writable(sk)) {
 		struct socket_wq *wq = rcu_dereference(sk->sk_wq);
 
-		if (wq_has_sleeper(wq))
+		if (skwq_has_sleeper(wq))
 			wake_up_interruptible(&wq->wait);
 		sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	}
@@ -305,7 +305,7 @@ struct rxrpc_call *rxrpc_kernel_begin_call(struct socket *sock,
 
 	if (!key)
 		key = rx->key;
-	if (key && !key->payload.data)
+	if (key && !key->payload.data[0])
 		key = NULL; /* a no-security key */
 
 	bundle = rxrpc_get_bundle(rx, trans, key, service_id, gfp);
@@ -441,8 +441,7 @@ static int rxrpc_connect(struct socket *sock, struct sockaddr *addr,
  *   - sends a call data packet
  *   - may send an abort (abort code in control data)
  */
-static int rxrpc_sendmsg(struct kiocb *iocb, struct socket *sock,
-			 struct msghdr *m, size_t len)
+static int rxrpc_sendmsg(struct socket *sock, struct msghdr *m, size_t len)
 {
 	struct rxrpc_transport *trans;
 	struct rxrpc_sock *rx = rxrpc_sk(sock->sk);
@@ -482,7 +481,7 @@ static int rxrpc_sendmsg(struct kiocb *iocb, struct socket *sock,
 	switch (rx->sk.sk_state) {
 	case RXRPC_SERVER_LISTENING:
 		if (!m->msg_name) {
-			ret = rxrpc_server_sendmsg(iocb, rx, m, len);
+			ret = rxrpc_server_sendmsg(rx, m, len);
 			break;
 		}
 	case RXRPC_SERVER_BOUND:
@@ -492,7 +491,7 @@ static int rxrpc_sendmsg(struct kiocb *iocb, struct socket *sock,
 			break;
 		}
 	case RXRPC_CLIENT_CONNECTED:
-		ret = rxrpc_client_sendmsg(iocb, rx, trans, m, len);
+		ret = rxrpc_client_sendmsg(rx, trans, m, len);
 		break;
 	default:
 		ret = -ENOTCONN;
@@ -633,7 +632,7 @@ static int rxrpc_create(struct net *net, struct socket *sock, int protocol,
 	sock->ops = &rxrpc_rpc_ops;
 	sock->state = SS_UNCONNECTED;
 
-	sk = sk_alloc(net, PF_RXRPC, GFP_KERNEL, &rxrpc_proto);
+	sk = sk_alloc(net, PF_RXRPC, GFP_KERNEL, &rxrpc_proto, kern);
 	if (!sk)
 		return -ENOMEM;
 

@@ -38,12 +38,13 @@ static void __init init_irq_default_affinity(void)
 #ifdef CONFIG_SMP
 static int alloc_masks(struct irq_desc *desc, gfp_t gfp, int node)
 {
-	if (!zalloc_cpumask_var_node(&desc->irq_data.affinity, gfp, node))
+	if (!zalloc_cpumask_var_node(&desc->irq_common_data.affinity,
+				     gfp, node))
 		return -ENOMEM;
 
 #ifdef CONFIG_GENERIC_PENDING_IRQ
 	if (!zalloc_cpumask_var_node(&desc->pending_mask, gfp, node)) {
-		free_cpumask_var(desc->irq_data.affinity);
+		free_cpumask_var(desc->irq_common_data.affinity);
 		return -ENOMEM;
 	}
 #endif
@@ -52,23 +53,19 @@ static int alloc_masks(struct irq_desc *desc, gfp_t gfp, int node)
 
 static void desc_smp_init(struct irq_desc *desc, int node)
 {
-	desc->irq_data.node = node;
-	cpumask_copy(desc->irq_data.affinity, irq_default_affinity);
+	cpumask_copy(desc->irq_common_data.affinity, irq_default_affinity);
 #ifdef CONFIG_GENERIC_PENDING_IRQ
 	cpumask_clear(desc->pending_mask);
 #endif
-}
-
-static inline int desc_node(struct irq_desc *desc)
-{
-	return desc->irq_data.node;
+#ifdef CONFIG_NUMA
+	desc->irq_common_data.node = node;
+#endif
 }
 
 #else
 static inline int
 alloc_masks(struct irq_desc *desc, gfp_t gfp, int node) { return 0; }
 static inline void desc_smp_init(struct irq_desc *desc, int node) { }
-static inline int desc_node(struct irq_desc *desc) { return 0; }
 #endif
 
 static void desc_set_defaults(unsigned int irq, struct irq_desc *desc, int node,
@@ -76,11 +73,13 @@ static void desc_set_defaults(unsigned int irq, struct irq_desc *desc, int node,
 {
 	int cpu;
 
+	desc->irq_common_data.handler_data = NULL;
+	desc->irq_common_data.msi_desc = NULL;
+
+	desc->irq_data.common = &desc->irq_common_data;
 	desc->irq_data.irq = irq;
 	desc->irq_data.chip = &no_irq_chip;
 	desc->irq_data.chip_data = NULL;
-	desc->irq_data.handler_data = NULL;
-	desc->irq_data.msi_desc = NULL;
 	irq_settings_clr_and_set(desc, ~0, _IRQ_DEFAULT_INIT_FLAGS);
 	irqd_set(&desc->irq_data, IRQD_IRQ_DISABLED);
 	desc->handle_irq = handle_bad_irq;
@@ -126,7 +125,7 @@ static void free_masks(struct irq_desc *desc)
 #ifdef CONFIG_GENERIC_PENDING_IRQ
 	free_cpumask_var(desc->pending_mask);
 #endif
-	free_cpumask_var(desc->irq_data.affinity);
+	free_cpumask_var(desc->irq_common_data.affinity);
 }
 #else
 static inline void free_masks(struct irq_desc *desc) { }
@@ -160,6 +159,7 @@ static struct irq_desc *alloc_desc(int irq, int node, struct module *owner)
 
 	raw_spin_lock_init(&desc->lock);
 	lockdep_set_class(&desc->lock, &irq_desc_lock_class);
+	init_rcu_head(&desc->rcu);
 
 	desc_set_defaults(irq, desc, node, owner);
 
@@ -170,6 +170,15 @@ err_kstat:
 err_desc:
 	kfree(desc);
 	return NULL;
+}
+
+static void delayed_free_desc(struct rcu_head *rhp)
+{
+	struct irq_desc *desc = container_of(rhp, struct irq_desc, rcu);
+
+	free_masks(desc);
+	free_percpu(desc->kstat_irqs);
+	kfree(desc);
 }
 
 static void free_desc(unsigned int irq)
@@ -188,9 +197,12 @@ static void free_desc(unsigned int irq)
 	delete_irq_desc(irq);
 	mutex_unlock(&sparse_irq_lock);
 
-	free_masks(desc);
-	free_percpu(desc->kstat_irqs);
-	kfree(desc);
+	/*
+	 * We free the descriptor, masks and stat fields via RCU. That
+	 * allows demultiplex interrupts to do rcu based management of
+	 * the child interrupts.
+	 */
+	call_rcu(&desc->rcu, delayed_free_desc);
 }
 
 static int alloc_descs(unsigned int start, unsigned int cnt, int node,
@@ -299,7 +311,7 @@ static void free_desc(unsigned int irq)
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
-	desc_set_defaults(irq, desc, desc_node(desc), NULL);
+	desc_set_defaults(irq, desc, irq_desc_get_node(desc), NULL);
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
 }
 
@@ -348,7 +360,7 @@ int generic_handle_irq(unsigned int irq)
 
 	if (!desc)
 		return -EINVAL;
-	generic_handle_irq_desc(irq, desc);
+	generic_handle_irq_desc(desc);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(generic_handle_irq);
@@ -587,7 +599,7 @@ int irq_set_percpu_devid(unsigned int irq)
 
 void kstat_incr_irq_this_cpu(unsigned int irq)
 {
-	kstat_incr_irqs_this_cpu(irq, irq_to_desc(irq));
+	kstat_incr_irqs_this_cpu(irq_to_desc(irq));
 }
 
 /**
@@ -619,7 +631,7 @@ unsigned int kstat_irqs(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 	int cpu;
-	int sum = 0;
+	unsigned int sum = 0;
 
 	if (!desc || !desc->kstat_irqs)
 		return 0;
@@ -639,7 +651,7 @@ unsigned int kstat_irqs(unsigned int irq)
  */
 unsigned int kstat_irqs_usr(unsigned int irq)
 {
-	int sum;
+	unsigned int sum;
 
 	irq_lock_sparse();
 	sum = kstat_irqs(irq);

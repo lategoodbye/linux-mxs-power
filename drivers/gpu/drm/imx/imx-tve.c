@@ -191,10 +191,18 @@ static int tve_setup_vga(struct imx_tve *tve)
 	/* set gain to (1 + 10/128) to provide 0.7V peak-to-peak amplitude */
 	ret = regmap_update_bits(tve->regmap, TVE_TVDAC0_CONT_REG,
 				 TVE_TVDAC_GAIN_MASK, 0x0a);
+	if (ret)
+		return ret;
+
 	ret = regmap_update_bits(tve->regmap, TVE_TVDAC1_CONT_REG,
 				 TVE_TVDAC_GAIN_MASK, 0x0a);
+	if (ret)
+		return ret;
+
 	ret = regmap_update_bits(tve->regmap, TVE_TVDAC2_CONT_REG,
 				 TVE_TVDAC_GAIN_MASK, 0x0a);
+	if (ret)
+		return ret;
 
 	/* set configuration register */
 	mask = TVE_DATA_SOURCE_MASK | TVE_INP_VIDEO_FORM;
@@ -204,16 +212,12 @@ static int tve_setup_vga(struct imx_tve *tve)
 	mask |= TVE_TV_OUT_MODE_MASK | TVE_SYNC_CH_0_EN;
 	val  |= TVE_TV_OUT_RGB       | TVE_SYNC_CH_0_EN;
 	ret = regmap_update_bits(tve->regmap, TVE_COM_CONF_REG, mask, val);
-	if (ret < 0) {
-		dev_err(tve->dev, "failed to set configuration: %d\n", ret);
+	if (ret)
 		return ret;
-	}
 
 	/* set test mode (as documented) */
-	ret = regmap_update_bits(tve->regmap, TVE_TST_MODE_REG,
+	return regmap_update_bits(tve->regmap, TVE_TST_MODE_REG,
 				 TVE_TVDAC_TEST_MODE_MASK, 1);
-
-	return 0;
 }
 
 static enum drm_connector_status imx_tve_connector_detect(
@@ -297,18 +301,18 @@ static void imx_tve_encoder_prepare(struct drm_encoder *encoder)
 
 	switch (tve->mode) {
 	case TVE_MODE_VGA:
-		imx_drm_panel_format_pins(encoder, IPU_PIX_FMT_GBR24,
-				tve->hsync_pin, tve->vsync_pin);
+		imx_drm_set_bus_format_pins(encoder, MEDIA_BUS_FMT_GBR888_1X24,
+					    tve->hsync_pin, tve->vsync_pin);
 		break;
 	case TVE_MODE_TVOUT:
-		imx_drm_panel_format(encoder, V4L2_PIX_FMT_YUV444);
+		imx_drm_set_bus_format(encoder, MEDIA_BUS_FMT_YUV8_1X24);
 		break;
 	}
 }
 
 static void imx_tve_encoder_mode_set(struct drm_encoder *encoder,
-				     struct drm_display_mode *mode,
-				     struct drm_display_mode *adjusted_mode)
+				     struct drm_display_mode *orig_mode,
+				     struct drm_display_mode *mode)
 {
 	struct imx_tve *tve = enc_to_tve(encoder);
 	unsigned long rounded_rate;
@@ -335,9 +339,11 @@ static void imx_tve_encoder_mode_set(struct drm_encoder *encoder,
 	}
 
 	if (tve->mode == TVE_MODE_VGA)
-		tve_setup_vga(tve);
+		ret = tve_setup_vga(tve);
 	else
-		tve_setup_tvout(tve);
+		ret = tve_setup_tvout(tve);
+	if (ret)
+		dev_err(tve->dev, "failed to set configuration: %d\n", ret);
 }
 
 static void imx_tve_encoder_commit(struct drm_encoder *encoder)
@@ -354,24 +360,24 @@ static void imx_tve_encoder_disable(struct drm_encoder *encoder)
 	tve_disable(tve);
 }
 
-static struct drm_connector_funcs imx_tve_connector_funcs = {
+static const struct drm_connector_funcs imx_tve_connector_funcs = {
 	.dpms = drm_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.detect = imx_tve_connector_detect,
 	.destroy = imx_drm_connector_destroy,
 };
 
-static struct drm_connector_helper_funcs imx_tve_connector_helper_funcs = {
+static const struct drm_connector_helper_funcs imx_tve_connector_helper_funcs = {
 	.get_modes = imx_tve_connector_get_modes,
 	.best_encoder = imx_tve_connector_best_encoder,
 	.mode_valid = imx_tve_connector_mode_valid,
 };
 
-static struct drm_encoder_funcs imx_tve_encoder_funcs = {
+static const struct drm_encoder_funcs imx_tve_encoder_funcs = {
 	.destroy = imx_drm_encoder_destroy,
 };
 
-static struct drm_encoder_helper_funcs imx_tve_encoder_helper_funcs = {
+static const struct drm_encoder_helper_funcs imx_tve_encoder_helper_funcs = {
 	.dpms = imx_tve_encoder_dpms,
 	.mode_fixup = imx_tve_encoder_mode_fixup,
 	.prepare = imx_tve_encoder_prepare,
@@ -502,7 +508,7 @@ static int imx_tve_register(struct drm_device *drm, struct imx_tve *tve)
 
 	drm_encoder_helper_add(&tve->encoder, &imx_tve_encoder_helper_funcs);
 	drm_encoder_init(drm, &tve->encoder, &imx_tve_encoder_funcs,
-			 encoder_type);
+			 encoder_type, NULL);
 
 	drm_connector_helper_add(&tve->connector,
 			&imx_tve_connector_helper_funcs);
@@ -671,6 +677,8 @@ static int imx_tve_bind(struct device *dev, struct device *master, void *data)
 
 	/* disable cable detection for VGA mode */
 	ret = regmap_write(tve->regmap, TVE_CD_CONT_REG, 0);
+	if (ret)
+		return ret;
 
 	ret = imx_tve_register(drm, tve);
 	if (ret)
@@ -713,6 +721,7 @@ static const struct of_device_id imx_tve_dt_ids[] = {
 	{ .compatible = "fsl,imx53-tve", },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, imx_tve_dt_ids);
 
 static struct platform_driver imx_tve_driver = {
 	.probe		= imx_tve_probe,

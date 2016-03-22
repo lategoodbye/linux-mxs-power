@@ -18,10 +18,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kernel.h>
@@ -35,6 +31,8 @@
 #include <linux/nmi.h>
 #include <linux/hardirq.h>
 #include <linux/pstore.h>
+#include <linux/vmalloc.h>
+#include <linux/mm.h> /* kvfree() */
 #include <acpi/apei.h>
 
 #include "apei-internal.h"
@@ -535,10 +533,7 @@ retry:
 			return -ENOMEM;
 		memcpy(new_entries, entries,
 		       erst_record_id_cache.len * sizeof(entries[0]));
-		if (erst_record_id_cache.size < PAGE_SIZE)
-			kfree(entries);
-		else
-			vfree(entries);
+		kvfree(entries);
 		erst_record_id_cache.entries = entries = new_entries;
 		erst_record_id_cache.size = new_size;
 	}

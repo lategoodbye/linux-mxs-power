@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -60,10 +60,10 @@
 static
 int get_xattr_type(const char *name)
 {
-	if (!strcmp(name, POSIX_ACL_XATTR_ACCESS))
+	if (!strcmp(name, XATTR_NAME_POSIX_ACL_ACCESS))
 		return XATTR_ACL_ACCESS_T;
 
-	if (!strcmp(name, POSIX_ACL_XATTR_DEFAULT))
+	if (!strcmp(name, XATTR_NAME_POSIX_ACL_DEFAULT))
 		return XATTR_ACL_DEFAULT_T;
 
 	if (!strncmp(name, XATTR_USER_PREFIX,
@@ -111,7 +111,6 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 	struct ll_sb_info *sbi = ll_i2sbi(inode);
 	struct ptlrpc_request *req = NULL;
 	int xattr_type, rc;
-	struct obd_capa *oc;
 #ifdef CONFIG_FS_POSIX_ACL
 	struct rmtacl_ctl_entry *rce = NULL;
 	posix_acl_xattr_header *new_value = NULL;
@@ -175,11 +174,12 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 			}
 			ee_free(ee);
 		} else if (rce->rce_ops == RMT_RSETFACL) {
-			size = lustre_posix_acl_xattr_filter(
+			rc = lustre_posix_acl_xattr_filter(
 						(posix_acl_xattr_header *)value,
 						size, &new_value);
-			if (unlikely(size < 0))
-				return size;
+			if (unlikely(rc < 0))
+				return rc;
+			size = rc;
 
 			pv = (const char *)new_value;
 		} else
@@ -188,14 +188,15 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 		valid |= rce_ops2valid(rce->rce_ops);
 	}
 #endif
-		oc = ll_mdscapa_get(inode);
-		rc = md_setxattr(sbi->ll_md_exp, ll_inode2fid(inode), oc,
-				valid, name, pv, size, 0, flags,
-				ll_i2suppgid(inode), &req);
-		capa_put(oc);
+	rc = md_setxattr(sbi->ll_md_exp, ll_inode2fid(inode),
+			 valid, name, pv, size, 0, flags,
+			 ll_i2suppgid(inode), &req);
 #ifdef CONFIG_FS_POSIX_ACL
 	if (new_value != NULL)
-		lustre_posix_acl_xattr_free(new_value, size);
+		/*
+		 * Release the posix ACL space.
+		 */
+		kfree(new_value);
 	if (acl != NULL)
 		lustre_ext_acl_xattr_free(acl);
 #endif
@@ -214,7 +215,7 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 int ll_setxattr(struct dentry *dentry, const char *name,
 		const void *value, size_t size, int flags)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 
 	LASSERT(inode);
 	LASSERT(name);
@@ -267,7 +268,7 @@ int ll_setxattr(struct dentry *dentry, const char *name,
 
 int ll_removexattr(struct dentry *dentry, const char *name)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 
 	LASSERT(inode);
 	LASSERT(name);
@@ -289,7 +290,6 @@ int ll_getxattr_common(struct inode *inode, const char *name,
 	struct mdt_body *body;
 	int xattr_type, rc;
 	void *xdata;
-	struct obd_capa *oc;
 	struct rmtacl_ctl_entry *rce = NULL;
 	struct ll_inode_info *lli = ll_i2info(inode);
 
@@ -380,11 +380,9 @@ do_getxattr:
 		}
 	} else {
 getxattr_nocache:
-		oc = ll_mdscapa_get(inode);
-		rc = md_getxattr(sbi->ll_md_exp, ll_inode2fid(inode), oc,
+		rc = md_getxattr(sbi->ll_md_exp, ll_inode2fid(inode),
 				valid | (rce ? rce_ops2valid(rce->rce_ops) : 0),
 				name, NULL, 0, size, 0, &req);
-		capa_put(oc);
 
 		if (rc < 0)
 			goto out_xattr;
@@ -457,7 +455,7 @@ out:
 ssize_t ll_getxattr(struct dentry *dentry, const char *name,
 		    void *buffer, size_t size)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 
 	LASSERT(inode);
 	LASSERT(name);
@@ -524,7 +522,7 @@ ssize_t ll_getxattr(struct dentry *dentry, const char *name,
 			goto out;
 		}
 
-		lump = (struct lov_user_md *)buffer;
+		lump = buffer;
 		memcpy(lump, lmm, lmmsize);
 		/* do not return layout gen for getxattr otherwise it would
 		 * confuse tar --xattr by recognizing layout gen as stripe
@@ -545,7 +543,7 @@ out:
 
 ssize_t ll_listxattr(struct dentry *dentry, char *buffer, size_t size)
 {
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = d_inode(dentry);
 	int rc = 0, rc2 = 0;
 	struct lov_mds_md *lmm = NULL;
 	struct ptlrpc_request *request = NULL;

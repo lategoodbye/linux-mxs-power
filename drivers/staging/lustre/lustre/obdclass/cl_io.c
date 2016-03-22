@@ -27,7 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2012, Intel Corporation.
+ * Copyright (c) 2011, 2015, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -236,16 +236,11 @@ int cl_io_rw_init(const struct lu_env *env, struct cl_io *io,
 }
 EXPORT_SYMBOL(cl_io_rw_init);
 
-static inline const struct lu_fid *
-cl_lock_descr_fid(const struct cl_lock_descr *descr)
-{
-	return lu_object_fid(&descr->cld_obj->co_lu);
-}
-
 static int cl_lock_descr_sort(const struct cl_lock_descr *d0,
 			      const struct cl_lock_descr *d1)
 {
-	return lu_fid_cmp(cl_lock_descr_fid(d0), cl_lock_descr_fid(d1)) ?:
+	return lu_fid_cmp(lu_object_fid(&d0->cld_obj->co_lu),
+			  lu_object_fid(&d1->cld_obj->co_lu)) ?:
 		__diff_normalize(d0->cld_start, d1->cld_start);
 }
 
@@ -254,7 +249,8 @@ static int cl_lock_descr_cmp(const struct cl_lock_descr *d0,
 {
 	int ret;
 
-	ret = lu_fid_cmp(cl_lock_descr_fid(d0), cl_lock_descr_fid(d1));
+	ret = lu_fid_cmp(lu_object_fid(&d0->cld_obj->co_lu),
+			 lu_object_fid(&d1->cld_obj->co_lu));
 	if (ret)
 		return ret;
 	if (d0->cld_end < d1->cld_start)
@@ -307,7 +303,7 @@ static void cl_io_locks_sort(struct cl_io *io)
 					 */
 				default:
 					LBUG();
-				case +1:
+				case 1:
 					list_move_tail(&curr->cill_linkage,
 							   &prev->cill_linkage);
 					done = 0;
@@ -335,7 +331,7 @@ int cl_queue_match(const struct list_head *queue,
 
        list_for_each_entry(scan, queue, cill_linkage) {
 	       if (cl_lock_descr_match(&scan->cill_descr, need))
-		       return +1;
+		       return 1;
        }
        return 0;
 }
@@ -353,7 +349,7 @@ static int cl_queue_merge(const struct list_head *queue,
 	       CDEBUG(D_VFSTRACE, "lock: %d: [%lu, %lu]\n",
 		      scan->cill_descr.cld_mode, scan->cill_descr.cld_start,
 		      scan->cill_descr.cld_end);
-	       return +1;
+	       return 1;
        }
        return 0;
 
@@ -570,7 +566,8 @@ EXPORT_SYMBOL(cl_io_iter_fini);
 /**
  * Records that read or write io progressed \a nob bytes forward.
  */
-void cl_io_rw_advance(const struct lu_env *env, struct cl_io *io, size_t nob)
+static void cl_io_rw_advance(const struct lu_env *env, struct cl_io *io,
+			     size_t nob)
 {
 	const struct cl_io_slice *scan;
 
@@ -589,7 +586,6 @@ void cl_io_rw_advance(const struct lu_env *env, struct cl_io *io, size_t nob)
 								   nob);
 	}
 }
-EXPORT_SYMBOL(cl_io_rw_advance);
 
 /**
  * Adds a lock to a lockset.
@@ -600,7 +596,7 @@ int cl_io_lock_add(const struct lu_env *env, struct cl_io *io,
 	int result;
 
 	if (cl_lockset_merge(&io->ci_lockset, &link->cill_descr))
-		result = +1;
+		result = 1;
 	else {
 		list_add(&link->cill_linkage, &io->ci_lockset.cls_todo);
 		result = 0;
@@ -612,7 +608,7 @@ EXPORT_SYMBOL(cl_io_lock_add);
 static void cl_free_io_lock_link(const struct lu_env *env,
 				 struct cl_io_lock_link *link)
 {
-	OBD_FREE_PTR(link);
+	kfree(link);
 }
 
 /**
@@ -624,7 +620,7 @@ int cl_io_lock_alloc_add(const struct lu_env *env, struct cl_io *io,
 	struct cl_io_lock_link *link;
 	int result;
 
-	OBD_ALLOC_PTR(link);
+	link = kzalloc(sizeof(*link), GFP_NOFS);
 	if (link != NULL) {
 		link->cill_descr     = *descr;
 		link->cill_fini      = cl_free_io_lock_link;
@@ -715,6 +711,7 @@ static int cl_page_in_io(const struct cl_page *page, const struct cl_io *io)
 		 */
 		if (!cl_io_is_append(io)) {
 			const struct cl_io_rw_common *crw = &(io->u.ci_rw);
+
 			start = cl_offset(page->cp_obj, idx);
 			end   = cl_offset(page->cp_obj, idx + 1);
 			result = crw->crw_pos < end &&
@@ -918,7 +915,7 @@ int cl_io_submit_sync(const struct lu_env *env, struct cl_io *io,
 		 */
 		 cl_page_list_for_each(pg, &queue->c2_qin) {
 			pg->cp_sync_io = NULL;
-			cl_sync_io_note(anchor, +1);
+			cl_sync_io_note(anchor, 1);
 		 }
 
 		 /* wait for the IO to be finished. */
@@ -936,8 +933,8 @@ EXPORT_SYMBOL(cl_io_submit_sync);
 /**
  * Cancel an IO which has been submitted by cl_io_submit_rw.
  */
-int cl_io_cancel(const struct lu_env *env, struct cl_io *io,
-		 struct cl_page_list *queue)
+static int cl_io_cancel(const struct lu_env *env, struct cl_io *io,
+			struct cl_page_list *queue)
 {
 	struct cl_page *page;
 	int result = 0;
@@ -952,7 +949,6 @@ int cl_io_cancel(const struct lu_env *env, struct cl_io *io,
 	}
 	return result;
 }
-EXPORT_SYMBOL(cl_io_cancel);
 
 /**
  * Main io loop.
@@ -1040,7 +1036,6 @@ void cl_io_slice_add(struct cl_io *io, struct cl_io_slice *slice,
 }
 EXPORT_SYMBOL(cl_io_slice_add);
 
-
 /**
  * Initializes page list.
  */
@@ -1076,8 +1071,8 @@ EXPORT_SYMBOL(cl_page_list_add);
 /**
  * Removes a page from a page list.
  */
-void cl_page_list_del(const struct lu_env *env,
-		      struct cl_page_list *plist, struct cl_page *page)
+static void cl_page_list_del(const struct lu_env *env,
+			     struct cl_page_list *plist, struct cl_page *page)
 {
 	LASSERT(plist->pl_nr > 0);
 	LINVRNT(plist->pl_owner == current);
@@ -1090,7 +1085,6 @@ void cl_page_list_del(const struct lu_env *env,
 	lu_ref_del_at(&page->cp_reference, &page->cp_queue_ref, "queue", plist);
 	cl_page_put(env, page);
 }
-EXPORT_SYMBOL(cl_page_list_del);
 
 /**
  * Moves a page from one page list to another.
@@ -1167,7 +1161,8 @@ EXPORT_SYMBOL(cl_page_list_disown);
 /**
  * Releases pages from queue.
  */
-void cl_page_list_fini(const struct lu_env *env, struct cl_page_list *plist)
+static void cl_page_list_fini(const struct lu_env *env,
+			      struct cl_page_list *plist)
 {
 	struct cl_page *page;
 	struct cl_page *temp;
@@ -1178,39 +1173,12 @@ void cl_page_list_fini(const struct lu_env *env, struct cl_page_list *plist)
 		cl_page_list_del(env, plist, page);
 	LASSERT(plist->pl_nr == 0);
 }
-EXPORT_SYMBOL(cl_page_list_fini);
-
-/**
- * Owns all pages in a queue.
- */
-int cl_page_list_own(const struct lu_env *env,
-		     struct cl_io *io, struct cl_page_list *plist)
-{
-	struct cl_page *page;
-	struct cl_page *temp;
-	pgoff_t index = 0;
-	int result;
-
-	LINVRNT(plist->pl_owner == current);
-
-	result = 0;
-	cl_page_list_for_each_safe(page, temp, plist) {
-		LASSERT(index <= page->cp_index);
-		index = page->cp_index;
-		if (cl_page_own(env, io, page) == 0)
-			result = result ?: page->cp_error;
-		else
-			cl_page_list_del(env, plist, page);
-	}
-	return result;
-}
-EXPORT_SYMBOL(cl_page_list_own);
 
 /**
  * Assumes all pages in a queue.
  */
-void cl_page_list_assume(const struct lu_env *env,
-			 struct cl_io *io, struct cl_page_list *plist)
+static void cl_page_list_assume(const struct lu_env *env,
+				struct cl_io *io, struct cl_page_list *plist)
 {
 	struct cl_page *page;
 
@@ -1219,13 +1187,12 @@ void cl_page_list_assume(const struct lu_env *env,
 	cl_page_list_for_each(page, plist)
 		cl_page_assume(env, io, page);
 }
-EXPORT_SYMBOL(cl_page_list_assume);
 
 /**
  * Discards all pages in a queue.
  */
-void cl_page_list_discard(const struct lu_env *env, struct cl_io *io,
-			  struct cl_page_list *plist)
+static void cl_page_list_discard(const struct lu_env *env, struct cl_io *io,
+				 struct cl_page_list *plist)
 {
 	struct cl_page *page;
 
@@ -1233,27 +1200,6 @@ void cl_page_list_discard(const struct lu_env *env, struct cl_io *io,
 	cl_page_list_for_each(page, plist)
 		cl_page_discard(env, io, page);
 }
-EXPORT_SYMBOL(cl_page_list_discard);
-
-/**
- * Unmaps all pages in a queue from user virtual memory.
- */
-int cl_page_list_unmap(const struct lu_env *env, struct cl_io *io,
-			struct cl_page_list *plist)
-{
-	struct cl_page *page;
-	int result;
-
-	LINVRNT(plist->pl_owner == current);
-	result = 0;
-	cl_page_list_for_each(page, plist) {
-		result = cl_page_unmap(env, io, page);
-		if (result != 0)
-			break;
-	}
-	return result;
-}
-EXPORT_SYMBOL(cl_page_list_unmap);
 
 /**
  * Initialize dual page queue.
@@ -1264,15 +1210,6 @@ void cl_2queue_init(struct cl_2queue *queue)
 	cl_page_list_init(&queue->c2_qout);
 }
 EXPORT_SYMBOL(cl_2queue_init);
-
-/**
- * Add a page to the incoming page list of 2-queue.
- */
-void cl_2queue_add(struct cl_2queue *queue, struct cl_page *page)
-{
-	cl_page_list_add(&queue->c2_qin, page);
-}
-EXPORT_SYMBOL(cl_2queue_add);
 
 /**
  * Disown pages in both lists of a 2-queue.
@@ -1297,17 +1234,6 @@ void cl_2queue_discard(const struct lu_env *env,
 EXPORT_SYMBOL(cl_2queue_discard);
 
 /**
- * Assume to own the pages in cl_2queue
- */
-void cl_2queue_assume(const struct lu_env *env,
-		      struct cl_io *io, struct cl_2queue *queue)
-{
-	cl_page_list_assume(env, io, &queue->c2_qin);
-	cl_page_list_assume(env, io, &queue->c2_qout);
-}
-EXPORT_SYMBOL(cl_2queue_assume);
-
-/**
  * Finalize both page lists of a 2-queue.
  */
 void cl_2queue_fini(const struct lu_env *env, struct cl_2queue *queue)
@@ -1323,7 +1249,10 @@ EXPORT_SYMBOL(cl_2queue_fini);
 void cl_2queue_init_page(struct cl_2queue *queue, struct cl_page *page)
 {
 	cl_2queue_init(queue);
-	cl_2queue_add(queue, page);
+	/*
+	 * Add a page to the incoming page list of 2-queue.
+	 */
+	cl_page_list_add(&queue->c2_qin, page);
 }
 EXPORT_SYMBOL(cl_2queue_init_page);
 
@@ -1339,14 +1268,6 @@ struct cl_io *cl_io_top(struct cl_io *io)
 	return io;
 }
 EXPORT_SYMBOL(cl_io_top);
-
-/**
- * Prints human readable representation of \a io to the \a f.
- */
-void cl_io_print(const struct lu_env *env, void *cookie,
-		 lu_printer_t printer, const struct cl_io *io)
-{
-}
 
 /**
  * Adds request slice to the compound request.
@@ -1380,6 +1301,7 @@ static void cl_req_free(const struct lu_env *env, struct cl_req *req)
 	if (req->crq_o != NULL) {
 		for (i = 0; i < req->crq_nrobjs; ++i) {
 			struct cl_object *obj = req->crq_o[i].ro_obj;
+
 			if (obj != NULL) {
 				lu_object_ref_del_at(&obj->co_lu,
 						     &req->crq_o[i].ro_obj_ref,
@@ -1387,9 +1309,9 @@ static void cl_req_free(const struct lu_env *env, struct cl_req *req)
 				cl_object_put(env, obj);
 			}
 		}
-		OBD_FREE(req->crq_o, req->crq_nrobjs * sizeof(req->crq_o[0]));
+		kfree(req->crq_o);
 	}
-	OBD_FREE_PTR(req);
+	kfree(req);
 }
 
 static int cl_req_init(const struct lu_env *env, struct cl_req *req,
@@ -1448,7 +1370,7 @@ struct cl_req *cl_req_alloc(const struct lu_env *env, struct cl_page *page,
 
 	LINVRNT(nr_objects > 0);
 
-	OBD_ALLOC_PTR(req);
+	req = kzalloc(sizeof(*req), GFP_NOFS);
 	if (req != NULL) {
 		int result;
 
@@ -1456,7 +1378,8 @@ struct cl_req *cl_req_alloc(const struct lu_env *env, struct cl_page *page,
 		INIT_LIST_HEAD(&req->crq_pages);
 		INIT_LIST_HEAD(&req->crq_layers);
 
-		OBD_ALLOC(req->crq_o, nr_objects * sizeof(req->crq_o[0]));
+		req->crq_o = kcalloc(nr_objects, sizeof(req->crq_o[0]),
+				     GFP_NOFS);
 		if (req->crq_o != NULL) {
 			req->crq_nrobjs = nr_objects;
 			result = cl_req_init(env, req, page);

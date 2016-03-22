@@ -98,7 +98,8 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 			continue;
 		base = range_state[i].base_pfn;
 		if (base < (1<<(20-PAGE_SHIFT)) && mtrr_state.have_fixed &&
-		    (mtrr_state.enabled & 1)) {
+		    (mtrr_state.enabled & MTRR_STATE_MTRR_ENABLED) &&
+		    (mtrr_state.enabled & MTRR_STATE_MTRR_FIXED_ENABLED)) {
 			/* Var MTRR contains UC entry below 1M? Skip it: */
 			printk(BIOS_BUG_MSG, i);
 			if (base + size <= (1<<(20-PAGE_SHIFT)))
@@ -592,9 +593,16 @@ mtrr_calc_range_state(u64 chunk_size, u64 gran_size,
 		      unsigned long x_remove_base,
 		      unsigned long x_remove_size, int i)
 {
-	static struct range range_new[RANGE_NUM];
+	/*
+	 * range_new should really be an automatic variable, but
+	 * putting 4096 bytes on the stack is frowned upon, to put it
+	 * mildly. It is safe to make it a static __initdata variable,
+	 * since mtrr_calc_range_state is only called during init and
+	 * there's no way it will call itself recursively.
+	 */
+	static struct range range_new[RANGE_NUM] __initdata;
 	unsigned long range_sums_new;
-	static int nr_range_new;
+	int nr_range_new;
 	int num_reg;
 
 	/* Convert ranges to var ranges state: */

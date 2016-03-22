@@ -46,7 +46,6 @@ struct usbhs_pipe {
 struct usbhs_pipe_info {
 	struct usbhs_pipe *pipe;
 	int size;	/* array size of "pipe" */
-	int bufnmb_last;	/* FIXME : driver needs good allocator */
 
 	int (*dma_map_ctrl)(struct usbhs_pkt *pkt, int map);
 };
@@ -97,6 +96,7 @@ void usbhs_pipe_set_trans_count_if_bulk(struct usbhs_pipe *pipe, int len);
 void usbhs_pipe_select_fifo(struct usbhs_pipe *pipe, struct usbhs_fifo *fifo);
 void usbhs_pipe_config_update(struct usbhs_pipe *pipe, u16 devsel,
 			      u16 epnum, u16 maxp);
+void usbhs_pipe_config_change_bfre(struct usbhs_pipe *pipe, int enable);
 
 #define usbhs_pipe_sequence_data0(pipe)	usbhs_pipe_data_sequence(pipe, 0)
 #define usbhs_pipe_sequence_data1(pipe)	usbhs_pipe_data_sequence(pipe, 1)

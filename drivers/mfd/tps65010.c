@@ -499,11 +499,11 @@ static int tps65010_gpio_get(struct gpio_chip *chip, unsigned offset)
 	if (offset < 4) {
 		value = i2c_smbus_read_byte_data(tps->client, TPS_DEFGPIO);
 		if (value < 0)
-			return 0;
+			return value;
 		if (value & (1 << (offset + 4)))	/* output */
 			return !(value & (1 << offset));
 		else					/* input */
-			return (value & (1 << offset));
+			return !!(value & (1 << offset));
 	}
 
 	/* REVISIT we *could* report LED1/nPG and LED2 state ... */
@@ -515,7 +515,7 @@ static int tps65010_gpio_get(struct gpio_chip *chip, unsigned offset)
 
 static struct tps65010 *the_tps;
 
-static int __exit tps65010_remove(struct i2c_client *client)
+static int tps65010_remove(struct i2c_client *client)
 {
 	struct tps65010		*tps = i2c_get_clientdata(client);
 	struct tps65010_board	*board = dev_get_platdata(&client->dev);
@@ -638,7 +638,7 @@ static int tps65010_probe(struct i2c_client *client,
 		tps->outmask = board->outmask;
 
 		tps->chip.label = client->name;
-		tps->chip.dev = &client->dev;
+		tps->chip.parent = &client->dev;
 		tps->chip.owner = THIS_MODULE;
 
 		tps->chip.set = tps65010_gpio_set;
@@ -684,7 +684,7 @@ static struct i2c_driver tps65010_driver = {
 		.name	= "tps65010",
 	},
 	.probe	= tps65010_probe,
-	.remove	= __exit_p(tps65010_remove),
+	.remove	= tps65010_remove,
 	.id_table = tps65010_id,
 };
 

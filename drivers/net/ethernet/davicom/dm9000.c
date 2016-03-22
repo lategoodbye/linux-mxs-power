@@ -36,6 +36,9 @@
 #include <linux/platform_device.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
+#include <linux/regulator/consumer.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 
 #include <asm/delay.h>
 #include <asm/irq.h>
@@ -125,7 +128,6 @@ struct board_info {
 	struct resource *data_res;
 	struct resource	*addr_req;   /* resources requested */
 	struct resource *data_req;
-	struct resource *irq_res;
 
 	int		 irq_wake;
 
@@ -1223,7 +1225,7 @@ static irqreturn_t dm9000_interrupt(int irq, void *dev_id)
 	if (int_status & ISR_PRS)
 		dm9000_rx(dev);
 
-	/* Trnasmit Interrupt check */
+	/* Transmit Interrupt check */
 	if (int_status & ISR_PTS)
 		dm9000_tx_done(dev, db);
 
@@ -1297,21 +1299,15 @@ static int
 dm9000_open(struct net_device *dev)
 {
 	struct board_info *db = netdev_priv(dev);
-	unsigned long irqflags = db->irq_res->flags & IRQF_TRIGGER_MASK;
 
 	if (netif_msg_ifup(db))
 		dev_dbg(db->dev, "enabling %s\n", dev->name);
 
-	/* If there is no IRQ type specified, default to something that
-	 * may work, and tell the user that this is a problem */
-
-	if (irqflags == IRQF_TRIGGER_NONE)
-		irqflags = irq_get_trigger_type(dev->irq);
-
-	if (irqflags == IRQF_TRIGGER_NONE)
+	/* If there is no IRQ type specified, tell the user that this is a
+	 * problem
+	 */
+	if (irq_get_trigger_type(dev->irq) == IRQF_TRIGGER_NONE)
 		dev_warn(db->dev, "WARNING: no IRQ resource flags set.\n");
-
-	irqflags |= IRQF_SHARED;
 
 	/* GPIO0 on pre-activate PHY, Reg 1F is not set by reset */
 	iow(db, DM9000_GPR, 0);	/* REG_1F bit0 activate phyxcer */
@@ -1320,7 +1316,8 @@ dm9000_open(struct net_device *dev)
 	/* Initialize DM9000 board */
 	dm9000_init_dm9000(dev);
 
-	if (request_irq(dev->irq, dm9000_interrupt, irqflags, dev->name, dev))
+	if (request_irq(dev->irq, dm9000_interrupt, IRQF_SHARED,
+			dev->name, dev))
 		return -EAGAIN;
 	/* Now that we have an interrupt handler hooked up we can unmask
 	 * our interrupts
@@ -1426,11 +1423,48 @@ dm9000_probe(struct platform_device *pdev)
 	struct dm9000_plat_data *pdata = dev_get_platdata(&pdev->dev);
 	struct board_info *db;	/* Point a board information structure */
 	struct net_device *ndev;
+	struct device *dev = &pdev->dev;
 	const unsigned char *mac_src;
 	int ret = 0;
 	int iosize;
 	int i;
 	u32 id_val;
+	int reset_gpios;
+	enum of_gpio_flags flags;
+	struct regulator *power;
+
+	power = devm_regulator_get(dev, "vcc");
+	if (IS_ERR(power)) {
+		if (PTR_ERR(power) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_dbg(dev, "no regulator provided\n");
+	} else {
+		ret = regulator_enable(power);
+		if (ret != 0) {
+			dev_err(dev,
+				"Failed to enable power regulator: %d\n", ret);
+			return ret;
+		}
+		dev_dbg(dev, "regulator enabled\n");
+	}
+
+	reset_gpios = of_get_named_gpio_flags(dev->of_node, "reset-gpios", 0,
+					      &flags);
+	if (gpio_is_valid(reset_gpios)) {
+		ret = devm_gpio_request_one(dev, reset_gpios, flags,
+					    "dm9000_reset");
+		if (ret) {
+			dev_err(dev, "failed to request reset gpio %d: %d\n",
+				reset_gpios, ret);
+			return -ENODEV;
+		}
+
+		/* According to manual PWRST# Low Period Min 1ms */
+		msleep(2);
+		gpio_set_value(reset_gpios, 1);
+		/* Needs 3ms to read eeprom when PWRST is deasserted */
+		msleep(4);
+	}
 
 	if (!pdata) {
 		pdata = dm9000_parse_dt(&pdev->dev);
@@ -1460,12 +1494,19 @@ dm9000_probe(struct platform_device *pdev)
 
 	db->addr_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	db->data_res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	db->irq_res  = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 
-	if (db->addr_res == NULL || db->data_res == NULL ||
-	    db->irq_res == NULL) {
-		dev_err(db->dev, "insufficient resources\n");
+	if (!db->addr_res || !db->data_res) {
+		dev_err(db->dev, "insufficient resources addr=%p data=%p\n",
+			db->addr_res, db->data_res);
 		ret = -ENOENT;
+		goto out;
+	}
+
+	ndev->irq = platform_get_irq(pdev, 0);
+	if (ndev->irq < 0) {
+		dev_err(db->dev, "interrupt resource unavailable: %d\n",
+			ndev->irq);
+		ret = ndev->irq;
 		goto out;
 	}
 
@@ -1530,7 +1571,6 @@ dm9000_probe(struct platform_device *pdev)
 
 	/* fill in parameters for net-dev structure */
 	ndev->base_addr = (unsigned long)db->io_addr;
-	ndev->irq	= db->irq_res->start;
 
 	/* ensure at least we have a default set of IO routines */
 	dm9000_set_io(db, iosize);

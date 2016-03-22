@@ -13,6 +13,9 @@
  * GNU General Public License for more details.
  */
 
+#ifndef _DT_BINDINGS_CLK_ROCKCHIP_RK3288_H
+#define _DT_BINDINGS_CLK_ROCKCHIP_RK3288_H
+
 /* core clocks */
 #define PLL_APLL		1
 #define PLL_DPLL		2
@@ -80,6 +83,14 @@
 #define SCLK_SDIO0_SAMPLE	119
 #define SCLK_SDIO1_SAMPLE	120
 #define SCLK_EMMC_SAMPLE	121
+#define SCLK_USBPHY480M_SRC	122
+#define SCLK_PVTM_CORE		123
+#define SCLK_PVTM_GPU		124
+#define SCLK_CRYPTO		125
+#define SCLK_MIPIDSI_24M	126
+
+#define SCLK_MAC		151
+#define SCLK_MACREF_OUT		152
 
 #define DCLK_VOP0		190
 #define DCLK_VOP1		191
@@ -154,6 +165,9 @@
 #define PCLK_PUBL0		365
 #define PCLK_DDRUPCTL1		366
 #define PCLK_PUBL1		367
+#define PCLK_WDT		368
+#define PCLK_EFUSE256		369
+#define PCLK_EFUSE1024		370
 
 /* hclk gates */
 #define HCLK_GPS		448
@@ -369,3 +383,5 @@
 #define SRST_TSP_CLKIN0		189
 #define SRST_TSP_CLKIN1		190
 #define SRST_TSP_27M		191
+
+#endif

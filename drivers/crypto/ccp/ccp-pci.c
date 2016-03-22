@@ -44,7 +44,7 @@ static int ccp_get_msix_irqs(struct ccp_device *ccp)
 {
 	struct ccp_pci *ccp_pci = ccp->dev_specific;
 	struct device *dev = ccp->dev;
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
 	struct msix_entry msix_entry[MSIX_VECTORS];
 	unsigned int name_len = sizeof(ccp_pci->msix[0].name) - 1;
 	int v, ret;
@@ -86,7 +86,7 @@ e_irq:
 static int ccp_get_msi_irq(struct ccp_device *ccp)
 {
 	struct device *dev = ccp->dev;
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
 	int ret;
 
 	ret = pci_enable_msi(pdev);
@@ -133,7 +133,7 @@ static void ccp_free_irqs(struct ccp_device *ccp)
 {
 	struct ccp_pci *ccp_pci = ccp->dev_specific;
 	struct device *dev = ccp->dev;
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
 
 	if (ccp_pci->msix_count) {
 		while (ccp_pci->msix_count--)
@@ -149,7 +149,7 @@ static void ccp_free_irqs(struct ccp_device *ccp)
 static int ccp_find_mmio_area(struct ccp_device *ccp)
 {
 	struct device *dev = ccp->dev;
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
+	struct pci_dev *pdev = to_pci_dev(dev);
 	resource_size_t io_len;
 	unsigned long io_flags;
 
@@ -174,11 +174,10 @@ static int ccp_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!ccp)
 		goto e_err;
 
-	ccp_pci = kzalloc(sizeof(*ccp_pci), GFP_KERNEL);
-	if (!ccp_pci) {
-		ret = -ENOMEM;
-		goto e_free1;
-	}
+	ccp_pci = devm_kzalloc(dev, sizeof(*ccp_pci), GFP_KERNEL);
+	if (!ccp_pci)
+		goto e_err;
+
 	ccp->dev_specific = ccp_pci;
 	ccp->get_irq = ccp_get_irqs;
 	ccp->free_irq = ccp_free_irqs;
@@ -186,7 +185,7 @@ static int ccp_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = pci_request_regions(pdev, "ccp");
 	if (ret) {
 		dev_err(dev, "pci_request_regions failed (%d)\n", ret);
-		goto e_free2;
+		goto e_err;
 	}
 
 	ret = pci_enable_device(pdev);
@@ -204,7 +203,7 @@ static int ccp_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	ret = -EIO;
 	ccp->io_map = pci_iomap(pdev, bar, 0);
-	if (ccp->io_map == NULL) {
+	if (!ccp->io_map) {
 		dev_err(dev, "pci_iomap failed\n");
 		goto e_device;
 	}
@@ -239,12 +238,6 @@ e_device:
 e_regions:
 	pci_release_regions(pdev);
 
-e_free2:
-	kfree(ccp_pci);
-
-e_free1:
-	kfree(ccp);
-
 e_err:
 	dev_notice(dev, "initialization failed\n");
 	return ret;
@@ -265,8 +258,6 @@ static void ccp_pci_remove(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 
 	pci_release_regions(pdev);
-
-	kfree(ccp);
 
 	dev_notice(dev, "disabled\n");
 }
@@ -328,7 +319,7 @@ static const struct pci_device_id ccp_pci_table[] = {
 MODULE_DEVICE_TABLE(pci, ccp_pci_table);
 
 static struct pci_driver ccp_pci_driver = {
-	.name = "AMD Cryptographic Coprocessor",
+	.name = "ccp",
 	.id_table = ccp_pci_table,
 	.probe = ccp_pci_probe,
 	.remove = ccp_pci_remove,

@@ -119,6 +119,20 @@ static int da9063_wdt_set_timeout(struct watchdog_device *wdd,
 	return ret;
 }
 
+static int da9063_wdt_restart(struct watchdog_device *wdd)
+{
+	struct da9063_watchdog *wdt = watchdog_get_drvdata(wdd);
+	int ret;
+
+	ret = regmap_write(wdt->da9063->regmap, DA9063_REG_CONTROL_F,
+			   DA9063_SHUTDOWN);
+	if (ret)
+		dev_alert(wdt->da9063->dev, "Failed to shutdown (err = %d)\n",
+			  ret);
+
+	return ret;
+}
+
 static const struct watchdog_info da9063_watchdog_info = {
 	.options = WDIOF_SETTIMEOUT | WDIOF_KEEPALIVEPING,
 	.identity = "DA9063 Watchdog",
@@ -130,6 +144,7 @@ static const struct watchdog_ops da9063_watchdog_ops = {
 	.stop = da9063_wdt_stop,
 	.ping = da9063_wdt_ping,
 	.set_timeout = da9063_wdt_set_timeout,
+	.restart = da9063_wdt_restart,
 };
 
 static int da9063_wdt_probe(struct platform_device *pdev)
@@ -156,15 +171,20 @@ static int da9063_wdt_probe(struct platform_device *pdev)
 	wdt->wdtdev.min_timeout = DA9063_WDT_MIN_TIMEOUT;
 	wdt->wdtdev.max_timeout = DA9063_WDT_MAX_TIMEOUT;
 	wdt->wdtdev.timeout = DA9063_WDG_TIMEOUT;
+	wdt->wdtdev.parent = &pdev->dev;
 
 	wdt->wdtdev.status = WATCHDOG_NOWAYOUT_INIT_STATUS;
+
+	watchdog_set_restart_priority(&wdt->wdtdev, 128);
 
 	watchdog_set_drvdata(&wdt->wdtdev, wdt);
 	dev_set_drvdata(&pdev->dev, wdt);
 
 	ret = watchdog_register_device(&wdt->wdtdev);
+	if (ret)
+		return ret;
 
-	return ret;
+	return 0;
 }
 
 static int da9063_wdt_remove(struct platform_device *pdev)

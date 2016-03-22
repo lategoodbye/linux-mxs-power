@@ -226,15 +226,9 @@ static ssize_t cachefiles_daemon_write(struct file *file,
 		return -EOPNOTSUPP;
 
 	/* drag the command string into the kernel so we can parse it */
-	data = kmalloc(datalen + 1, GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
-
-	ret = -EFAULT;
-	if (copy_from_user(data, _data, datalen) != 0)
-		goto error;
-
-	data[datalen] = '\0';
+	data = memdup_user_nul(_data, datalen);
+	if (IS_ERR(data))
+		return PTR_ERR(data);
 
 	ret = -EINVAL;
 	if (memchr(data, '\0', datalen))
@@ -574,7 +568,7 @@ static int cachefiles_daemon_cull(struct cachefiles_cache *cache, char *args)
 	/* extract the directory dentry from the cwd */
 	get_fs_pwd(current->fs, &path);
 
-	if (!S_ISDIR(path.dentry->d_inode->i_mode))
+	if (!d_can_lookup(path.dentry))
 		goto notdir;
 
 	cachefiles_begin_secure(cache, &saved_cred);
@@ -646,7 +640,7 @@ static int cachefiles_daemon_inuse(struct cachefiles_cache *cache, char *args)
 	/* extract the directory dentry from the cwd */
 	get_fs_pwd(current->fs, &path);
 
-	if (!S_ISDIR(path.dentry->d_inode->i_mode))
+	if (!d_can_lookup(path.dentry))
 		goto notdir;
 
 	cachefiles_begin_secure(cache, &saved_cred);

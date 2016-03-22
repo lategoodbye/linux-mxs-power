@@ -254,6 +254,16 @@ void sync_pt_free(struct sync_pt *pt);
  */
 struct sync_fence *sync_fence_create(const char *name, struct sync_pt *pt);
 
+/**
+ * sync_fence_create_dma() - creates a sync fence from dma-fence
+ * @name:	name of fence to create
+ * @pt:	dma-fence to add to the fence
+ *
+ * Creates a fence containg @pt.  Once this is called, the fence takes
+ * ownership of @pt.
+ */
+struct sync_fence *sync_fence_create_dma(const char *name, struct fence *pt);
+
 /*
  * API for sync_fence consumers
  */
@@ -337,11 +347,11 @@ int sync_fence_wait(struct sync_fence *fence, long timeout);
 
 #ifdef CONFIG_DEBUG_FS
 
-extern void sync_timeline_debug_add(struct sync_timeline *obj);
-extern void sync_timeline_debug_remove(struct sync_timeline *obj);
-extern void sync_fence_debug_add(struct sync_fence *fence);
-extern void sync_fence_debug_remove(struct sync_fence *fence);
-extern void sync_dump(void);
+void sync_timeline_debug_add(struct sync_timeline *obj);
+void sync_timeline_debug_remove(struct sync_timeline *obj);
+void sync_fence_debug_add(struct sync_fence *fence);
+void sync_fence_debug_remove(struct sync_fence *fence);
+void sync_dump(void);
 
 #else
 # define sync_timeline_debug_add(obj)
