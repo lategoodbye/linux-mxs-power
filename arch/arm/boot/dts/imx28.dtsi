@@ -1126,6 +1126,12 @@
 					regulator-boot-on;
 					regulator-always-on;
 				};
+
+				pswitch: pswitch@5 {
+					compatible = "fsl,imx28-pswitch";
+					linux,code = <116>;
+					interrupts = <6>;
+				};
 			};
 
 			saif1: saif@80046000 {
