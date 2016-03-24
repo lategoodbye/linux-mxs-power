@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/suspend.h>
 #include <linux/io.h>
+#include <linux/platform_device.h>
 #include "pm.h"
 
 static int mxs_suspend_enter(suspend_state_t state)
@@ -35,7 +36,12 @@ static struct platform_suspend_ops mxs_suspend_ops = {
 	.valid = suspend_valid_only_mem,
 };
 
+static struct platform_device mxs_cpufreq_pdev = {
+	.name = "cpufreq-dt",
+};
+
 void __init mxs_pm_init(void)
 {
 	suspend_set_ops(&mxs_suspend_ops);
+	platform_device_register(&mxs_cpufreq_pdev);
 }
