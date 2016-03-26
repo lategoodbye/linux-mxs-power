@@ -45,17 +45,45 @@
 			compatible = "arm,arm926ej-s";
 			device_type = "cpu";
 			reg = <0x0>;
-			operating-points = <
-				/* kHz	uV */
-				64000	1300000
-				261819  1350000
-				360000  1350000
-				392728  1450000
-				454737  1550000
-			>;
 			clocks = <&clks 21>;
-			clock-latency = <61036>; /* two CLK32 periods */
+			clock-names = "cpu";
 			cpu-supply = <&reg_vddd>;
+			operating-points-v2 = <&cpu0_opp_table>;
+		};
+	};
+
+	cpu0_opp_table: opp_table0 {
+		compatible = "operating-points-v2";
+
+		opp00 {
+			opp-hz = /bits/ 64 <64000000>;
+			opp-microvolt = <1300000>;
+			clock-latency-ns = <61036>;
+			opp-suspend;
+		};
+
+		opp01 {
+			opp-hz = /bits/ 64 <261818181>;
+			opp-microvolt = <1350000>;
+			clock-latency-ns = <61036>;
+		};
+
+		opp02 {
+			opp-hz = /bits/ 64 <360000000>;
+			opp-microvolt = <1350000>;
+			clock-latency-ns = <61036>;
+		};
+
+		opp03 {
+			opp-hz = /bits/ 64 <392727272>;
+			opp-microvolt = <1450000>;
+			clock-latency-ns = <61036>;
+		};
+
+		opp04 {
+			opp-hz = /bits/ 64 <454736842>;
+			opp-microvolt = <1550000>;
+			clock-latency-ns = <61036>;
 		};
 	};
 
