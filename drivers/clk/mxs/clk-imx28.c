@@ -118,10 +118,14 @@ static void __init clk_misc_init(void)
 	/*
 	 * 480 MHz seems too high to be ssp clock source directly,
 	 * so set frac0 to get a 288 MHz ref_io0 and ref_io1.
+	 * According to reference manual we must change frac0 bytewise.
 	 */
 	val = readl_relaxed(FRAC0);
-	val &= ~((0x3f << BP_FRAC0_IO0FRAC) | (0x3f << BP_FRAC0_IO1FRAC));
-	val |= (30 << BP_FRAC0_IO0FRAC) | (30 << BP_FRAC0_IO1FRAC);
+	val &= ~(0x3f << BP_FRAC0_IO0FRAC);
+	val |= (30 << BP_FRAC0_IO0FRAC);
+	writel_relaxed(val, FRAC0);
+	val &= ~(0x3f << BP_FRAC0_IO1FRAC);
+	val |= (30 << BP_FRAC0_IO1FRAC);
 	writel_relaxed(val, FRAC0);
 }
 
