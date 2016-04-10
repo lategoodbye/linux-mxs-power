@@ -295,6 +295,7 @@ struct mxs_lradc {
 #define	LRADC_CTRL1_LRADC_IRQ_EN(n)		(1 << ((n) + 16))
 #define	LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK	(0x1fff << 16)
 #define	LRADC_CTRL1_MX23_LRADC_IRQ_EN_MASK	(0x01ff << 16)
+#define	LRADC_CTRL1_MAPPED_CHANS_IRQ_EN_MASK	(0x00ff << 16)
 #define	LRADC_CTRL1_LRADC_IRQ_EN_OFFSET		16
 #define	LRADC_CTRL1_TOUCH_DETECT_IRQ		BIT(8)
 #define	LRADC_CTRL1_LRADC_IRQ(n)		(1 << (n))
@@ -371,13 +372,6 @@ static u32 mxs_lradc_plate_mask(struct mxs_lradc *lradc)
 	if (lradc->soc == IMX23_LRADC)
 		return LRADC_CTRL0_MX23_PLATE_MASK;
 	return LRADC_CTRL0_MX28_PLATE_MASK;
-}
-
-static u32 mxs_lradc_irq_en_mask(struct mxs_lradc *lradc)
-{
-	if (lradc->soc == IMX23_LRADC)
-		return LRADC_CTRL1_MX23_LRADC_IRQ_EN_MASK;
-	return LRADC_CTRL1_MX28_LRADC_IRQ_EN_MASK;
 }
 
 static u32 mxs_lradc_irq_mask(struct mxs_lradc *lradc)
@@ -1502,7 +1496,8 @@ static void mxs_lradc_hw_stop(struct mxs_lradc *lradc)
 {
 	int i;
 
-	mxs_lradc_reg_clear(lradc, mxs_lradc_irq_en_mask(lradc), LRADC_CTRL1);
+	mxs_lradc_reg_clear(lradc, LRADC_CTRL1_MAPPED_CHANS_IRQ_EN_MASK,
+			    LRADC_CTRL1);
 
 	for (i = 0; i < LRADC_MAX_DELAY_CHANS; i++)
 		mxs_lradc_reg_wrt(lradc, 0, LRADC_DELAY(i));
