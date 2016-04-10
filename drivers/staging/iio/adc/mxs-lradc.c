@@ -29,6 +29,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/stmp_device.h>
 #include <linux/sysfs.h>
@@ -1741,10 +1742,75 @@ static int mxs_lradc_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+static int mxs_lradc_suspend(struct device *dev)
+{
+	struct iio_dev *iio = dev_get_drvdata(dev);
+	struct mxs_lradc *lradc = iio_priv(iio);
+	struct input_dev *input = lradc->ts_input;
+	int ret = 0;
+
+	if (input) {
+		mutex_lock(&input->mutex);
+
+		/* Enable touchscreen wakeup irq */
+		if (input->users && device_may_wakeup(dev))
+			ret = enable_irq_wake(lradc->irq[0]);
+		else
+			mxs_lradc_disable_ts(lradc);
+
+		mutex_unlock(&input->mutex);
+	}
+
+	if (ret)
+		return ret;
+
+	mxs_lradc_hw_stop(lradc);
+
+	clk_disable_unprepare(lradc->clk);
+
+	return ret;
+}
+
+static int mxs_lradc_resume(struct device *dev)
+{
+	struct iio_dev *iio = dev_get_drvdata(dev);
+	struct mxs_lradc *lradc = iio_priv(iio);
+	struct input_dev *input = lradc->ts_input;
+	int ret = 0;
+
+	if (input) {
+		mutex_lock(&input->mutex);
+
+		/* Disable touchscreen wakeup irq */
+		if (input->users && device_may_wakeup(dev))
+			ret = disable_irq_wake(lradc->irq[0]);
+		else
+			mxs_lradc_enable_touch_detection(lradc);
+
+		mutex_unlock(&input->mutex);
+	}
+
+	if (ret)
+		return ret;
+
+	ret = clk_prepare_enable(lradc->clk);
+	if (ret)
+		return ret;
+
+	mxs_lradc_hw_init(lradc);
+
+	return ret;
+}
+#endif
+
+static SIMPLE_DEV_PM_OPS(mxs_lradc_pm_ops, mxs_lradc_suspend, mxs_lradc_resume);
+
 static struct platform_driver mxs_lradc_driver = {
 	.driver	= {
 		.name	= DRIVER_NAME,
 		.of_match_table = mxs_lradc_dt_ids,
+		.pm	= &mxs_lradc_pm_ops,
 	},
 	.probe	= mxs_lradc_probe,
 	.remove	= mxs_lradc_remove,
