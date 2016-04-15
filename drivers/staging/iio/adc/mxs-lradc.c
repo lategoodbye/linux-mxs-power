@@ -1742,8 +1742,7 @@ static int mxs_lradc_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int mxs_lradc_suspend(struct device *dev)
+static int __maybe_unused mxs_lradc_suspend(struct device *dev)
 {
 	struct iio_dev *iio = dev_get_drvdata(dev);
 	struct mxs_lradc *lradc = iio_priv(iio);
@@ -1772,12 +1771,18 @@ static int mxs_lradc_suspend(struct device *dev)
 	return ret;
 }
 
-static int mxs_lradc_resume(struct device *dev)
+static int __maybe_unused mxs_lradc_resume(struct device *dev)
 {
 	struct iio_dev *iio = dev_get_drvdata(dev);
 	struct mxs_lradc *lradc = iio_priv(iio);
 	struct input_dev *input = lradc->ts_input;
-	int ret = 0;
+	int ret;
+
+	ret = clk_prepare_enable(lradc->clk);
+	if (ret)
+		return ret;
+
+	mxs_lradc_hw_init(lradc);
 
 	if (input) {
 		mutex_lock(&input->mutex);
@@ -1791,18 +1796,8 @@ static int mxs_lradc_resume(struct device *dev)
 		mutex_unlock(&input->mutex);
 	}
 
-	if (ret)
-		return ret;
-
-	ret = clk_prepare_enable(lradc->clk);
-	if (ret)
-		return ret;
-
-	mxs_lradc_hw_init(lradc);
-
 	return ret;
 }
-#endif
 
 static SIMPLE_DEV_PM_OPS(mxs_lradc_pm_ops, mxs_lradc_suspend, mxs_lradc_resume);
 
