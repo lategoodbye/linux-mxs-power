@@ -39,6 +39,7 @@ static void __iomem *digctrl;
 #define TV			(CLKCTRL + 0x00d0)
 #define ETM			(CLKCTRL + 0x00e0)
 #define FRAC			(CLKCTRL + 0x00f0)
+#define FRAC1			(CLKCTRL + 0x0100)
 #define CLKSEQ			(CLKCTRL + 0x0110)
 
 #define BP_CPU_INTERRUPT_WAIT	12
@@ -89,7 +90,8 @@ enum imx23_clk {
 	cpu_xtal, hbus, xbus, lcdif_div, ssp_div, gpmi_div, emi_pll,
 	emi_xtal, etm_div, saif_div, clk32k_div, rtc, adc, spdif_div,
 	clk32k, dri, pwm, filt, uart, ssp, gpmi, spdif, emi, saif,
-	lcdif, etm, usb, usb_phy,
+	lcdif, etm, usb, usb_phy, vid_div, ref_vid, tv108m_ng, tv108m,
+	tv27m_div, tv27m,
 	clk_max
 };
 
@@ -157,6 +159,12 @@ static void __init mx23_clocks_init(struct device_node *np)
 	clks[etm] = mxs_clk_gate("etm", "etm_div", ETM, 31);
 	clks[usb] = mxs_clk_gate("usb", "usb_phy", DIGCTRL, 2);
 	clks[usb_phy] = clk_register_gate(NULL, "usb_phy", "pll", 0, PLLCTRL0, 18, 0, &mxs_lock);
+	clks[vid_div] = mxs_clk_fixed_factor("vid_div", "pll", 18, 20);
+	clks[ref_vid] = mxs_clk_gate("ref_vid", "vid_div", FRAC1, 31);
+	clks[tv108m_ng] = mxs_clk_fixed_factor("tv108m_ng", "ref_vid", 1, 4);
+	clks[tv108m] = mxs_clk_gate("tv108m", "tv108m_ng", TV, 31);
+	clks[tv27m_div] = mxs_clk_fixed_factor("tv27m_div", "tv108m_ng", 1, 4);
+	clks[tv27m] = mxs_clk_gate("tv27m", "tv27m_div", TV, 30);
 
 	for (i = 0; i < ARRAY_SIZE(clks); i++)
 		if (IS_ERR(clks[i])) {

@@ -53,6 +53,12 @@ clocks and IDs.
 	etm		39
 	usb		40
 	usb_phy		41
+	vid_div		42
+	ref_vid		43
+	tv108m_ng	44
+	tv108m		45
+	tv27m_div	46
+	tv27m		47
 
 Examples:
 
