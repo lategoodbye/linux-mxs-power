@@ -249,6 +249,13 @@ static void __init mx28_clocks_init(struct device_node *np)
 
 	clk_register_clkdev(clks[enet_out], NULL, "enet_out");
 
+	/*
+	 * Select PLL as the parent source of lcdif_sel clk to have a finer
+	 * granularity when calculating the LCD pixelclock
+	 */
+	if (clk_set_parent(clks[lcdif_sel], clks[ref_pix]))
+		pr_err("error setting ref_pix as parent of lcdif_sel\n");
+
 	for (i = 0; i < ARRAY_SIZE(clks_init_on); i++)
 		clk_prepare_enable(clks[clks_init_on[i]]);
 }
