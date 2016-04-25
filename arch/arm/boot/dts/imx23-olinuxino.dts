@@ -23,7 +23,7 @@
 		reg = <0x40000000 0x04000000>;
 	};
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			ssp0: ssp@80010000 {
 				compatible = "fsl,imx23-mmc";
@@ -98,7 +98,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		usb0: usb@80080000 {
 			dr_mode = "host";
 			vbus-supply = <&reg_usb0_vbus>;

@@ -20,7 +20,7 @@
 		reg = <0x40000000 0x04000000>;
 	};
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			ssp0: ssp@80010000 {
 				compatible = "fsl,imx23-mmc";

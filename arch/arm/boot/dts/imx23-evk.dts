@@ -20,7 +20,7 @@
 		reg = <0x40000000 0x08000000>;
 	};
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			gpmi-nand@8000c000 {
 				pinctrl-names = "default";
@@ -119,7 +119,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		usb0: usb@80080000 {
 			status = "okay";
 		};
