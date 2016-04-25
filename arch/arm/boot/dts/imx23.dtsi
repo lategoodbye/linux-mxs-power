@@ -607,6 +607,11 @@
 		#size-cells = <1>;
 		ranges;
 
+		ocram: sram@00000000 {
+			compatible = "mmio-sram";
+			reg = <0x00000000 0x8000>;
+		};
+
 		usb0: usb@80080000 {
 			compatible = "fsl,imx23-usb", "fsl,imx27-usb";
 			reg = <0x80080000 0x40000>;
