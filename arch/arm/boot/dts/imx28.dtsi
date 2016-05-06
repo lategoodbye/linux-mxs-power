@@ -87,11 +87,10 @@
 		};
 	};
 
-	apb@80000000 {
+	apb {
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
-		reg = <0x80000000 0x80000>;
 		ranges;
 
 		apbh@80000000 {
@@ -1317,11 +1316,10 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
-		reg = <0x80080000 0x80000>;
 		ranges;
 
 		usb0: usb@80080000 {

@@ -16,7 +16,7 @@
 	model = "Armadeus Systems APF28Dev docking/development board";
 	compatible = "armadeus,imx28-apf28dev", "armadeus,imx28-apf28", "fsl,imx28";
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			ssp0: ssp@80010000 {
 				compatible = "fsl,imx28-mmc";
@@ -154,7 +154,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		usb0: usb@80080000 {
 			pinctrl-names = "default";
 			pinctrl-0 = <&usb0_otg_apf28dev

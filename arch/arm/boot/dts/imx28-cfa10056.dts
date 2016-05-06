@@ -19,7 +19,7 @@
 	model = "Crystalfontz CFA-10056 Board";
 	compatible = "crystalfontz,cfa10056", "crystalfontz,cfa10037", "crystalfontz,cfa10036", "fsl,imx28";
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			pinctrl@80018000 {
 				spi2_pins_cfa10056: spi2-cfa10056@0 {

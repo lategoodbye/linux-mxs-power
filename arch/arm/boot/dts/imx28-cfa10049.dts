@@ -19,7 +19,7 @@
 	model = "Crystalfontz CFA-10049 Board";
 	compatible = "crystalfontz,cfa10049", "crystalfontz,cfa10036", "fsl,imx28";
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			pinctrl@80018000 {
 				usb_pins_cfa10049: usb-10049@0 {
@@ -295,7 +295,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		usb1: usb@80090000 {
 			vbus-supply = <&reg_usb1_vbus>;
 			pinctrl-0 = <&usb1_pins_a>;
@@ -321,7 +321,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		mac0: ethernet@800f0000 {
 			phy-mode = "rmii";
 			pinctrl-names = "default";

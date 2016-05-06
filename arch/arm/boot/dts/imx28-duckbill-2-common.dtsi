@@ -18,7 +18,7 @@
 	model = "I2SE Duckbill 2";
 	compatible = "i2se,duckbill", "fsl,imx28";
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			ssp0: ssp@80010000 {
 				compatible = "fsl,imx28-mmc";
@@ -69,7 +69,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		mac0: ethernet@800f0000 {
 			phy-reset-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>;
 			phy-handle = <&ethphy>;

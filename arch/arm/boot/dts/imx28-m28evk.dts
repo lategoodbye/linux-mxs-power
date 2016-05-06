@@ -16,7 +16,7 @@
 	model = "DENX M28EVK";
 	compatible = "denx,m28evk", "fsl,imx28";
 
-	apb@80000000 {
+	apb {
 		apbh@80000000 {
 			ssp0: ssp@80010000 {
 				compatible = "fsl,imx28-mmc";
@@ -197,7 +197,7 @@
 		};
 	};
 
-	ahb@80080000 {
+	ahb {
 		usb0: usb@80080000 {
 			vbus-supply = <&reg_usb0_vbus>;
 			pinctrl-names = "default";
