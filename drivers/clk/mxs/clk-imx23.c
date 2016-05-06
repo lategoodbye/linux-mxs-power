@@ -10,6 +10,7 @@
  */
 
 #include <linux/clk/mxs.h>
+#include <linux/clkdev.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/err.h>
@@ -168,6 +169,11 @@ static void __init mx23_clocks_init(struct device_node *np)
 	clk_data.clks = clks;
 	clk_data.clk_num = ARRAY_SIZE(clks);
 	of_clk_add_provider(np, of_clk_src_onecell_get, &clk_data);
+
+	/* These clocks are used by the suspend platform code. */
+	clk_register_clkdev(clks[cpu], NULL, "cpu");
+	clk_register_clkdev(clks[cpu_xtal], NULL, "cpu_xtal");
+	clk_register_clkdev(clks[hbus], NULL, "hbus");
 
 	for (i = 0; i < ARRAY_SIZE(clks_init_on); i++)
 		clk_prepare_enable(clks[clks_init_on[i]]);
