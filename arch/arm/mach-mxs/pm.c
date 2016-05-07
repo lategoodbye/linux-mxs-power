@@ -114,12 +114,13 @@ static inline void __mxs_clrl(u32 mask, void __iomem *reg)
 static void get_virt_addr(const char *compat, void __iomem **paddr)
 {
 	struct device_node *np;
+	struct resource res;
 
 	np = of_find_compatible_node(NULL, NULL, compat);
-	*paddr = of_iomap(np, 0);
+	of_address_to_resource(np, 0, &res);
+	*paddr = ioremap(res.start, resource_size(&res));
 	WARN_ON(!*paddr);
-	of_node_put(np);
-	pr_debug("%s: address of %s is %p\n", __func__, compat, *paddr);
+	pr_info("%s: address of %s is %zu\n", __func__, compat, res.start);
 }
 
 static void mxs_do_standby(void)
