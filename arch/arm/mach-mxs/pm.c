@@ -353,7 +353,7 @@ static int __init mxs_suspend_init(void)
 	}
 
 	mxs_suspend_in_ocram_fn = fncpy(
-		suspend_ocram_base,
+		suspend_ocram_base + sizeof(*mxs_virt_addr),
 		suspend_asm,
 		*soc_data->suspend_asm_sz);
 
