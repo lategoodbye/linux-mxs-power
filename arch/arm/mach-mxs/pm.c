@@ -34,7 +34,7 @@
 
 #define HW_CLKCTRL_CLKSEQ		0x000001d0
 #define HW_CLKCTRL_XTAL			0x00000080
-#define HW_POWER_RESET                  0x00000100
+#define HW_POWER_RESET			0x00000100
 
 #define BM_POWER_CTRL_ENIRQ_PSWITCH	0x00020000
 #define BM_POWER_CTRL_PSWITCH_IRQ	0x00100000
@@ -133,7 +133,7 @@ static void mxs_do_standby(void)
 	unsigned long cpu_rate = 0;
 	unsigned long cpu_xtal_rate = 0;
 	unsigned long hbus_rate = 0;
-	u32 reg_clkctrl_clkseq, reg_clkctrl_xtal;
+	u32 reg_clkseq, reg_xtal;
 	int suspend_param = MXS_DONOT_SW_OSC_RTC_TO_BATT;
 
 	/*
@@ -188,19 +188,15 @@ static void mxs_do_standby(void)
 	__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
 		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
 
-	reg_clkctrl_clkseq = readl(mxs_virt_addr->clkctrl_addr +
-					 HW_CLKCTRL_CLKSEQ);
-
-	reg_clkctrl_xtal = readl(mxs_virt_addr->clkctrl_addr +
-				       HW_CLKCTRL_XTAL);
+	reg_clkseq = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
+	reg_xtal = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
 
 	/* do suspend */
 	mxs_suspend_in_ocram_fn(suspend_param, mxs_virt_addr);
 
-	writel(reg_clkctrl_clkseq, mxs_virt_addr->clkctrl_addr +
-		     HW_CLKCTRL_CLKSEQ);
-	writel(reg_clkctrl_xtal, mxs_virt_addr->clkctrl_addr +
-		     HW_CLKCTRL_XTAL);
+	writel(reg_clkseq, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
+	writel(reg_xtal, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
+
 	__mxs_clrl(BM_POWER_CTRL_PSWITCH_IRQ,
 		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
 	__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
@@ -209,8 +205,8 @@ static void mxs_do_standby(void)
 	local_fiq_enable();
 
 	if (clk_set_parent(cpu_clk, cpu_parent) < 0)
-		pr_err("%s: Failed to switch cpu clock back.\n",
-		       __func__);
+		pr_err("%s: Failed to switch cpu clock back.\n", __func__);
+
 	clk_set_rate(cpu_clk, cpu_rate);
 	clk_set_rate(hbus_clk, hbus_rate);
 
