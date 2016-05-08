@@ -17,20 +17,20 @@
 #include <asm/io.h>
 #include <asm/irqflags.h>
 
-#include <linux/compiler.h>
-#include <linux/kernel.h>
-#include <linux/pm.h>
-#include <linux/suspend.h>
-#include <linux/io.h>
-#include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/compiler.h>
+#include <linux/genalloc.h>
+#include <linux/io.h>
+#include <linux/kernel.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
-#include <linux/genalloc.h>
+#include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/suspend.h>
 
-#include "pm.h"
 #include "mxs-sleep.h"
+#include "pm.h"
 
 #define HW_CLKCTRL_CLKSEQ		0x000001d0
 #define HW_CLKCTRL_XTAL			0x00000080
