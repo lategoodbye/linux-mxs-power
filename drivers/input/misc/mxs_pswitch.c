@@ -49,6 +49,7 @@ struct mxs_pswitch_data {
 	struct input_dev *input;
 	struct regmap *syscon;
 	int irq;
+	bool wakeup;
 	unsigned int input_code;
 	struct delayed_work poll_key;
 };
@@ -100,6 +101,8 @@ static irqreturn_t mxs_pswitch_irq_handler(int irq, void *dev_id)
 	/* check if irq by power key */
 	if (ret || !val)
 		return IRQ_HANDLED;
+
+	pm_wakeup_event(info->input->dev.parent, 0);
 
 	/* Ack the irq */
 	regmap_write(info->syscon, HW_POWER_CTRL + STMP_OFFSET_REG_CLR,
@@ -167,6 +170,8 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 	if (of_property_read_u32(np, "linux,code", &info->input_code))
 		info->input_code = KEY_POWER;
 
+	info->wakeup = of_property_read_bool(np, "wakeup-source");
+
 	info->input = devm_input_allocate_device(dev);
 	if (!info->input)
 		return -ENOMEM;
@@ -202,6 +207,10 @@ static int mxs_pswitch_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	device_init_wakeup(dev, info->wakeup);
+
+	return 0;
+
 err:
 	cancel_delayed_work_sync(&info->poll_key);
 
@@ -217,6 +226,33 @@ static int mxs_pswitch_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int __maybe_unused mxs_pswitch_suspend(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
+
+	cancel_delayed_work_sync(&info->poll_key);
+
+	if (device_may_wakeup(&pdev->dev))
+		enable_irq_wake(info->irq);
+
+	return 0;
+}
+
+static int __maybe_unused mxs_pswitch_resume(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mxs_pswitch_data *info = platform_get_drvdata(pdev);
+
+	if (device_may_wakeup(&pdev->dev))
+		disable_irq_wake(info->irq);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(mxs_pswitch_pm,
+			 mxs_pswitch_suspend, mxs_pswitch_resume);
+
 static const struct of_device_id mxs_pswitch_of_match[] = {
 	{ .compatible = "fsl,imx23-pswitch" },
 	{ .compatible = "fsl,imx28-pswitch" },
@@ -229,6 +265,7 @@ static struct platform_driver mxs_pswitch_driver = {
 	.driver		= {
 		.name   = "mxs-pswitch",
 		.of_match_table = mxs_pswitch_of_match,
+		.pm     = &mxs_pswitch_pm,
 	},
 	.probe	= mxs_pswitch_probe,
 	.remove	= mxs_pswitch_remove,
