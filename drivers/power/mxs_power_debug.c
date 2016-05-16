@@ -154,6 +154,28 @@ mxs_power_vddio_mxs_show(struct seq_file *s, void *what)
 }
 
 static int
+mxs_power_vddmem_mxs_show(struct seq_file *s, void *what)
+{
+	struct mxs_power_data *data = s->private;
+	u32 value;
+	int ret = regmap_read(data->regmap, HW_POWER_VDDMEMCTRL, &value);
+
+	if (ret)
+		return ret;
+
+	seq_printf(s, "PULLDOWN_ACTIVE: %x\n", (value >> 10) & 1);
+	seq_printf(s, "ENABLE_ILIMIT: %x\n", (value >> 9) & 1);
+	seq_printf(s, "ENABLE_LINREG: %x\n", (value >> 8) & 1);
+
+	/* only MX28 */
+	seq_printf(s, "BO_OFFSET: %x\n", (value >> 5) & 7);
+
+	seq_printf(s, "TRG: %x\n", value & 0x1f);
+
+	return 0;
+}
+
+static int
 mxs_power_dcdc4p2_mxs_show(struct seq_file *s, void *what)
 {
 	struct mxs_power_data *data = s->private;
@@ -263,6 +285,12 @@ mxs_power_vddio_open(struct inode *inode, struct file *file)
 }
 
 static int
+mxs_power_vddmem_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mxs_power_vddmem_mxs_show, inode->i_private);
+}
+
+static int
 mxs_power_dcdc4p2_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, mxs_power_dcdc4p2_mxs_show, inode->i_private);
@@ -315,6 +343,13 @@ static const struct file_operations mxs_power_vddio_ops = {
 	.release = single_release,
 };
 
+static const struct file_operations mxs_power_vddmem_ops = {
+	.open = mxs_power_vddmem_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static const struct file_operations mxs_power_dcdc4p2_ops = {
 	.open = mxs_power_dcdc4p2_open,
 	.read = seq_read,
@@ -359,6 +394,8 @@ mxs_power_init_device_debugfs(struct mxs_power_data *data)
 			    &mxs_power_vdda_ops);
 	debugfs_create_file("vddio", S_IFREG | S_IRUGO, device_root, data,
 			    &mxs_power_vddio_ops);
+	debugfs_create_file("vddmem", S_IFREG | S_IRUGO, device_root, data,
+			    &mxs_power_vddmem_ops);
 	debugfs_create_file("dcdc4p2", S_IFREG | S_IRUGO, device_root, data,
 			    &mxs_power_dcdc4p2_ops);
 	debugfs_create_file("misc", S_IFREG | S_IRUGO, device_root, data,

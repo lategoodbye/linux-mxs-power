@@ -485,14 +485,23 @@
 					regulator-always-on;
 				};
 
-				dcdc: regulator@4 {
+				reg_vddmem: regulator@4 {
+					compatible = "fsl,imx23-vddmem";
+					regulator-name = "vddmem";
+					regulator-min-microvolt = <1700000>;
+					regulator-max-microvolt = <3250000>;
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
+				dcdc: regulator@5 {
 					compatible = "fsl,imx23-dcdc";
 					regulator-name = "dcdc";
 					regulator-boot-on;
 					regulator-always-on;
 				};
 
-				pswitch: pswitch@5 {
+				pswitch: pswitch@6 {
 					compatible = "fsl,imx23-pswitch";
 					linux,code = <116>;
 					interrupts = <3>;

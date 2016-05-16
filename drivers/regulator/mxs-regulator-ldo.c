@@ -1,16 +1,12 @@
 /*
  * Freescale MXS on-chip LDO driver
  *
- * Embedded Alley Solutions, Inc <source@embeddedalley.com>
- *
  * Copyright (C) 2014 Stefan Wahren
  * Copyright (C) 2010 Freescale Semiconductor, Inc.
  * Copyright (C) 2008 Embedded Alley Solutions, Inc All Rights Reserved.
  *
  * Inspired by imx-bootlets
- */
-
-/*
+ *
  * The code contained herein is licensed under the GNU General Public
  * License. You may obtain a copy of the GNU General Public License
  * Version 2 or later at the following locations:
@@ -42,6 +38,9 @@
 #define BM_POWER_5VCTRL_ENABLE_DCDC	BIT(0)
 
 #define BM_POWER_LINREG_OFFSET_DCDC_MODE	BIT(1)
+
+#define BM_POWER_VDDMEM_ENABLE_ILIMIT	BIT(9)
+
 struct mxs_ldo_info;
 
 struct mxs_ldo_info {
@@ -137,6 +136,21 @@ static u8 get_vddio_power_source(struct mxs_ldo_info *ldo)
 	}
 
 	return HW_POWER_UNKNOWN_SOURCE;
+}
+
+static u8 get_vddmem_power_source(struct mxs_ldo_info *ldo)
+{
+	struct regulator_desc *desc = &ldo->desc;
+	unsigned int mask = desc->enable_mask | BM_POWER_VDDMEM_ENABLE_ILIMIT;
+	u32 base;	
+
+	if (regmap_read(ldo->regmap, ldo->ctrl_reg, &base))
+		return HW_POWER_UNKNOWN_SOURCE;
+
+	if ((base & mask) == desc->enable_mask)
+		return HW_POWER_LINREG_DCDC_OFF;
+
+	return HW_POWER_DCDC_LINREG_OFF;
 }
 
 static u8 get_vdda_vddd_power_source(struct mxs_ldo_info *ldo)
@@ -296,6 +310,12 @@ static struct regulator_ops mxs_vdda_vddd_ops = {
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 };
 
+static struct regulator_ops mxs_vddmem_ops = {
+	.list_voltage		= regulator_list_voltage_linear,
+	.map_voltage		= regulator_map_voltage_linear,
+	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
+};
+
 static const struct mxs_ldo_info imx23_info_vddio = {
 	.desc = {
 		.name = "vddio",
@@ -352,6 +372,50 @@ static const struct mxs_ldo_info imx28_info_vddio = {
 	.irq_bo = 1 << 11,
 	.enirq_bo = 1 << 10,
 	.get_power_source = get_vddio_power_source,
+};
+
+static const struct mxs_ldo_info imx23_info_vddmem = {
+	.desc = {
+		.name = "vddmem",
+		.id = MXS_POWER_VDDMEM,
+		.type = REGULATOR_VOLTAGE,
+		.owner = THIS_MODULE,
+		.n_voltages = 0x20,
+		.uV_step = 50000,
+		.linear_min_sel = 0,
+		.min_uV = 1700000,
+		.vsel_reg = HW_POWER_VDDMEMCTRL,
+		.vsel_mask = 0x1f,
+		.ops = &mxs_vddmem_ops,
+		.enable_reg = HW_POWER_VDDMEMCTRL,
+		.enable_mask = 1 << 8,
+	},
+	.ctrl_reg = HW_POWER_VDDMEMCTRL,
+	.get_power_source = get_vddmem_power_source,
+};
+
+/* 
+ * The i.MX28 supports brownout detection for VDDMEM, but don't have an IRQ.
+ * So we leave this out.
+ */
+static const struct mxs_ldo_info imx28_info_vddmem = {
+	.desc = {
+		.name = "vddmem",
+		.id = MXS_POWER_VDDMEM,
+		.type = REGULATOR_VOLTAGE,
+		.owner = THIS_MODULE,
+		.n_voltages = 0x20,
+		.uV_step = 25000,
+		.linear_min_sel = 0,
+		.min_uV = 1100000,
+		.vsel_reg = HW_POWER_VDDMEMCTRL,
+		.vsel_mask = 0x1f,
+		.ops = &mxs_vddmem_ops,
+		.enable_reg = HW_POWER_VDDMEMCTRL,
+		.enable_mask = 1 << 8,
+	},
+	.ctrl_reg = HW_POWER_VDDMEMCTRL,
+	.get_power_source = get_vddmem_power_source,
 };
 
 static const struct mxs_ldo_info mxs_info_vdda = {
@@ -411,12 +475,14 @@ static const struct mxs_ldo_info mxs_info_vddd = {
 };
 
 static const struct of_device_id of_mxs_regulator_ldo_match[] = {
-	{ .compatible = "fsl,imx23-vddio", .data = &imx23_info_vddio },
-	{ .compatible = "fsl,imx23-vdda",  .data = &mxs_info_vdda },
-	{ .compatible = "fsl,imx23-vddd",  .data = &mxs_info_vddd },
-	{ .compatible = "fsl,imx28-vddio", .data = &imx28_info_vddio },
-	{ .compatible = "fsl,imx28-vdda",  .data = &mxs_info_vdda },
-	{ .compatible = "fsl,imx28-vddd",  .data = &mxs_info_vddd },
+	{ .compatible = "fsl,imx23-vddio",  .data = &imx23_info_vddio },
+	{ .compatible = "fsl,imx23-vdda",   .data = &mxs_info_vdda },
+	{ .compatible = "fsl,imx23-vddd",   .data = &mxs_info_vddd },
+	{ .compatible = "fsl,imx23-vddmem", .data = &imx23_info_vddmem },
+	{ .compatible = "fsl,imx28-vddio",  .data = &imx28_info_vddio },
+	{ .compatible = "fsl,imx28-vdda",   .data = &mxs_info_vdda },
+	{ .compatible = "fsl,imx28-vddd",   .data = &mxs_info_vddd },
+	{ .compatible = "fsl,imx28-vddmem", .data = &imx28_info_vddmem },
 	{ /* end */ }
 };
 MODULE_DEVICE_TABLE(of, of_mxs_regulator_ldo_match);

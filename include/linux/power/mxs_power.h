@@ -19,10 +19,11 @@
 #include <linux/stmp_device.h>
 
 /* Regulator IDs */
-#define MXS_POWER_DCDC	1
-#define MXS_POWER_VDDIO	2
-#define MXS_POWER_VDDA	3
-#define MXS_POWER_VDDD	4
+#define MXS_POWER_DCDC		1
+#define MXS_POWER_VDDIO		2
+#define MXS_POWER_VDDA		3
+#define MXS_POWER_VDDD		4
+#define MXS_POWER_VDDMEM	5
 
 /* MXS power register address offset */
 #define HW_POWER_CTRL		0x0000
@@ -30,6 +31,7 @@
 #define HW_POWER_VDDDCTRL	0x0040
 #define HW_POWER_VDDACTRL	0x0050
 #define HW_POWER_VDDIOCTRL	0x0060
+#define HW_POWER_VDDMEMCTRL	0x0070
 #define HW_POWER_DCDC4P2	0x0080
 #define HW_POWER_MISC		0x0090
 #define HW_POWER_STS		0x00c0

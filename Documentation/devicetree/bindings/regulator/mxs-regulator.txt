@@ -57,6 +57,7 @@ Required properties:
   - "fsl,<soc>-vddd" for VDDD linear regulator
   - "fsl,<soc>-vdda" for VDDA linear regulator
   - "fsl,<soc>-vddio" for VDDIO linear regulator
+  - "fsl,<soc>-vddmem" for VDDMEM linear regulator
 
 Optional properties:
 - switching-frequency: switching frequency for the DC-DC converter in Hz.
