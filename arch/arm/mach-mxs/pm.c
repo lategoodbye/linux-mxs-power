@@ -36,8 +36,6 @@
 #define HW_CLKCTRL_XTAL			0x00000080
 #define HW_POWER_RESET			0x00000100
 
-#define BM_POWER_CTRL_ENIRQ_PSWITCH	0x00020000
-#define BM_POWER_CTRL_PSWITCH_IRQ	0x00100000
 #define HW_POWER_CTRL			0x00000000
 #define BM_POWER_RESET_PWD		0x00000001
 #define BM_POWER_RESET_UNLOCK		0xFFFF0000
@@ -46,8 +44,6 @@
 #define HW_ICOLL_STAT			0x00000070
 
 #define MXS_SET_ADDR			0x4
-#define MXS_CLR_ADDR			0x8
-#define MXS_TOG_ADDR			0xc
 
 struct mxs_virt_addr_t {
 	void __iomem *clkctrl_addr;
@@ -100,16 +96,6 @@ static struct gen_pool *ocram_pool;
 static void __iomem *suspend_ocram_base;
 static const struct mxs_pm_socdata *soc_data;
 static void (*mxs_suspend_in_ocram_fn)(int arg1, void *arg2);
-
-static inline void __mxs_setl(u32 mask, void __iomem *reg)
-{
-	writel(mask, reg + MXS_SET_ADDR);
-}
-
-static inline void __mxs_clrl(u32 mask, void __iomem *reg)
-{
-	writel(mask, reg + MXS_CLR_ADDR);
-}
 
 static void get_virt_addr(const char *compat, void __iomem **paddr)
 {
@@ -185,9 +171,6 @@ static void mxs_do_standby(void)
 
 	local_fiq_disable();
 
-	__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
-		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
-
 	reg_clkseq = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
 	reg_xtal = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
 
@@ -196,11 +179,6 @@ static void mxs_do_standby(void)
 
 	writel(reg_clkseq, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
 	writel(reg_xtal, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
-
-	__mxs_clrl(BM_POWER_CTRL_PSWITCH_IRQ,
-		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
-	__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
-		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
 
 	local_fiq_enable();
 
@@ -247,8 +225,8 @@ static void mxs_pm_power_off(void)
 {
 	struct mxs_virt_addr_t *mxs_virt_addr = suspend_ocram_base;
 	/* Power down */
-	__mxs_setl(BF_POWER_RESET_UNLOCK(0x3e77) | BM_POWER_RESET_PWD,
-		   mxs_virt_addr->power_addr + HW_POWER_RESET);
+	writel(BF_POWER_RESET_UNLOCK(0x3e77) | BM_POWER_RESET_PWD,
+	       mxs_virt_addr->power_addr + HW_POWER_RESET + MXS_SET_ADDR);
 }
 
 static int __init mxs_suspend_alloc_ocram(size_t size, void __iomem **virt_out)
