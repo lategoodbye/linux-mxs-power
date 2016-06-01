@@ -53,7 +53,7 @@ struct mxs_virt_addr_t {
 	void __iomem *emi_addr;
 	/* These are not used */
 	void __iomem *rtc_addr;
-} __packed;
+} __aligned(8);
 
 struct mxs_pm_socdata {
 	const char *clkctrl_compat;
