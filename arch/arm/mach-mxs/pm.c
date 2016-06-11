@@ -169,8 +169,6 @@ static void mxs_do_standby(void)
 		goto cpu_clk_err;
 	}
 
-	local_fiq_disable();
-
 	reg_clkseq = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
 	reg_xtal = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
 
@@ -179,8 +177,6 @@ static void mxs_do_standby(void)
 
 	writel(reg_clkseq, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
 	writel(reg_xtal, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
-
-	local_fiq_enable();
 
 	if (clk_set_parent(cpu_clk, cpu_parent) < 0)
 		pr_err("%s: Failed to switch cpu clock back.\n", __func__);
