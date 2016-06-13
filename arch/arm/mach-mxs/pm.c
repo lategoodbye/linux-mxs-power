@@ -51,6 +51,7 @@ struct mxs_virt_addr_t {
 	void __iomem *dram_addr;
 	void __iomem *pinctrl_addr;
 	void __iomem *emi_addr;
+	void __iomem *icoll_addr;
 	/* These are not used */
 	void __iomem *rtc_addr;
 } __aligned(8);
@@ -309,6 +310,7 @@ static int __init mxs_suspend_init(void)
 	get_virt_addr(soc_data->dram_compat, &mxs_virt_addr->dram_addr);
 	get_virt_addr(soc_data->pinctrl_compat, &mxs_virt_addr->pinctrl_addr);
 	get_virt_addr(soc_data->emi_compat, &mxs_virt_addr->emi_addr);
+	get_virt_addr(soc_data->icoll_compat, &mxs_virt_addr->icoll_addr);
 	get_virt_addr(soc_data->rtc_compat, &mxs_virt_addr->rtc_addr);
 
 	suspend_asm = soc_data->suspend_asm;
