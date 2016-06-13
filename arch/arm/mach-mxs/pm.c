@@ -312,9 +312,7 @@ static int __init mxs_suspend_init(void)
 	get_virt_addr(soc_data->icoll_compat, &mxs_virt_addr->icoll_addr);
 	get_virt_addr(soc_data->rtc_compat, &mxs_virt_addr->rtc_addr);
 
-	suspend_asm = soc_data->suspend_asm;
-
-	if (!suspend_asm) {
+	if (!soc_data->suspend_asm) {
 		pr_info("%s: suspend_asm is NULL\n", __func__);
 		return 0;
 	}
@@ -323,6 +321,8 @@ static int __init mxs_suspend_init(void)
 		pr_info("%s: soc_data->suspend_asm_sz is NULL\n", __func__);
 		return -EINVAL;
 	}
+
+	suspend_asm = soc_data->suspend_asm;
 
 	mxs_suspend_in_ocram_fn = fncpy(
 		suspend_ocram_base + sizeof(*mxs_virt_addr),
