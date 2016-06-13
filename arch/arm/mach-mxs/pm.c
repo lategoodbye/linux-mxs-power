@@ -14,8 +14,7 @@
 
 #include <asm/cacheflush.h>
 #include <asm/fncpy.h>
-#include <asm/io.h>
-#include <asm/irqflags.h>
+#include <asm/tlbflush.h>
 
 #include <linux/clk.h>
 #include <linux/compiler.h>
@@ -131,6 +130,7 @@ static void mxs_do_standby(void)
 	/* make sure SRAM copy gets physically written into SDRAM.
 	 * SDRAM will be placed into self-refresh during power down
 	 */
+	local_flush_tlb_all();
 	flush_cache_all();
 
 	/* now switch the CPU to cpu_xtal */
