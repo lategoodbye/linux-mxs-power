@@ -92,7 +92,7 @@ static const struct mxs_pm_socdata imx28_pm_data __initconst = {
 };
 
 static unsigned long ocram_base;
-static struct gen_pool *ocram_pool;
+static struct gen_pool *ocram_pool = NULL;
 static void __iomem *suspend_ocram_base;
 static const struct mxs_pm_socdata *soc_data;
 static void (*mxs_suspend_in_ocram_fn)(int arg1, void *arg2);
