@@ -301,6 +301,7 @@ static int __init mxs_suspend_init(void)
 	if (ret)
 		return ret;
 
+	memset(suspend_ocram_base, 0, sizeof(*mxs_virt_addr));
 	mxs_virt_addr = suspend_ocram_base;
 
 	get_virt_addr(soc_data->clkctrl_compat, &mxs_virt_addr->clkctrl_addr);
