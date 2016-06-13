@@ -107,7 +107,6 @@ static void get_virt_addr(const char *compat, void __iomem **paddr)
 	of_address_to_resource(np, 0, &res);
 	*paddr = ioremap(res.start, resource_size(&res));
 	WARN_ON(!*paddr);
-	pr_info("%s: address of %s is %p\n", __func__, compat, *paddr);
 }
 
 static void mxs_do_standby(void)
