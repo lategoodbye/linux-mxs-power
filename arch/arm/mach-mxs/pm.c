@@ -91,6 +91,9 @@ static const struct mxs_pm_socdata imx28_pm_data __initconst = {
 	.suspend_asm_sz = &mx28_cpu_standby_sz,
 };
 
+static struct clk *cpu_clk;
+static struct clk *osc_clk;
+static struct clk *hbus_clk;
 static unsigned long ocram_base;
 static struct gen_pool *ocram_pool = NULL;
 static void __iomem *suspend_ocram_base;
@@ -111,9 +114,6 @@ static void get_virt_addr(const char *compat, void __iomem **paddr)
 static void mxs_do_standby(void)
 {
 	struct mxs_virt_addr_t *mxs_virt_addr = suspend_ocram_base;
-	struct clk *cpu_clk;
-	struct clk *osc_clk;
-	struct clk *hbus_clk;
 	struct clk *cpu_parent = NULL;
 	unsigned long cpu_rate = 0;
 	unsigned long cpu_xtal_rate = 0;
@@ -134,39 +134,19 @@ static void mxs_do_standby(void)
 	flush_cache_all();
 
 	/* now switch the CPU to cpu_xtal */
-	cpu_clk = clk_get_sys("cpu", NULL);
-	osc_clk = clk_get_sys("cpu_xtal", NULL);
-	hbus_clk = clk_get_sys("hbus", NULL);
-
-	if (IS_ERR(cpu_clk)) {
-		pr_err("%s: failed to get cpu_clk with %ld\n",
-		       __func__, PTR_ERR(cpu_clk));
-		goto cpu_clk_err;
-	}
-	if (IS_ERR(osc_clk)) {
-		pr_err("%s: failed to get osc_clk with %ld\n",
-		       __func__, PTR_ERR(osc_clk));
-		goto cpu_clk_err;
-	}
-	if (IS_ERR(hbus_clk)) {
-		pr_err("%s: failed to get hbus_clk with %ld\n",
-		       __func__, PTR_ERR(hbus_clk));
-		goto cpu_clk_err;
-	}
-
 	cpu_rate = clk_get_rate(cpu_clk);
 	cpu_xtal_rate = clk_get_rate(osc_clk);
 	cpu_parent = clk_get_parent(cpu_clk);
 	if (IS_ERR(cpu_parent)) {
 		pr_err("%s: failed to get cpu parent with %ld\n",
 		       __func__, PTR_ERR(cpu_parent));
-		goto cpu_clk_err;
+		return;
 	}
 	hbus_rate = clk_get_rate(hbus_clk);
 
 	if (clk_set_parent(cpu_clk, osc_clk) < 0) {
 		pr_err("%s: failed to switch cpu clocks.", __func__);
-		goto cpu_clk_err;
+		return;
 	}
 
 	reg_clkseq = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
@@ -183,11 +163,6 @@ static void mxs_do_standby(void)
 
 	clk_set_rate(cpu_clk, cpu_rate);
 	clk_set_rate(hbus_clk, hbus_rate);
-
-cpu_clk_err:
-	clk_put(hbus_clk);
-	clk_put(osc_clk);
-	clk_put(cpu_clk);
 }
 
 static int mxs_suspend_enter(suspend_state_t state)
@@ -322,6 +297,29 @@ static int __init mxs_suspend_init(void)
 		return -EINVAL;
 	}
 
+	cpu_clk = clk_get_sys("cpu", NULL);
+	osc_clk = clk_get_sys("cpu_xtal", NULL);
+	hbus_clk = clk_get_sys("hbus", NULL);
+
+	if (IS_ERR(cpu_clk)) {
+		pr_err("%s: failed to get cpu_clk with %ld\n",
+		       __func__, PTR_ERR(cpu_clk));
+		ret = -EIO;
+		goto cpu_clk_err;
+	}
+	if (IS_ERR(osc_clk)) {
+		pr_err("%s: failed to get osc_clk with %ld\n",
+		       __func__, PTR_ERR(osc_clk));
+		ret = -EIO;
+		goto cpu_clk_err;
+	}
+	if (IS_ERR(hbus_clk)) {
+		pr_err("%s: failed to get hbus_clk with %ld\n",
+		       __func__, PTR_ERR(hbus_clk));
+		ret = -EIO;
+		goto cpu_clk_err;
+	}
+
 	suspend_asm = soc_data->suspend_asm;
 
 	mxs_suspend_in_ocram_fn = fncpy(
@@ -334,6 +332,13 @@ static int __init mxs_suspend_init(void)
 	suspend_set_ops(&mxs_suspend_ops);
 
 	return 0;
+
+cpu_clk_err:
+	clk_put(hbus_clk);
+	clk_put(osc_clk);
+	clk_put(cpu_clk);
+
+	return ret;
 }
 
 void __init mxs_pm_init(void)
