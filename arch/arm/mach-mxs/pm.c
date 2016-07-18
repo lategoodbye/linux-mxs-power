@@ -132,7 +132,7 @@ static void mxs_do_standby(void)
 	unsigned long cpu_rate = 0;
 	unsigned long cpu_xtal_rate = 0;
 	unsigned long hbus_rate = 0;
-	u32 reg_clkseq, reg_xtal;
+	u32 reg_clkseq, reg_xtal, reg_pwrctrl;
 	int suspend_param = MXS_DONOT_SW_OSC_RTC_TO_BATT;
 
 	/*
@@ -163,8 +163,12 @@ static void mxs_do_standby(void)
 		return;
 	}
 
-	__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
-		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
+	/* Enable ENIRQ_PSWITCH */
+	reg_pwrctrl = readl(mxs_virt_addr->power_addr + HW_POWER_CTRL);
+	if (!(reg_pwrctrl & BM_POWER_CTRL_ENIRQ_PSWITCH)) {
+		__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
+			   mxs_virt_addr->power_addr + HW_POWER_CTRL);
+	}
 
 	reg_clkseq = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
 	reg_xtal = readl(mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
@@ -175,10 +179,16 @@ static void mxs_do_standby(void)
 	writel(reg_clkseq, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_CLKSEQ);
 	writel(reg_xtal, mxs_virt_addr->clkctrl_addr + HW_CLKCTRL_XTAL);
 
-	__mxs_clrl(BM_POWER_CTRL_PSWITCH_IRQ,
-		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
-	__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
-		   mxs_virt_addr->power_addr + HW_POWER_CTRL);
+	/* Restore ENIRQ_PSWITCH */
+	if (reg_pwrctrl & BM_POWER_CTRL_ENIRQ_PSWITCH) {
+		__mxs_setl(BM_POWER_CTRL_ENIRQ_PSWITCH,
+			   mxs_virt_addr->power_addr + HW_POWER_CTRL);
+	} else {
+		__mxs_clrl(BM_POWER_CTRL_PSWITCH_IRQ,
+			   mxs_virt_addr->power_addr + HW_POWER_CTRL);
+		__mxs_clrl(BM_POWER_CTRL_ENIRQ_PSWITCH,
+			   mxs_virt_addr->power_addr + HW_POWER_CTRL);
+	}
 
 	if (clk_set_parent(cpu_clk, cpu_parent) < 0)
 		pr_err("%s: Failed to switch cpu clock back.\n", __func__);
