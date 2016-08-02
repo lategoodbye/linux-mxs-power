@@ -67,6 +67,7 @@
 #define HW_TIMROT_RUNNING_COUNTn(n)	(0x30 + (n) * 0x40)
 #define HW_TIMROT_FIXED_COUNTn(n)	(0x40 + (n) * 0x40)
 
+#define BM_TIMROT_ROTCTRL_CLKGATE	(1 << 30)
 #define BM_TIMROT_TIMCTRLn_RELOAD	(1 << 6)
 #define BM_TIMROT_TIMCTRLn_UPDATE	(1 << 7)
 #define BM_TIMROT_TIMCTRLn_IRQ_EN	(1 << 14)
@@ -198,10 +199,56 @@ static int __init mxs_clockevent_init(struct clk *timer_clk)
 	return 0;
 }
 
+static void mxs_timer_hw_init(void)
+{
+	/*
+	 * Initialize timers to a known state
+	 */
+	stmp_reset_block(mxs_timrot_base + HW_TIMROT_ROTCTRL);
+
+	/* one for clock_event */
+	__raw_writel((timrot_is_v1() ?
+			BV_TIMROTv1_TIMCTRLn_SELECT__32KHZ_XTAL :
+			BV_TIMROTv2_TIMCTRLn_SELECT__TICK_ALWAYS) |
+			BM_TIMROT_TIMCTRLn_UPDATE |
+			BM_TIMROT_TIMCTRLn_IRQ_EN,
+			mxs_timrot_base + HW_TIMROT_TIMCTRLn(0));
+
+	/* another for clocksource */
+	__raw_writel((timrot_is_v1() ?
+			BV_TIMROTv1_TIMCTRLn_SELECT__32KHZ_XTAL :
+			BV_TIMROTv2_TIMCTRLn_SELECT__TICK_ALWAYS) |
+			BM_TIMROT_TIMCTRLn_RELOAD,
+			mxs_timrot_base + HW_TIMROT_TIMCTRLn(1));
+
+	/* set clocksource timer fixed count to the maximum */
+	if (timrot_is_v1())
+		__raw_writel(0xffff,
+			mxs_timrot_base + HW_TIMROT_TIMCOUNTn(1));
+	else
+		__raw_writel(0xffffffff,
+			mxs_timrot_base + HW_TIMROT_FIXED_COUNTn(1));
+}
+
+static void mxs_clocksource_suspend(struct clocksource *cs)
+{
+	__raw_writel(BM_TIMROT_TIMCTRLn_IRQ_EN | BM_TIMROT_TIMCTRLn_IRQ,
+			mxs_timrot_base  + HW_TIMROT_TIMCTRLn(0) + STMP_OFFSET_REG_CLR);
+	__raw_writel(BM_TIMROT_ROTCTRL_CLKGATE,
+			mxs_timrot_base  + HW_TIMROT_ROTCTRL + STMP_OFFSET_REG_SET);
+}
+
+static void mxs_clocksource_resume(struct clocksource *cs)
+{
+	mxs_timer_hw_init();
+}
+
 static struct clocksource clocksource_mxs = {
 	.name		= "mxs_timer",
 	.rating		= 200,
 	.read		= timrotv1_get_cycles,
+	.suspend	= mxs_clocksource_suspend,
+	.resume		= mxs_clocksource_resume,
 	.mask		= CLOCKSOURCE_MASK(16),
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
@@ -242,11 +289,6 @@ static void __init mxs_timer_init(struct device_node *np)
 
 	clk_prepare_enable(timer_clk);
 
-	/*
-	 * Initialize timers to a known state
-	 */
-	stmp_reset_block(mxs_timrot_base + HW_TIMROT_ROTCTRL);
-
 	/* get timrot version */
 	timrot_major_version = __raw_readl(mxs_timrot_base +
 			(of_device_is_compatible(np, "fsl,imx23-timrot") ?
@@ -254,28 +296,7 @@ static void __init mxs_timer_init(struct device_node *np)
 						MX28_TIMROT_VERSION_OFFSET));
 	timrot_major_version >>= BP_TIMROT_MAJOR_VERSION;
 
-	/* one for clock_event */
-	__raw_writel((timrot_is_v1() ?
-			BV_TIMROTv1_TIMCTRLn_SELECT__32KHZ_XTAL :
-			BV_TIMROTv2_TIMCTRLn_SELECT__TICK_ALWAYS) |
-			BM_TIMROT_TIMCTRLn_UPDATE |
-			BM_TIMROT_TIMCTRLn_IRQ_EN,
-			mxs_timrot_base + HW_TIMROT_TIMCTRLn(0));
-
-	/* another for clocksource */
-	__raw_writel((timrot_is_v1() ?
-			BV_TIMROTv1_TIMCTRLn_SELECT__32KHZ_XTAL :
-			BV_TIMROTv2_TIMCTRLn_SELECT__TICK_ALWAYS) |
-			BM_TIMROT_TIMCTRLn_RELOAD,
-			mxs_timrot_base + HW_TIMROT_TIMCTRLn(1));
-
-	/* set clocksource timer fixed count to the maximum */
-	if (timrot_is_v1())
-		__raw_writel(0xffff,
-			mxs_timrot_base + HW_TIMROT_TIMCOUNTn(1));
-	else
-		__raw_writel(0xffffffff,
-			mxs_timrot_base + HW_TIMROT_FIXED_COUNTn(1));
+	mxs_timer_hw_init();
 
 	/* init and register the timer to the framework */
 	mxs_clocksource_init(timer_clk);
