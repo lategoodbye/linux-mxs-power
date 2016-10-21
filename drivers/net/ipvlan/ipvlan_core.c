@@ -53,8 +53,8 @@ static u8 ipvlan_get_v4_hash(const void *iaddr)
 	       IPVLAN_HASH_MASK;
 }
 
-struct ipvl_addr *ipvlan_ht_addr_lookup(const struct ipvl_port *port,
-					const void *iaddr, bool is_v6)
+static struct ipvl_addr *ipvlan_ht_addr_lookup(const struct ipvl_port *port,
+					       const void *iaddr, bool is_v6)
 {
 	struct ipvl_addr *addr;
 	u8 hash;
@@ -254,6 +254,18 @@ acct:
 	}
 }
 
+static void ipvlan_skb_crossing_ns(struct sk_buff *skb, struct net_device *dev)
+{
+	bool xnet = true;
+
+	if (dev)
+		xnet = !net_eq(dev_net(skb->dev), dev_net(dev));
+
+	skb_scrub_packet(skb, xnet);
+	if (dev)
+		skb->dev = dev;
+}
+
 static int ipvlan_rcv_frame(struct ipvl_addr *addr, struct sk_buff **pskb,
 			    bool local)
 {
@@ -265,20 +277,25 @@ static int ipvlan_rcv_frame(struct ipvl_addr *addr, struct sk_buff **pskb,
 	struct sk_buff *skb = *pskb;
 
 	len = skb->len + ETH_HLEN;
-	if (unlikely(!(dev->flags & IFF_UP))) {
-		kfree_skb(skb);
-		goto out;
+	/* Only packets exchanged between two local slaves need to have
+	 * device-up check as well as skb-share check.
+	 */
+	if (local) {
+		if (unlikely(!(dev->flags & IFF_UP))) {
+			kfree_skb(skb);
+			goto out;
+		}
+
+		skb = skb_share_check(skb, GFP_ATOMIC);
+		if (!skb)
+			goto out;
+
+		*pskb = skb;
 	}
-
-	skb = skb_share_check(skb, GFP_ATOMIC);
-	if (!skb)
-		goto out;
-
-	*pskb = skb;
-	skb->dev = dev;
-	skb->pkt_type = PACKET_HOST;
+	ipvlan_skb_crossing_ns(skb, dev);
 
 	if (local) {
+		skb->pkt_type = PACKET_HOST;
 		if (dev_forward_skb(ipvlan->dev, skb) == NET_RX_SUCCESS)
 			success = true;
 	} else {
@@ -365,7 +382,6 @@ static int ipvlan_process_v4_outbound(struct sk_buff *skb)
 		ip_rt_put(rt);
 		goto err;
 	}
-	skb_dst_drop(skb);
 	skb_dst_set(skb, &rt->dst);
 	err = ip_local_out(net, skb->sk, skb);
 	if (unlikely(net_xmit_eval(err)))
@@ -403,7 +419,6 @@ static int ipvlan_process_v6_outbound(struct sk_buff *skb)
 		dst_release(dst);
 		goto err;
 	}
-	skb_dst_drop(skb);
 	skb_dst_set(skb, dst);
 	err = ip6_local_out(net, skb->sk, skb);
 	if (unlikely(net_xmit_eval(err)))
@@ -418,8 +433,7 @@ out:
 	return ret;
 }
 
-static int ipvlan_process_outbound(struct sk_buff *skb,
-				   const struct ipvl_dev *ipvlan)
+static int ipvlan_process_outbound(struct sk_buff *skb)
 {
 	struct ethhdr *ethh = eth_hdr(skb);
 	int ret = NET_XMIT_DROP;
@@ -491,8 +505,8 @@ static int ipvlan_xmit_mode_l3(struct sk_buff *skb, struct net_device *dev)
 		return ipvlan_rcv_frame(addr, &skb, true);
 
 out:
-	skb->dev = ipvlan->phy_dev;
-	return ipvlan_process_outbound(skb, ipvlan);
+	ipvlan_skb_crossing_ns(skb, ipvlan->phy_dev);
+	return ipvlan_process_outbound(skb);
 }
 
 static int ipvlan_xmit_mode_l2(struct sk_buff *skb, struct net_device *dev)
@@ -522,11 +536,12 @@ static int ipvlan_xmit_mode_l2(struct sk_buff *skb, struct net_device *dev)
 		return dev_forward_skb(ipvlan->phy_dev, skb);
 
 	} else if (is_multicast_ether_addr(eth->h_dest)) {
+		ipvlan_skb_crossing_ns(skb, NULL);
 		ipvlan_multicast_enqueue(ipvlan->port, skb);
 		return NET_XMIT_SUCCESS;
 	}
 
-	skb->dev = ipvlan->phy_dev;
+	ipvlan_skb_crossing_ns(skb, ipvlan->phy_dev);
 	return dev_queue_xmit(skb);
 }
 
@@ -616,8 +631,10 @@ static rx_handler_result_t ipvlan_handle_mode_l2(struct sk_buff **pskb,
 			 * when work-queue processes this frame. This is
 			 * achieved by returning RX_HANDLER_PASS.
 			 */
-			if (nskb)
+			if (nskb) {
+				ipvlan_skb_crossing_ns(nskb, NULL);
 				ipvlan_multicast_enqueue(port, nskb);
+			}
 		}
 	} else {
 		struct ipvl_addr *addr;

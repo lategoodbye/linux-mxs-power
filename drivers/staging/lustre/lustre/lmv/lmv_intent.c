@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -69,7 +65,7 @@ static int lmv_intent_remote(struct obd_export *exp, void *lmm,
 	int			rc = 0;
 
 	body = req_capsule_server_get(&(*reqp)->rq_pill, &RMF_MDT_BODY);
-	if (body == NULL)
+	if (!body)
 		return -EPROTO;
 
 	LASSERT((body->valid & OBD_MD_MDS));
@@ -84,11 +80,11 @@ static int lmv_intent_remote(struct obd_export *exp, void *lmm,
 	/*
 	 * We got LOOKUP lock, but we really need attrs.
 	 */
-	pmode = it->d.lustre.it_lock_mode;
+	pmode = it->it_lock_mode;
 	if (pmode) {
-		plock.cookie = it->d.lustre.it_lock_handle;
-		it->d.lustre.it_lock_mode = 0;
-		it->d.lustre.it_data = NULL;
+		plock.cookie = it->it_lock_handle;
+		it->it_lock_mode = 0;
+		it->it_request = NULL;
 	}
 
 	LASSERT(fid_is_sane(&body->fid1));
@@ -107,14 +103,16 @@ static int lmv_intent_remote(struct obd_export *exp, void *lmm,
 
 	op_data->op_fid1 = body->fid1;
 	/* Sent the parent FID to the remote MDT */
-	if (parent_fid != NULL) {
+	if (parent_fid) {
 		/* The parent fid is only for remote open to
 		 * check whether the open is from OBF,
-		 * see mdt_cross_open */
+		 * see mdt_cross_open
+		 */
 		LASSERT(it->it_op & IT_OPEN);
 		op_data->op_fid2 = *parent_fid;
 		/* Add object FID to op_fid3, in case it needs to check stale
-		 * (M_CHECK_STALE), see mdc_finish_intent_lock */
+		 * (M_CHECK_STALE), see mdc_finish_intent_lock
+		 */
 		op_data->op_fid3 = body->fid1;
 	}
 
@@ -132,14 +130,14 @@ static int lmv_intent_remote(struct obd_export *exp, void *lmm,
 	 * maintain dcache consistency. Thus drop UPDATE|PERM lock here
 	 * and put LOOKUP in request.
 	 */
-	if (it->d.lustre.it_lock_mode != 0) {
-		it->d.lustre.it_remote_lock_handle =
-					it->d.lustre.it_lock_handle;
-		it->d.lustre.it_remote_lock_mode = it->d.lustre.it_lock_mode;
+	if (it->it_lock_mode != 0) {
+		it->it_remote_lock_handle =
+					it->it_lock_handle;
+		it->it_remote_lock_mode = it->it_lock_mode;
 	}
 
-	it->d.lustre.it_lock_handle = plock.cookie;
-	it->d.lustre.it_lock_mode = pmode;
+	it->it_lock_handle = plock.cookie;
+	it->it_lock_mode = pmode;
 
 out_free_op_data:
 	kfree(op_data);
@@ -173,7 +171,8 @@ static int lmv_intent_open(struct obd_export *exp, struct md_op_data *op_data,
 		return PTR_ERR(tgt);
 
 	/* If it is ready to open the file by FID, do not need
-	 * allocate FID at all, otherwise it will confuse MDT */
+	 * allocate FID at all, otherwise it will confuse MDT
+	 */
 	if ((it->it_op & IT_CREAT) &&
 	    !(it->it_flags & MDS_OPEN_BY_FID)) {
 		/*
@@ -198,13 +197,13 @@ static int lmv_intent_open(struct obd_export *exp, struct md_op_data *op_data,
 	 * Nothing is found, do not access body->fid1 as it is zero and thus
 	 * pointless.
 	 */
-	if ((it->d.lustre.it_disposition & DISP_LOOKUP_NEG) &&
-	    !(it->d.lustre.it_disposition & DISP_OPEN_CREATE) &&
-	    !(it->d.lustre.it_disposition & DISP_OPEN_OPEN))
+	if ((it->it_disposition & DISP_LOOKUP_NEG) &&
+	    !(it->it_disposition & DISP_OPEN_CREATE) &&
+	    !(it->it_disposition & DISP_OPEN_OPEN))
 		return rc;
 
 	body = req_capsule_server_get(&(*reqp)->rq_pill, &RMF_MDT_BODY);
-	if (body == NULL)
+	if (!body)
 		return -EPROTO;
 	/*
 	 * Not cross-ref case, just get out of here.
@@ -268,9 +267,9 @@ static int lmv_intent_lookup(struct obd_export *exp,
 	op_data->op_bias &= ~MDS_CROSS_REF;
 
 	rc = md_intent_lock(tgt->ltd_exp, op_data, lmm, lmmsize, it,
-			     flags, reqp, cb_blocking, extra_lock_flags);
+			    flags, reqp, cb_blocking, extra_lock_flags);
 
-	if (rc < 0 || *reqp == NULL)
+	if (rc < 0 || !*reqp)
 		return rc;
 
 	/*
@@ -278,7 +277,7 @@ static int lmv_intent_lookup(struct obd_export *exp,
 	 * remote inode. Let's check this.
 	 */
 	body = req_capsule_server_get(&(*reqp)->rq_pill, &RMF_MDT_BODY);
-	if (body == NULL)
+	if (!body)
 		return -EPROTO;
 	/* Not cross-ref case, just get out of here. */
 	if (likely(!(body->valid & OBD_MD_MDS)))
@@ -299,7 +298,6 @@ int lmv_intent_lock(struct obd_export *exp, struct md_op_data *op_data,
 	struct obd_device *obd = exp->exp_obd;
 	int		rc;
 
-	LASSERT(it != NULL);
 	LASSERT(fid_is_sane(&op_data->op_fid1));
 
 	CDEBUG(D_INODE, "INTENT LOCK '%s' for '%*s' on "DFID"\n",

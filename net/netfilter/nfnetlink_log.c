@@ -330,14 +330,13 @@ nfulnl_alloc_skb(struct net *net, u32 peer_portid, unsigned int inst_size,
 	 * message.  WARNING: has to be <= 128k due to slab restrictions */
 
 	n = max(inst_size, pkt_size);
-	skb = nfnetlink_alloc_skb(net, n, peer_portid, GFP_ATOMIC);
+	skb = alloc_skb(n, GFP_ATOMIC);
 	if (!skb) {
 		if (n > pkt_size) {
 			/* try to allocate only as much as we need for current
 			 * packet */
 
-			skb = nfnetlink_alloc_skb(net, pkt_size,
-						  peer_portid, GFP_ATOMIC);
+			skb = alloc_skb(pkt_size, GFP_ATOMIC);
 		}
 	}
 
@@ -701,10 +700,13 @@ nfulnl_log_packet(struct net *net,
 		break;
 
 	case NFULNL_COPY_PACKET:
-		if (inst->copy_range > skb->len)
+		data_len = inst->copy_range;
+		if ((li->u.ulog.flags & NF_LOG_F_COPY_LEN) &&
+		    (li->u.ulog.copy_len < data_len))
+			data_len = li->u.ulog.copy_len;
+
+		if (data_len > skb->len)
 			data_len = skb->len;
-		else
-			data_len = inst->copy_range;
 
 		size += nla_total_size(data_len);
 		break;
@@ -1145,6 +1147,7 @@ MODULE_ALIAS_NFNL_SUBSYS(NFNL_SUBSYS_ULOG);
 MODULE_ALIAS_NF_LOGGER(AF_INET, 1);
 MODULE_ALIAS_NF_LOGGER(AF_INET6, 1);
 MODULE_ALIAS_NF_LOGGER(AF_BRIDGE, 1);
+MODULE_ALIAS_NF_LOGGER(3, 1); /* NFPROTO_ARP */
 
 module_init(nfnetlink_log_init);
 module_exit(nfnetlink_log_fini);

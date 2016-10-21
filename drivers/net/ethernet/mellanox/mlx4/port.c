@@ -52,6 +52,7 @@
 
 #define MLX4_FLAG_V_IGNORE_FCS_MASK		0x2
 #define MLX4_IGNORE_FCS_MASK			0x1
+#define MLX4_TC_MAX_NUMBER			8
 
 void mlx4_init_mac_table(struct mlx4_dev *dev, struct mlx4_mac_table *table)
 {
@@ -1317,6 +1318,19 @@ static int mlx4_common_set_port(struct mlx4_dev *dev, int slave, u32 in_mod,
 			}
 
 			gen_context->mtu = cpu_to_be16(master->max_mtu[port]);
+			/* Slave cannot change Global Pause configuration */
+			if (slave != mlx4_master_func_num(dev) &&
+			    ((gen_context->pptx != master->pptx) ||
+			     (gen_context->pprx != master->pprx))) {
+				gen_context->pptx = master->pptx;
+				gen_context->pprx = master->pprx;
+				mlx4_warn(dev,
+					  "denying Global Pause change for slave:%d\n",
+					  slave);
+			} else {
+				master->pptx = gen_context->pptx;
+				master->pprx = gen_context->pprx;
+			}
 			break;
 		case MLX4_SET_PORT_GID_TABLE:
 			/* change to MULTIPLE entries: number of guest's gids
@@ -2002,3 +2016,14 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL(mlx4_get_module_info);
+
+int mlx4_max_tc(struct mlx4_dev *dev)
+{
+	u8 num_tc = dev->caps.max_tc_eth;
+
+	if (!num_tc)
+		num_tc = MLX4_TC_MAX_NUMBER;
+
+	return num_tc;
+}
+EXPORT_SYMBOL(mlx4_max_tc);

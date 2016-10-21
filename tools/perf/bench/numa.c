@@ -4,6 +4,9 @@
  * numa: Simulate NUMA-sensitive workload and measure their NUMA performance
  */
 
+/* For the CLR_() macros */
+#include <pthread.h>
+
 #include "../perf.h"
 #include "../builtin.h"
 #include "../util/util.h"
@@ -21,7 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -293,7 +295,7 @@ static void bind_to_memnode(int node)
 	if (node == -1)
 		return;
 
-	BUG_ON(g->p.nr_nodes > (int)sizeof(nodemask));
+	BUG_ON(g->p.nr_nodes > (int)sizeof(nodemask)*8);
 	nodemask = 1L << node;
 
 	ret = set_mempolicy(MPOL_BIND, &nodemask, sizeof(nodemask)*8);

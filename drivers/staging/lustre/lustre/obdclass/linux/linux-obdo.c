@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -47,7 +43,6 @@
 #include "../../include/lustre/lustre_idl.h"
 
 #include <linux/fs.h>
-#include <linux/pagemap.h> /* for PAGE_CACHE_SIZE */
 
 void obdo_refresh_inode(struct inode *dst, struct obdo *src, u32 valid)
 {
@@ -71,8 +66,8 @@ void obdo_refresh_inode(struct inode *dst, struct obdo *src, u32 valid)
 	if (valid & OBD_MD_FLBLKSZ && src->o_blksize > (1 << dst->i_blkbits))
 		dst->i_blkbits = ffs(src->o_blksize) - 1;
 
-	if (dst->i_blkbits < PAGE_CACHE_SHIFT)
-		dst->i_blkbits = PAGE_CACHE_SHIFT;
+	if (dst->i_blkbits < PAGE_SHIFT)
+		dst->i_blkbits = PAGE_SHIFT;
 
 	/* allocation of space */
 	if (valid & OBD_MD_FLBLOCKS && src->o_blocks > dst->i_blocks)

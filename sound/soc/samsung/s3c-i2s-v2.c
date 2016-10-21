@@ -268,7 +268,7 @@ static int s3c2412_i2s_set_fmt(struct snd_soc_dai *cpu_dai,
 		iismod &= ~S3C2412_IISMOD_SLAVE;
 		break;
 	default:
-		pr_err("unknwon master/slave format\n");
+		pr_err("unknown master/slave format\n");
 		return -EINVAL;
 	}
 
@@ -709,7 +709,7 @@ static int s3c2412_i2s_resume(struct snd_soc_dai *dai)
 #endif
 
 int s3c_i2sv2_register_component(struct device *dev, int id,
-			   struct snd_soc_component_driver *cmp_drv,
+			   const struct snd_soc_component_driver *cmp_drv,
 			   struct snd_soc_dai_driver *dai_drv)
 {
 	struct snd_soc_dai_ops *ops = (struct snd_soc_dai_ops *)dai_drv->ops;

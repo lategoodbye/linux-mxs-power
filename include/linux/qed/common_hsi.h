@@ -11,9 +11,22 @@
 
 #define CORE_SPQE_PAGE_SIZE_BYTES                       4096
 
+#define X_FINAL_CLEANUP_AGG_INT 1
+#define NUM_OF_GLOBAL_QUEUES                            128
+
+/* Queue Zone sizes in bytes */
+#define TSTORM_QZONE_SIZE 8
+#define MSTORM_QZONE_SIZE 0
+#define USTORM_QZONE_SIZE 8
+#define XSTORM_QZONE_SIZE 8
+#define YSTORM_QZONE_SIZE 0
+#define PSTORM_QZONE_SIZE 0
+
+#define ETH_MAX_NUM_RX_QUEUES_PER_VF 16
+
 #define FW_MAJOR_VERSION	8
-#define FW_MINOR_VERSION	4
-#define FW_REVISION_VERSION	2
+#define FW_MINOR_VERSION	10
+#define FW_REVISION_VERSION	5
 #define FW_ENGINEERING_VERSION	0
 
 /***********************/
@@ -95,45 +108,86 @@
 #define DQ_XCM_AGG_VAL_SEL_REG6   7
 
 /* XCM agg val selection */
-#define DQ_XCM_ETH_EDPM_NUM_BDS_CMD \
-	DQ_XCM_AGG_VAL_SEL_WORD2
-#define DQ_XCM_ETH_TX_BD_CONS_CMD \
-	DQ_XCM_AGG_VAL_SEL_WORD3
-#define DQ_XCM_CORE_TX_BD_CONS_CMD \
-	DQ_XCM_AGG_VAL_SEL_WORD3
-#define DQ_XCM_ETH_TX_BD_PROD_CMD \
-	DQ_XCM_AGG_VAL_SEL_WORD4
-#define DQ_XCM_CORE_TX_BD_PROD_CMD \
-	DQ_XCM_AGG_VAL_SEL_WORD4
-#define DQ_XCM_CORE_SPQ_PROD_CMD \
-	DQ_XCM_AGG_VAL_SEL_WORD4
-#define DQ_XCM_ETH_GO_TO_BD_CONS_CMD            DQ_XCM_AGG_VAL_SEL_WORD5
+#define	DQ_XCM_CORE_TX_BD_CONS_CMD	DQ_XCM_AGG_VAL_SEL_WORD3
+#define	DQ_XCM_CORE_TX_BD_PROD_CMD	DQ_XCM_AGG_VAL_SEL_WORD4
+#define	DQ_XCM_CORE_SPQ_PROD_CMD	DQ_XCM_AGG_VAL_SEL_WORD4
+#define	DQ_XCM_ETH_EDPM_NUM_BDS_CMD	DQ_XCM_AGG_VAL_SEL_WORD2
+#define	DQ_XCM_ETH_TX_BD_CONS_CMD	DQ_XCM_AGG_VAL_SEL_WORD3
+#define	DQ_XCM_ETH_TX_BD_PROD_CMD	DQ_XCM_AGG_VAL_SEL_WORD4
+#define	DQ_XCM_ETH_GO_TO_BD_CONS_CMD	DQ_XCM_AGG_VAL_SEL_WORD5
+
+/* UCM agg val selection (HW) */
+#define	DQ_UCM_AGG_VAL_SEL_WORD0	0
+#define	DQ_UCM_AGG_VAL_SEL_WORD1	1
+#define	DQ_UCM_AGG_VAL_SEL_WORD2	2
+#define	DQ_UCM_AGG_VAL_SEL_WORD3	3
+#define	DQ_UCM_AGG_VAL_SEL_REG0	4
+#define	DQ_UCM_AGG_VAL_SEL_REG1	5
+#define	DQ_UCM_AGG_VAL_SEL_REG2	6
+#define	DQ_UCM_AGG_VAL_SEL_REG3	7
+
+/* UCM agg val selection (FW) */
+#define DQ_UCM_ETH_PMD_TX_CONS_CMD	DQ_UCM_AGG_VAL_SEL_WORD2
+#define DQ_UCM_ETH_PMD_RX_CONS_CMD	DQ_UCM_AGG_VAL_SEL_WORD3
+#define DQ_UCM_ROCE_CQ_CONS_CMD		DQ_UCM_AGG_VAL_SEL_REG0
+#define DQ_UCM_ROCE_CQ_PROD_CMD		DQ_UCM_AGG_VAL_SEL_REG2
+
+/* TCM agg val selection (HW) */
+#define	DQ_TCM_AGG_VAL_SEL_WORD0	0
+#define	DQ_TCM_AGG_VAL_SEL_WORD1	1
+#define	DQ_TCM_AGG_VAL_SEL_WORD2	2
+#define	DQ_TCM_AGG_VAL_SEL_WORD3	3
+#define	DQ_TCM_AGG_VAL_SEL_REG1		4
+#define	DQ_TCM_AGG_VAL_SEL_REG2		5
+#define	DQ_TCM_AGG_VAL_SEL_REG6		6
+#define	DQ_TCM_AGG_VAL_SEL_REG9		7
+
+/* TCM agg val selection (FW) */
+#define DQ_TCM_L2B_BD_PROD_CMD \
+	DQ_TCM_AGG_VAL_SEL_WORD1
+#define DQ_TCM_ROCE_RQ_PROD_CMD	\
+	DQ_TCM_AGG_VAL_SEL_WORD0
 
 /* XCM agg counter flag selection */
-#define DQ_XCM_AGG_FLG_SHIFT_BIT14  0
-#define DQ_XCM_AGG_FLG_SHIFT_BIT15  1
-#define DQ_XCM_AGG_FLG_SHIFT_CF12   2
-#define DQ_XCM_AGG_FLG_SHIFT_CF13   3
-#define DQ_XCM_AGG_FLG_SHIFT_CF18   4
-#define DQ_XCM_AGG_FLG_SHIFT_CF19   5
-#define DQ_XCM_AGG_FLG_SHIFT_CF22   6
-#define DQ_XCM_AGG_FLG_SHIFT_CF23   7
+#define	DQ_XCM_AGG_FLG_SHIFT_BIT14	0
+#define	DQ_XCM_AGG_FLG_SHIFT_BIT15	1
+#define	DQ_XCM_AGG_FLG_SHIFT_CF12	2
+#define	DQ_XCM_AGG_FLG_SHIFT_CF13	3
+#define	DQ_XCM_AGG_FLG_SHIFT_CF18	4
+#define	DQ_XCM_AGG_FLG_SHIFT_CF19	5
+#define	DQ_XCM_AGG_FLG_SHIFT_CF22	6
+#define	DQ_XCM_AGG_FLG_SHIFT_CF23	7
 
 /* XCM agg counter flag selection */
-#define DQ_XCM_ETH_DQ_CF_CMD		(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF18)
-#define DQ_XCM_CORE_DQ_CF_CMD		(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF18)
-#define DQ_XCM_ETH_TERMINATE_CMD	(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF19)
-#define DQ_XCM_CORE_TERMINATE_CMD	(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF19)
-#define DQ_XCM_ETH_SLOW_PATH_CMD	(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF22)
-#define DQ_XCM_CORE_SLOW_PATH_CMD	(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF22)
-#define DQ_XCM_ETH_TPH_EN_CMD		(1 << \
-					DQ_XCM_AGG_FLG_SHIFT_CF23)
+#define DQ_XCM_CORE_DQ_CF_CMD		(1 << DQ_XCM_AGG_FLG_SHIFT_CF18)
+#define DQ_XCM_CORE_TERMINATE_CMD	(1 << DQ_XCM_AGG_FLG_SHIFT_CF19)
+#define DQ_XCM_CORE_SLOW_PATH_CMD	(1 << DQ_XCM_AGG_FLG_SHIFT_CF22)
+#define DQ_XCM_ETH_DQ_CF_CMD		(1 << DQ_XCM_AGG_FLG_SHIFT_CF18)
+#define DQ_XCM_ETH_TERMINATE_CMD	(1 << DQ_XCM_AGG_FLG_SHIFT_CF19)
+#define DQ_XCM_ETH_SLOW_PATH_CMD	(1 << DQ_XCM_AGG_FLG_SHIFT_CF22)
+#define DQ_XCM_ETH_TPH_EN_CMD		(1 << DQ_XCM_AGG_FLG_SHIFT_CF23)
+
+/* UCM agg counter flag selection (HW) */
+#define	DQ_UCM_AGG_FLG_SHIFT_CF0	0
+#define	DQ_UCM_AGG_FLG_SHIFT_CF1	1
+#define	DQ_UCM_AGG_FLG_SHIFT_CF3	2
+#define	DQ_UCM_AGG_FLG_SHIFT_CF4	3
+#define	DQ_UCM_AGG_FLG_SHIFT_CF5	4
+#define	DQ_UCM_AGG_FLG_SHIFT_CF6	5
+#define	DQ_UCM_AGG_FLG_SHIFT_RULE0EN	6
+#define	DQ_UCM_AGG_FLG_SHIFT_RULE1EN	7
+
+/* UCM agg counter flag selection (FW) */
+#define DQ_UCM_ETH_PMD_TX_ARM_CMD	(1 << DQ_UCM_AGG_FLG_SHIFT_CF4)
+#define DQ_UCM_ETH_PMD_RX_ARM_CMD	(1 << DQ_UCM_AGG_FLG_SHIFT_CF5)
+
+#define	DQ_REGION_SHIFT	(12)
+
+/* DPM */
+#define	DQ_DPM_WQE_BUFF_SIZE	(320)
+
+/* Conn type ranges */
+#define	DQ_CONN_TYPE_RANGE_SHIFT	(4)
 
 /*****************/
 /* QM CONSTANTS  */
@@ -151,6 +205,9 @@
 
 /* number of queues in a PF queue group */
 #define QM_PF_QUEUE_GROUP_SIZE	8
+
+/* the size of a single queue element in bytes */
+#define QM_PQ_ELEMENT_SIZE                      4
 
 /* base number of Tx PQs in the CM PQ representation.
  * should be used when storing PQ IDs in CM PQ registers and context
@@ -277,13 +334,81 @@
 	(PXP_EXTERNAL_BAR_GLOBAL_WINDOW_START + \
 	 PXP_EXTERNAL_BAR_GLOBAL_WINDOW_LENGTH - 1)
 
-#define PXP_ILT_PAGE_SIZE_NUM_BITS_MIN	12
-#define PXP_ILT_BLOCK_FACTOR_MULTIPLIER	1024
+
+#define PXP_VF_BAR0_START_IGU                   0
+#define PXP_VF_BAR0_IGU_LENGTH                  0x3000
+#define PXP_VF_BAR0_END_IGU                     (PXP_VF_BAR0_START_IGU + \
+						 PXP_VF_BAR0_IGU_LENGTH - 1)
+
+#define PXP_VF_BAR0_START_DQ                    0x3000
+#define PXP_VF_BAR0_DQ_LENGTH                   0x200
+#define PXP_VF_BAR0_DQ_OPAQUE_OFFSET            0
+#define PXP_VF_BAR0_ME_OPAQUE_ADDRESS           (PXP_VF_BAR0_START_DQ +	\
+						 PXP_VF_BAR0_DQ_OPAQUE_OFFSET)
+#define PXP_VF_BAR0_ME_CONCRETE_ADDRESS         (PXP_VF_BAR0_ME_OPAQUE_ADDRESS \
+						 + 4)
+#define PXP_VF_BAR0_END_DQ                      (PXP_VF_BAR0_START_DQ +	\
+						 PXP_VF_BAR0_DQ_LENGTH - 1)
+
+#define PXP_VF_BAR0_START_TSDM_ZONE_B           0x3200
+#define PXP_VF_BAR0_SDM_LENGTH_ZONE_B           0x200
+#define PXP_VF_BAR0_END_TSDM_ZONE_B             (PXP_VF_BAR0_START_TSDM_ZONE_B \
+						 +			       \
+						 PXP_VF_BAR0_SDM_LENGTH_ZONE_B \
+						 - 1)
+
+#define PXP_VF_BAR0_START_MSDM_ZONE_B           0x3400
+#define PXP_VF_BAR0_END_MSDM_ZONE_B             (PXP_VF_BAR0_START_MSDM_ZONE_B \
+						 +			       \
+						 PXP_VF_BAR0_SDM_LENGTH_ZONE_B \
+						 - 1)
+
+#define PXP_VF_BAR0_START_USDM_ZONE_B           0x3600
+#define PXP_VF_BAR0_END_USDM_ZONE_B             (PXP_VF_BAR0_START_USDM_ZONE_B \
+						 +			       \
+						 PXP_VF_BAR0_SDM_LENGTH_ZONE_B \
+						 - 1)
+
+#define PXP_VF_BAR0_START_XSDM_ZONE_B           0x3800
+#define PXP_VF_BAR0_END_XSDM_ZONE_B             (PXP_VF_BAR0_START_XSDM_ZONE_B \
+						 +			       \
+						 PXP_VF_BAR0_SDM_LENGTH_ZONE_B \
+						 - 1)
+
+#define PXP_VF_BAR0_START_YSDM_ZONE_B           0x3a00
+#define PXP_VF_BAR0_END_YSDM_ZONE_B             (PXP_VF_BAR0_START_YSDM_ZONE_B \
+						 +			       \
+						 PXP_VF_BAR0_SDM_LENGTH_ZONE_B \
+						 - 1)
+
+#define PXP_VF_BAR0_START_PSDM_ZONE_B           0x3c00
+#define PXP_VF_BAR0_END_PSDM_ZONE_B             (PXP_VF_BAR0_START_PSDM_ZONE_B \
+						 +			       \
+						 PXP_VF_BAR0_SDM_LENGTH_ZONE_B \
+						 - 1)
+
+#define PXP_VF_BAR0_START_SDM_ZONE_A            0x4000
+#define PXP_VF_BAR0_END_SDM_ZONE_A              0x10000
+
+#define PXP_VF_BAR0_GRC_WINDOW_LENGTH           32
+
+#define PXP_ILT_PAGE_SIZE_NUM_BITS_MIN		12
+#define PXP_ILT_BLOCK_FACTOR_MULTIPLIER		1024
 
 /* ILT Records */
 #define PXP_NUM_ILT_RECORDS_BB 7600
 #define PXP_NUM_ILT_RECORDS_K2 11000
 #define MAX_NUM_ILT_RECORDS MAX(PXP_NUM_ILT_RECORDS_BB, PXP_NUM_ILT_RECORDS_K2)
+
+#define SDM_COMP_TYPE_NONE              0
+#define SDM_COMP_TYPE_WAKE_THREAD       1
+#define SDM_COMP_TYPE_AGG_INT           2
+#define SDM_COMP_TYPE_CM                3
+#define SDM_COMP_TYPE_LOADER            4
+#define SDM_COMP_TYPE_PXP               5
+#define SDM_COMP_TYPE_INDICATE_ERROR    6
+#define SDM_COMP_TYPE_RELEASE_THREAD    7
+#define SDM_COMP_TYPE_RAM               8
 
 /******************/
 /* PBF CONSTANTS  */
@@ -307,15 +432,64 @@ struct async_data {
 	u8	fw_debug_param;
 };
 
+struct coalescing_timeset {
+	u8 value;
+#define	COALESCING_TIMESET_TIMESET_MASK		0x7F
+#define	COALESCING_TIMESET_TIMESET_SHIFT	0
+#define	COALESCING_TIMESET_VALID_MASK		0x1
+#define	COALESCING_TIMESET_VALID_SHIFT		7
+};
+
+struct common_prs_pf_msg_info {
+	__le32 value;
+#define	COMMON_PRS_PF_MSG_INFO_NPAR_DEFAULT_PF_MASK	0x1
+#define	COMMON_PRS_PF_MSG_INFO_NPAR_DEFAULT_PF_SHIFT	0
+#define	COMMON_PRS_PF_MSG_INFO_FW_DEBUG_1_MASK		0x1
+#define	COMMON_PRS_PF_MSG_INFO_FW_DEBUG_1_SHIFT		1
+#define	COMMON_PRS_PF_MSG_INFO_FW_DEBUG_2_MASK		0x1
+#define	COMMON_PRS_PF_MSG_INFO_FW_DEBUG_2_SHIFT		2
+#define	COMMON_PRS_PF_MSG_INFO_FW_DEBUG_3_MASK		0x1
+#define	COMMON_PRS_PF_MSG_INFO_FW_DEBUG_3_SHIFT		3
+#define	COMMON_PRS_PF_MSG_INFO_RESERVED_MASK		0xFFFFFFF
+#define	COMMON_PRS_PF_MSG_INFO_RESERVED_SHIFT		4
+};
+
+struct common_queue_zone {
+	__le16 ring_drv_data_consumer;
+	__le16 reserved;
+};
+
+struct eth_rx_prod_data {
+	__le16 bd_prod;
+	__le16 cqe_prod;
+};
+
 struct regpair {
 	__le32	lo;
 	__le32	hi;
 };
 
+struct vf_pf_channel_eqe_data {
+	struct regpair msg_addr;
+};
+
+struct malicious_vf_eqe_data {
+	u8 vf_id;
+	u8 err_id;
+	__le16 reserved[3];
+};
+
+struct initial_cleanup_eqe_data {
+	u8 vf_id;
+	u8 reserved[7];
+};
+
 /* Event Data Union */
 union event_ring_data {
-	u8				bytes[8];
-	struct async_data		async_info;
+	u8 bytes[8];
+	struct vf_pf_channel_eqe_data vf_pf_channel;
+	struct malicious_vf_eqe_data malicious_vf;
+	struct initial_cleanup_eqe_data vf_init_cleanup;
 };
 
 /* Event Ring Entry */
@@ -335,7 +509,7 @@ struct event_ring_entry {
 
 /* Multi function mode */
 enum mf_mode {
-	SF,
+	ERROR_MODE /* Unsupported mode */,
 	MF_OVLAN,
 	MF_NPAR,
 	MAX_MF_MODE
@@ -343,9 +517,9 @@ enum mf_mode {
 
 /* Per-protocol connection types */
 enum protocol_type {
-	PROTOCOLID_RESERVED1,
+	PROTOCOLID_ISCSI,
 	PROTOCOLID_RESERVED2,
-	PROTOCOLID_RESERVED3,
+	PROTOCOLID_ROCE,
 	PROTOCOLID_CORE,
 	PROTOCOLID_ETH,
 	PROTOCOLID_RESERVED4,
@@ -354,6 +528,16 @@ enum protocol_type {
 	PROTOCOLID_COMMON,
 	PROTOCOLID_RESERVED6,
 	MAX_PROTOCOL_TYPE
+};
+
+struct ustorm_eth_queue_zone {
+	struct coalescing_timeset int_coalescing_timeset;
+	u8 reserved[3];
+};
+
+struct ustorm_queue_zone {
+	struct ustorm_eth_queue_zone eth;
+	struct common_queue_zone common;
 };
 
 /* status block structure */
@@ -511,7 +695,10 @@ struct parsing_and_err_flags {
 #define PARSING_AND_ERR_FLAGS_TUNNELL4CHKSMERROR_SHIFT         15
 };
 
-/* Concrete Function ID. */
+struct pb_context {
+	__le32 crc[4];
+};
+
 struct pxp_concrete_fid {
 	__le16 fid;
 #define PXP_CONCRETE_FID_PFID_MASK     0xF
@@ -578,6 +765,72 @@ struct pxp_ptt_entry {
 };
 
 /* RSS hash type */
+struct rdif_task_context {
+	__le32 initial_ref_tag;
+	__le16 app_tag_value;
+	__le16 app_tag_mask;
+	u8 flags0;
+#define RDIF_TASK_CONTEXT_IGNOREAPPTAG_MASK            0x1
+#define RDIF_TASK_CONTEXT_IGNOREAPPTAG_SHIFT           0
+#define RDIF_TASK_CONTEXT_INITIALREFTAGVALID_MASK      0x1
+#define RDIF_TASK_CONTEXT_INITIALREFTAGVALID_SHIFT     1
+#define RDIF_TASK_CONTEXT_HOSTGUARDTYPE_MASK           0x1
+#define RDIF_TASK_CONTEXT_HOSTGUARDTYPE_SHIFT          2
+#define RDIF_TASK_CONTEXT_SETERRORWITHEOP_MASK         0x1
+#define RDIF_TASK_CONTEXT_SETERRORWITHEOP_SHIFT        3
+#define RDIF_TASK_CONTEXT_PROTECTIONTYPE_MASK          0x3
+#define RDIF_TASK_CONTEXT_PROTECTIONTYPE_SHIFT         4
+#define RDIF_TASK_CONTEXT_CRC_SEED_MASK                0x1
+#define RDIF_TASK_CONTEXT_CRC_SEED_SHIFT               6
+#define RDIF_TASK_CONTEXT_KEEPREFTAGCONST_MASK         0x1
+#define RDIF_TASK_CONTEXT_KEEPREFTAGCONST_SHIFT        7
+	u8 partial_dif_data[7];
+	__le16 partial_crc_value;
+	__le16 partial_checksum_value;
+	__le32 offset_in_io;
+	__le16 flags1;
+#define RDIF_TASK_CONTEXT_VALIDATEGUARD_MASK           0x1
+#define RDIF_TASK_CONTEXT_VALIDATEGUARD_SHIFT          0
+#define RDIF_TASK_CONTEXT_VALIDATEAPPTAG_MASK          0x1
+#define RDIF_TASK_CONTEXT_VALIDATEAPPTAG_SHIFT         1
+#define RDIF_TASK_CONTEXT_VALIDATEREFTAG_MASK          0x1
+#define RDIF_TASK_CONTEXT_VALIDATEREFTAG_SHIFT         2
+#define RDIF_TASK_CONTEXT_FORWARDGUARD_MASK            0x1
+#define RDIF_TASK_CONTEXT_FORWARDGUARD_SHIFT           3
+#define RDIF_TASK_CONTEXT_FORWARDAPPTAG_MASK           0x1
+#define RDIF_TASK_CONTEXT_FORWARDAPPTAG_SHIFT          4
+#define RDIF_TASK_CONTEXT_FORWARDREFTAG_MASK           0x1
+#define RDIF_TASK_CONTEXT_FORWARDREFTAG_SHIFT          5
+#define RDIF_TASK_CONTEXT_INTERVALSIZE_MASK            0x7
+#define RDIF_TASK_CONTEXT_INTERVALSIZE_SHIFT           6
+#define RDIF_TASK_CONTEXT_HOSTINTERFACE_MASK           0x3
+#define RDIF_TASK_CONTEXT_HOSTINTERFACE_SHIFT          9
+#define RDIF_TASK_CONTEXT_DIFBEFOREDATA_MASK           0x1
+#define RDIF_TASK_CONTEXT_DIFBEFOREDATA_SHIFT          11
+#define RDIF_TASK_CONTEXT_RESERVED0_MASK               0x1
+#define RDIF_TASK_CONTEXT_RESERVED0_SHIFT              12
+#define RDIF_TASK_CONTEXT_NETWORKINTERFACE_MASK        0x1
+#define RDIF_TASK_CONTEXT_NETWORKINTERFACE_SHIFT       13
+#define RDIF_TASK_CONTEXT_FORWARDAPPTAGWITHMASK_MASK   0x1
+#define RDIF_TASK_CONTEXT_FORWARDAPPTAGWITHMASK_SHIFT  14
+#define RDIF_TASK_CONTEXT_FORWARDREFTAGWITHMASK_MASK   0x1
+#define RDIF_TASK_CONTEXT_FORWARDREFTAGWITHMASK_SHIFT  15
+	__le16 state;
+#define RDIF_TASK_CONTEXT_RECEIVEDDIFBYTESLEFT_MASK    0xF
+#define RDIF_TASK_CONTEXT_RECEIVEDDIFBYTESLEFT_SHIFT   0
+#define RDIF_TASK_CONTEXT_TRANSMITEDDIFBYTESLEFT_MASK  0xF
+#define RDIF_TASK_CONTEXT_TRANSMITEDDIFBYTESLEFT_SHIFT 4
+#define RDIF_TASK_CONTEXT_ERRORINIO_MASK               0x1
+#define RDIF_TASK_CONTEXT_ERRORINIO_SHIFT              8
+#define RDIF_TASK_CONTEXT_CHECKSUMOVERFLOW_MASK        0x1
+#define RDIF_TASK_CONTEXT_CHECKSUMOVERFLOW_SHIFT       9
+#define RDIF_TASK_CONTEXT_REFTAGMASK_MASK              0xF
+#define RDIF_TASK_CONTEXT_REFTAGMASK_SHIFT             10
+#define RDIF_TASK_CONTEXT_RESERVED1_MASK               0x3
+#define RDIF_TASK_CONTEXT_RESERVED1_SHIFT              14
+	__le32 reserved2;
+};
+
 enum rss_hash_type {
 	RSS_HASH_TYPE_DEFAULT	= 0,
 	RSS_HASH_TYPE_IPV4	= 1,
@@ -606,4 +859,122 @@ struct status_block {
 #define STATUS_BLOCK_ZERO_PAD3_SHIFT  24
 };
 
+struct tdif_task_context {
+	__le32 initial_ref_tag;
+	__le16 app_tag_value;
+	__le16 app_tag_mask;
+	__le16 partial_crc_valueB;
+	__le16 partial_checksum_valueB;
+	__le16 stateB;
+#define TDIF_TASK_CONTEXT_RECEIVEDDIFBYTESLEFTB_MASK    0xF
+#define TDIF_TASK_CONTEXT_RECEIVEDDIFBYTESLEFTB_SHIFT   0
+#define TDIF_TASK_CONTEXT_TRANSMITEDDIFBYTESLEFTB_MASK  0xF
+#define TDIF_TASK_CONTEXT_TRANSMITEDDIFBYTESLEFTB_SHIFT 4
+#define TDIF_TASK_CONTEXT_ERRORINIOB_MASK               0x1
+#define TDIF_TASK_CONTEXT_ERRORINIOB_SHIFT              8
+#define TDIF_TASK_CONTEXT_CHECKSUMOVERFLOW_MASK         0x1
+#define TDIF_TASK_CONTEXT_CHECKSUMOVERFLOW_SHIFT        9
+#define TDIF_TASK_CONTEXT_RESERVED0_MASK                0x3F
+#define TDIF_TASK_CONTEXT_RESERVED0_SHIFT               10
+	u8 reserved1;
+	u8 flags0;
+#define TDIF_TASK_CONTEXT_IGNOREAPPTAG_MASK             0x1
+#define TDIF_TASK_CONTEXT_IGNOREAPPTAG_SHIFT            0
+#define TDIF_TASK_CONTEXT_INITIALREFTAGVALID_MASK       0x1
+#define TDIF_TASK_CONTEXT_INITIALREFTAGVALID_SHIFT      1
+#define TDIF_TASK_CONTEXT_HOSTGUARDTYPE_MASK            0x1
+#define TDIF_TASK_CONTEXT_HOSTGUARDTYPE_SHIFT           2
+#define TDIF_TASK_CONTEXT_SETERRORWITHEOP_MASK          0x1
+#define TDIF_TASK_CONTEXT_SETERRORWITHEOP_SHIFT         3
+#define TDIF_TASK_CONTEXT_PROTECTIONTYPE_MASK           0x3
+#define TDIF_TASK_CONTEXT_PROTECTIONTYPE_SHIFT          4
+#define TDIF_TASK_CONTEXT_CRC_SEED_MASK                 0x1
+#define TDIF_TASK_CONTEXT_CRC_SEED_SHIFT                6
+#define TDIF_TASK_CONTEXT_RESERVED2_MASK                0x1
+#define TDIF_TASK_CONTEXT_RESERVED2_SHIFT               7
+	__le32 flags1;
+#define TDIF_TASK_CONTEXT_VALIDATEGUARD_MASK            0x1
+#define TDIF_TASK_CONTEXT_VALIDATEGUARD_SHIFT           0
+#define TDIF_TASK_CONTEXT_VALIDATEAPPTAG_MASK           0x1
+#define TDIF_TASK_CONTEXT_VALIDATEAPPTAG_SHIFT          1
+#define TDIF_TASK_CONTEXT_VALIDATEREFTAG_MASK           0x1
+#define TDIF_TASK_CONTEXT_VALIDATEREFTAG_SHIFT          2
+#define TDIF_TASK_CONTEXT_FORWARDGUARD_MASK             0x1
+#define TDIF_TASK_CONTEXT_FORWARDGUARD_SHIFT            3
+#define TDIF_TASK_CONTEXT_FORWARDAPPTAG_MASK            0x1
+#define TDIF_TASK_CONTEXT_FORWARDAPPTAG_SHIFT           4
+#define TDIF_TASK_CONTEXT_FORWARDREFTAG_MASK            0x1
+#define TDIF_TASK_CONTEXT_FORWARDREFTAG_SHIFT           5
+#define TDIF_TASK_CONTEXT_INTERVALSIZE_MASK             0x7
+#define TDIF_TASK_CONTEXT_INTERVALSIZE_SHIFT            6
+#define TDIF_TASK_CONTEXT_HOSTINTERFACE_MASK            0x3
+#define TDIF_TASK_CONTEXT_HOSTINTERFACE_SHIFT           9
+#define TDIF_TASK_CONTEXT_DIFBEFOREDATA_MASK            0x1
+#define TDIF_TASK_CONTEXT_DIFBEFOREDATA_SHIFT           11
+#define TDIF_TASK_CONTEXT_RESERVED3_MASK                0x1
+#define TDIF_TASK_CONTEXT_RESERVED3_SHIFT               12
+#define TDIF_TASK_CONTEXT_NETWORKINTERFACE_MASK         0x1
+#define TDIF_TASK_CONTEXT_NETWORKINTERFACE_SHIFT        13
+#define TDIF_TASK_CONTEXT_RECEIVEDDIFBYTESLEFTA_MASK    0xF
+#define TDIF_TASK_CONTEXT_RECEIVEDDIFBYTESLEFTA_SHIFT   14
+#define TDIF_TASK_CONTEXT_TRANSMITEDDIFBYTESLEFTA_MASK  0xF
+#define TDIF_TASK_CONTEXT_TRANSMITEDDIFBYTESLEFTA_SHIFT 18
+#define TDIF_TASK_CONTEXT_ERRORINIOA_MASK               0x1
+#define TDIF_TASK_CONTEXT_ERRORINIOA_SHIFT              22
+#define TDIF_TASK_CONTEXT_CHECKSUMOVERFLOWA_MASK        0x1
+#define TDIF_TASK_CONTEXT_CHECKSUMOVERFLOWA_SHIFT       23
+#define TDIF_TASK_CONTEXT_REFTAGMASK_MASK               0xF
+#define TDIF_TASK_CONTEXT_REFTAGMASK_SHIFT              24
+#define TDIF_TASK_CONTEXT_FORWARDAPPTAGWITHMASK_MASK    0x1
+#define TDIF_TASK_CONTEXT_FORWARDAPPTAGWITHMASK_SHIFT   28
+#define TDIF_TASK_CONTEXT_FORWARDREFTAGWITHMASK_MASK    0x1
+#define TDIF_TASK_CONTEXT_FORWARDREFTAGWITHMASK_SHIFT   29
+#define TDIF_TASK_CONTEXT_KEEPREFTAGCONST_MASK          0x1
+#define TDIF_TASK_CONTEXT_KEEPREFTAGCONST_SHIFT         30
+#define TDIF_TASK_CONTEXT_RESERVED4_MASK                0x1
+#define TDIF_TASK_CONTEXT_RESERVED4_SHIFT               31
+	__le32 offset_in_iob;
+	__le16 partial_crc_value_a;
+	__le16 partial_checksum_valuea_;
+	__le32 offset_in_ioa;
+	u8 partial_dif_data_a[8];
+	u8 partial_dif_data_b[8];
+};
+
+struct timers_context {
+	__le32 logical_client0;
+#define TIMERS_CONTEXT_EXPIRATIONTIMELC0_MASK     0xFFFFFFF
+#define TIMERS_CONTEXT_EXPIRATIONTIMELC0_SHIFT    0
+#define TIMERS_CONTEXT_VALIDLC0_MASK              0x1
+#define TIMERS_CONTEXT_VALIDLC0_SHIFT             28
+#define TIMERS_CONTEXT_ACTIVELC0_MASK             0x1
+#define TIMERS_CONTEXT_ACTIVELC0_SHIFT            29
+#define TIMERS_CONTEXT_RESERVED0_MASK             0x3
+#define TIMERS_CONTEXT_RESERVED0_SHIFT            30
+	__le32 logical_client1;
+#define TIMERS_CONTEXT_EXPIRATIONTIMELC1_MASK     0xFFFFFFF
+#define TIMERS_CONTEXT_EXPIRATIONTIMELC1_SHIFT    0
+#define TIMERS_CONTEXT_VALIDLC1_MASK              0x1
+#define TIMERS_CONTEXT_VALIDLC1_SHIFT             28
+#define TIMERS_CONTEXT_ACTIVELC1_MASK             0x1
+#define TIMERS_CONTEXT_ACTIVELC1_SHIFT            29
+#define TIMERS_CONTEXT_RESERVED1_MASK             0x3
+#define TIMERS_CONTEXT_RESERVED1_SHIFT            30
+	__le32 logical_client2;
+#define TIMERS_CONTEXT_EXPIRATIONTIMELC2_MASK     0xFFFFFFF
+#define TIMERS_CONTEXT_EXPIRATIONTIMELC2_SHIFT    0
+#define TIMERS_CONTEXT_VALIDLC2_MASK              0x1
+#define TIMERS_CONTEXT_VALIDLC2_SHIFT             28
+#define TIMERS_CONTEXT_ACTIVELC2_MASK             0x1
+#define TIMERS_CONTEXT_ACTIVELC2_SHIFT            29
+#define TIMERS_CONTEXT_RESERVED2_MASK             0x3
+#define TIMERS_CONTEXT_RESERVED2_SHIFT            30
+	__le32 host_expiration_fields;
+#define TIMERS_CONTEXT_HOSTEXPRIRATIONVALUE_MASK  0xFFFFFFF
+#define TIMERS_CONTEXT_HOSTEXPRIRATIONVALUE_SHIFT 0
+#define TIMERS_CONTEXT_HOSTEXPRIRATIONVALID_MASK  0x1
+#define TIMERS_CONTEXT_HOSTEXPRIRATIONVALID_SHIFT 28
+#define TIMERS_CONTEXT_RESERVED3_MASK             0x7
+#define TIMERS_CONTEXT_RESERVED3_SHIFT            29
+};
 #endif /* __COMMON_HSI__ */

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 - 2015 Emulex
+ * Copyright (C) 2005 - 2016 Broadcom
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -72,6 +72,9 @@
 #define BE_MAX_MTU              (BE_MAX_JUMBO_FRAME_SIZE -	\
 				 (ETH_HLEN + ETH_FCS_LEN))
 
+/* Accommodate for QnQ configurations where VLAN insertion is enabled in HW */
+#define BE_MAX_GSO_SIZE		(65535 - 2 * VLAN_HLEN)
+
 #define BE_NUM_VLANS_SUPPORTED	64
 #define BE_MAX_EQD		128u
 #define	BE_MAX_TX_FRAG_COUNT	30
@@ -89,8 +92,13 @@
 #define BE3_MAX_TX_QS		16
 #define BE3_MAX_EVT_QS		16
 #define BE3_SRIOV_MAX_EVT_QS	8
+#define SH_VF_MAX_NIC_EQS	3	/* Skyhawk VFs can have a max of 4 EQs
+					 * and at least 1 is granted to either
+					 * SURF/DPDK
+					 */
 
-#define MAX_RSS_IFACES		15
+#define MAX_PORT_RSS_TABLES	15
+#define MAX_NIC_FUNCS		16
 #define MAX_RX_QS		32
 #define MAX_EVT_QS		32
 #define MAX_TX_QS		32
@@ -111,6 +119,8 @@
 #define	RSS_INDIR_TABLE_LEN	128
 #define RSS_HASH_KEY_LEN	40
 
+#define BE_UNKNOWN_PHY_STATE	0xFF
+
 struct be_dma_mem {
 	void *va;
 	dma_addr_t dma;
@@ -118,27 +128,27 @@ struct be_dma_mem {
 };
 
 struct be_queue_info {
-	struct be_dma_mem dma_mem;
-	u16 len;
-	u16 entry_size;	/* Size of an element in the queue */
-	u16 id;
-	u16 tail, head;
-	bool created;
+	u32 len;
+	u32 entry_size;	/* Size of an element in the queue */
+	u32 tail, head;
 	atomic_t used;	/* Number of valid elements in the queue */
+	u32 id;
+	struct be_dma_mem dma_mem;
+	bool created;
 };
 
-static inline u32 MODULO(u16 val, u16 limit)
+static inline u32 MODULO(u32 val, u32 limit)
 {
 	BUG_ON(limit & (limit - 1));
 	return val & (limit - 1);
 }
 
-static inline void index_adv(u16 *index, u16 val, u16 limit)
+static inline void index_adv(u32 *index, u32 val, u32 limit)
 {
 	*index = MODULO((*index + val), limit);
 }
 
-static inline void index_inc(u16 *index, u16 limit)
+static inline void index_inc(u32 *index, u32 limit)
 {
 	*index = MODULO((*index + 1), limit);
 }
@@ -163,7 +173,7 @@ static inline void queue_head_inc(struct be_queue_info *q)
 	index_inc(&q->head, q->len);
 }
 
-static inline void index_dec(u16 *index, u16 limit)
+static inline void index_dec(u32 *index, u32 limit)
 {
 	*index = MODULO((*index - 1), limit);
 }
@@ -386,12 +396,16 @@ enum vf_state {
 #define BE_FLAGS_QNQ_ASYNC_EVT_RCVD		BIT(7)
 #define BE_FLAGS_VXLAN_OFFLOADS			BIT(8)
 #define BE_FLAGS_SETUP_DONE			BIT(9)
-#define BE_FLAGS_EVT_INCOMPATIBLE_SFP		BIT(10)
+#define BE_FLAGS_PHY_MISCONFIGURED		BIT(10)
 #define BE_FLAGS_ERR_DETECTION_SCHEDULED	BIT(11)
 #define BE_FLAGS_OS2BMC				BIT(12)
 
 #define BE_UC_PMAC_COUNT			30
 #define BE_VF_UC_PMAC_COUNT			2
+
+#define MAX_ERR_RECOVERY_RETRY_COUNT		3
+#define ERR_DETECTION_DELAY			1000
+#define ERR_RECOVERY_RETRY_DELAY		30000
 
 /* Ethtool set_dump flags */
 #define LANCER_INITIATE_FW_DUMP			0x1
@@ -429,8 +443,20 @@ struct be_resources {
 	u16 max_iface_count;
 	u16 max_mcc_count;
 	u16 max_evt_qs;
+	u16 max_nic_evt_qs;	/* NIC's share of evt qs */
 	u32 if_cap_flags;
 	u32 vf_if_cap_flags;	/* VF if capability flags */
+	u32 flags;
+	/* Calculated PF Pool's share of RSS Tables. This is not enforced by
+	 * the FW, but is a self-imposed driver limitation.
+	 */
+	u16 max_rss_tables;
+};
+
+/* These are port-wide values */
+struct be_port_resources {
+	u16 max_vfs;
+	u16 nic_pfs;
 };
 
 #define be_is_os2bmc_enabled(adapter) (adapter->flags & BE_FLAGS_OS2BMC)
@@ -500,7 +526,8 @@ struct be_adapter {
 	spinlock_t mcc_lock;	/* For serializing mcc cmds to BE card */
 	spinlock_t mcc_cq_lock;
 
-	u16 cfg_num_qs;		/* configured via set-channels */
+	u16 cfg_num_rx_irqs;		/* configured via set-channels */
+	u16 cfg_num_tx_irqs;		/* configured via set-channels */
 	u16 num_evt_qs;
 	u16 num_msix_vec;
 	struct be_eq_obj eq_obj[MAX_EVT_QS];
@@ -530,6 +557,7 @@ struct be_adapter {
 	u16 work_counter;
 
 	struct delayed_work be_err_detection_work;
+	u8 recovery_retries;
 	u8 err_flags;
 	bool pcicfg_mapped;	/* pcicfg obtained via pci_iomap() */
 	u32 flags;
@@ -595,6 +623,7 @@ struct be_adapter {
 	u32 bmc_filt_mask;
 	u32 fat_dump_len;
 	u16 serial_num[CNTL_SERIAL_NUM_WORDS];
+	u8 phy_state; /* state of sfp optics (functional, faulted, etc.,) */
 };
 
 #define be_physfn(adapter)		(!adapter->virtfn)
@@ -617,16 +646,42 @@ struct be_adapter {
 #define be_max_txqs(adapter)		(adapter->res.max_tx_qs)
 #define be_max_prio_txqs(adapter)	(adapter->res.max_prio_tx_qs)
 #define be_max_rxqs(adapter)		(adapter->res.max_rx_qs)
-#define be_max_eqs(adapter)		(adapter->res.max_evt_qs)
+/* Max number of EQs available for the function (NIC + RoCE (if enabled)) */
+#define be_max_func_eqs(adapter)	(adapter->res.max_evt_qs)
+/* Max number of EQs available avaialble only for NIC */
+#define be_max_nic_eqs(adapter)		(adapter->res.max_nic_evt_qs)
 #define be_if_cap_flags(adapter)	(adapter->res.if_cap_flags)
+#define be_max_pf_pool_rss_tables(adapter)	\
+				(adapter->pool_res.max_rss_tables)
+/* Max irqs avaialble for NIC */
+#define be_max_irqs(adapter)		\
+			(min_t(u16, be_max_nic_eqs(adapter), num_online_cpus()))
 
-static inline u16 be_max_qs(struct be_adapter *adapter)
+/* Max irqs *needed* for RX queues */
+static inline u16 be_max_rx_irqs(struct be_adapter *adapter)
 {
-	/* If no RSS, need atleast the one def RXQ */
+	/* If no RSS, need atleast one irq for def-RXQ */
 	u16 num = max_t(u16, be_max_rss(adapter), 1);
 
-	num = min(num, be_max_eqs(adapter));
-	return min_t(u16, num, num_online_cpus());
+	return min_t(u16, num, be_max_irqs(adapter));
+}
+
+/* Max irqs *needed* for TX queues */
+static inline u16 be_max_tx_irqs(struct be_adapter *adapter)
+{
+	return min_t(u16, be_max_txqs(adapter), be_max_irqs(adapter));
+}
+
+/* Max irqs *needed* for combined queues */
+static inline u16 be_max_qp_irqs(struct be_adapter *adapter)
+{
+	return min(be_max_tx_irqs(adapter), be_max_rx_irqs(adapter));
+}
+
+/* Max irqs *needed* for RX and TX queues together */
+static inline u16 be_max_any_irqs(struct be_adapter *adapter)
+{
+	return max(be_max_tx_irqs(adapter), be_max_rx_irqs(adapter));
 }
 
 /* Is BE in pvid_tagging mode */

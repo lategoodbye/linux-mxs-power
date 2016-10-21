@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -65,7 +61,8 @@ struct portals_handle_ops {
  *
  * Now you're able to assign the results of cookie2handle directly to an
  * ldlm_lock.  If it's not at the top, you'll want to use container_of()
- * to compute the start of the structure based on the handle field. */
+ * to compute the start of the structure based on the handle field.
+ */
 struct portals_handle {
 	struct list_head			h_link;
 	__u64				h_cookie;

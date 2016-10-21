@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -58,7 +54,8 @@ int lmv_fld_lookup(struct lmv_obd *lmv,
 	int rc;
 
 	/* FIXME: Currently ZFS still use local seq for ROOT unfortunately, and
-	 * this fid_is_local check should be removed once LU-2240 is fixed */
+	 * this fid_is_local check should be removed once LU-2240 is fixed
+	 */
 	LASSERTF((fid_seq_in_fldb(fid_seq(fid)) ||
 		  fid_seq_is_local_file(fid_seq(fid))) &&
 		 fid_is_sane(fid), DFID" is insane!\n", PFID(fid));

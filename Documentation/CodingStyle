@@ -458,7 +458,7 @@ of the function, telling people what it does, and possibly WHY it does
 it.
 
 When commenting the kernel API functions, please use the kernel-doc format.
-See the files Documentation/kernel-doc-nano-HOWTO.txt and scripts/kernel-doc
+See the files Documentation/kernel-documentation.rst and scripts/kernel-doc
 for details.
 
 Linux style for comments is the C89 "/* ... */" style.
@@ -640,7 +640,7 @@ Things to avoid when using macros:
 		do {					\
 			if (blah(x) < 0)		\
 				return -EBUGGERED;	\
-		} while(0)
+		} while (0)
 
 is a _very_ bad idea.  It looks like a function call but exits the "calling"
 function; don't break the internal parsers of those who will read the code.

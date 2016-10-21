@@ -12,15 +12,15 @@
 /********************/
 /* ETH FW CONSTANTS */
 /********************/
+#define ETH_HSI_VER_MAJOR                   3
+#define ETH_HSI_VER_MINOR                   0
 #define ETH_CACHE_LINE_SIZE                 64
 
 #define ETH_MAX_RAMROD_PER_CON                          8
 #define ETH_TX_BD_PAGE_SIZE_BYTES                       4096
 #define ETH_RX_BD_PAGE_SIZE_BYTES                       4096
-#define ETH_RX_SGE_PAGE_SIZE_BYTES                      4096
 #define ETH_RX_CQE_PAGE_SIZE_BYTES                      4096
 #define ETH_RX_NUM_NEXT_PAGE_BDS                        2
-#define ETH_RX_NUM_NEXT_PAGE_SGES                       2
 
 #define ETH_TX_MIN_BDS_PER_NON_LSO_PKT                          1
 #define ETH_TX_MAX_BDS_PER_NON_LSO_PACKET                       18
@@ -34,7 +34,8 @@
 
 #define ETH_NUM_STATISTIC_COUNTERS                      MAX_NUM_VPORTS
 
-#define ETH_REG_CQE_PBL_SIZE                3
+/* Maximum number of buffers, used for RX packet placement */
+#define ETH_RX_MAX_BUFF_PER_PKT             5
 
 /* num of MAC/VLAN filters */
 #define ETH_NUM_MAC_FILTERS                                     512
@@ -54,38 +55,25 @@
 
 /* TPA constants */
 #define ETH_TPA_MAX_AGGS_NUM              64
-#define ETH_TPA_CQE_START_SGL_SIZE        3
-#define ETH_TPA_CQE_CONT_SGL_SIZE         6
-#define ETH_TPA_CQE_END_SGL_SIZE          4
+#define ETH_TPA_CQE_START_LEN_LIST_SIZE   ETH_RX_MAX_BUFF_PER_PKT
+#define ETH_TPA_CQE_CONT_LEN_LIST_SIZE    6
+#define ETH_TPA_CQE_END_LEN_LIST_SIZE     4
 
-/* Queue Zone sizes */
-#define TSTORM_QZONE_SIZE    0
-#define MSTORM_QZONE_SIZE    sizeof(struct mstorm_eth_queue_zone)
-#define USTORM_QZONE_SIZE    sizeof(struct ustorm_eth_queue_zone)
-#define XSTORM_QZONE_SIZE    0
-#define YSTORM_QZONE_SIZE    sizeof(struct ystorm_eth_queue_zone)
-#define PSTORM_QZONE_SIZE    0
-
-/* Interrupt coalescing TimeSet */
-struct coalescing_timeset {
-	u8	timeset;
-	u8	valid;
-};
 
 struct eth_tx_1st_bd_flags {
 	u8 bitfields;
-#define ETH_TX_1ST_BD_FLAGS_FORCE_VLAN_MODE_MASK  0x1
-#define ETH_TX_1ST_BD_FLAGS_FORCE_VLAN_MODE_SHIFT 0
-#define ETH_TX_1ST_BD_FLAGS_IP_CSUM_MASK          0x1
-#define ETH_TX_1ST_BD_FLAGS_IP_CSUM_SHIFT         1
-#define ETH_TX_1ST_BD_FLAGS_L4_CSUM_MASK          0x1
-#define ETH_TX_1ST_BD_FLAGS_L4_CSUM_SHIFT         2
-#define ETH_TX_1ST_BD_FLAGS_VLAN_INSERTION_MASK   0x1
-#define ETH_TX_1ST_BD_FLAGS_VLAN_INSERTION_SHIFT  3
-#define ETH_TX_1ST_BD_FLAGS_LSO_MASK              0x1
-#define ETH_TX_1ST_BD_FLAGS_LSO_SHIFT             4
 #define ETH_TX_1ST_BD_FLAGS_START_BD_MASK         0x1
-#define ETH_TX_1ST_BD_FLAGS_START_BD_SHIFT        5
+#define ETH_TX_1ST_BD_FLAGS_START_BD_SHIFT        0
+#define ETH_TX_1ST_BD_FLAGS_FORCE_VLAN_MODE_MASK  0x1
+#define ETH_TX_1ST_BD_FLAGS_FORCE_VLAN_MODE_SHIFT 1
+#define ETH_TX_1ST_BD_FLAGS_IP_CSUM_MASK          0x1
+#define ETH_TX_1ST_BD_FLAGS_IP_CSUM_SHIFT         2
+#define ETH_TX_1ST_BD_FLAGS_L4_CSUM_MASK          0x1
+#define ETH_TX_1ST_BD_FLAGS_L4_CSUM_SHIFT         3
+#define ETH_TX_1ST_BD_FLAGS_VLAN_INSERTION_MASK   0x1
+#define ETH_TX_1ST_BD_FLAGS_VLAN_INSERTION_SHIFT  4
+#define ETH_TX_1ST_BD_FLAGS_LSO_MASK              0x1
+#define ETH_TX_1ST_BD_FLAGS_LSO_SHIFT             5
 #define ETH_TX_1ST_BD_FLAGS_TUNN_IP_CSUM_MASK     0x1
 #define ETH_TX_1ST_BD_FLAGS_TUNN_IP_CSUM_SHIFT    6
 #define ETH_TX_1ST_BD_FLAGS_TUNN_L4_CSUM_MASK     0x1
@@ -97,59 +85,145 @@ struct eth_tx_data_1st_bd {
 	__le16				vlan;
 	u8				nbds;
 	struct eth_tx_1st_bd_flags	bd_flags;
-	__le16				fw_use_only;
+	__le16				bitfields;
+#define ETH_TX_DATA_1ST_BD_TUNN_FLAG_MASK  0x1
+#define ETH_TX_DATA_1ST_BD_TUNN_FLAG_SHIFT 0
+#define ETH_TX_DATA_1ST_BD_RESERVED0_MASK          0x1
+#define ETH_TX_DATA_1ST_BD_RESERVED0_SHIFT         1
+#define ETH_TX_DATA_1ST_BD_PKT_LEN_MASK    0x3FFF
+#define ETH_TX_DATA_1ST_BD_PKT_LEN_SHIFT   2
 };
 
 /* The parsing information data for the second tx bd of a given packet. */
 struct eth_tx_data_2nd_bd {
 	__le16	tunn_ip_size;
-	__le16	bitfields;
-#define ETH_TX_DATA_2ND_BD_L4_HDR_START_OFFSET_W_MASK     0x1FFF
-#define ETH_TX_DATA_2ND_BD_L4_HDR_START_OFFSET_W_SHIFT    0
-#define ETH_TX_DATA_2ND_BD_RESERVED0_MASK                 0x7
-#define ETH_TX_DATA_2ND_BD_RESERVED0_SHIFT                13
-	__le16	bitfields2;
+	__le16	bitfields1;
 #define ETH_TX_DATA_2ND_BD_TUNN_INNER_L2_HDR_SIZE_W_MASK  0xF
 #define ETH_TX_DATA_2ND_BD_TUNN_INNER_L2_HDR_SIZE_W_SHIFT 0
 #define ETH_TX_DATA_2ND_BD_TUNN_INNER_ETH_TYPE_MASK       0x3
 #define ETH_TX_DATA_2ND_BD_TUNN_INNER_ETH_TYPE_SHIFT      4
 #define ETH_TX_DATA_2ND_BD_DEST_PORT_MODE_MASK            0x3
 #define ETH_TX_DATA_2ND_BD_DEST_PORT_MODE_SHIFT           6
+#define ETH_TX_DATA_2ND_BD_START_BD_MASK                  0x1
+#define ETH_TX_DATA_2ND_BD_START_BD_SHIFT                 8
 #define ETH_TX_DATA_2ND_BD_TUNN_TYPE_MASK                 0x3
-#define ETH_TX_DATA_2ND_BD_TUNN_TYPE_SHIFT                8
+#define ETH_TX_DATA_2ND_BD_TUNN_TYPE_SHIFT                9
 #define ETH_TX_DATA_2ND_BD_TUNN_INNER_IPV6_MASK           0x1
-#define ETH_TX_DATA_2ND_BD_TUNN_INNER_IPV6_SHIFT          10
+#define ETH_TX_DATA_2ND_BD_TUNN_INNER_IPV6_SHIFT          11
 #define ETH_TX_DATA_2ND_BD_IPV6_EXT_MASK                  0x1
-#define ETH_TX_DATA_2ND_BD_IPV6_EXT_SHIFT                 11
+#define ETH_TX_DATA_2ND_BD_IPV6_EXT_SHIFT                 12
 #define ETH_TX_DATA_2ND_BD_TUNN_IPV6_EXT_MASK             0x1
-#define ETH_TX_DATA_2ND_BD_TUNN_IPV6_EXT_SHIFT            12
+#define ETH_TX_DATA_2ND_BD_TUNN_IPV6_EXT_SHIFT            13
 #define ETH_TX_DATA_2ND_BD_L4_UDP_MASK                    0x1
-#define ETH_TX_DATA_2ND_BD_L4_UDP_SHIFT                   13
+#define ETH_TX_DATA_2ND_BD_L4_UDP_SHIFT                   14
 #define ETH_TX_DATA_2ND_BD_L4_PSEUDO_CSUM_MODE_MASK       0x1
-#define ETH_TX_DATA_2ND_BD_L4_PSEUDO_CSUM_MODE_SHIFT      14
-#define ETH_TX_DATA_2ND_BD_RESERVED1_MASK                 0x1
-#define ETH_TX_DATA_2ND_BD_RESERVED1_SHIFT                15
+#define ETH_TX_DATA_2ND_BD_L4_PSEUDO_CSUM_MODE_SHIFT      15
+	__le16 bitfields2;
+#define ETH_TX_DATA_2ND_BD_L4_HDR_START_OFFSET_W_MASK     0x1FFF
+#define ETH_TX_DATA_2ND_BD_L4_HDR_START_OFFSET_W_SHIFT    0
+#define ETH_TX_DATA_2ND_BD_RESERVED0_MASK                 0x7
+#define ETH_TX_DATA_2ND_BD_RESERVED0_SHIFT                13
+};
+
+struct eth_fast_path_cqe_fw_debug {
+	u8 reserved0;
+	u8 reserved1;
+	__le16 reserved2;
+};
+
+/*  tunneling parsing flags */
+struct eth_tunnel_parsing_flags {
+	u8 flags;
+#define	ETH_TUNNEL_PARSING_FLAGS_TYPE_MASK		0x3
+#define	ETH_TUNNEL_PARSING_FLAGS_TYPE_SHIFT		0
+#define	ETH_TUNNEL_PARSING_FLAGS_TENNANT_ID_EXIST_MASK	0x1
+#define	ETH_TUNNEL_PARSING_FLAGS_TENNANT_ID_EXIST_SHIFT	2
+#define	ETH_TUNNEL_PARSING_FLAGS_NEXT_PROTOCOL_MASK	0x3
+#define	ETH_TUNNEL_PARSING_FLAGS_NEXT_PROTOCOL_SHIFT	3
+#define	ETH_TUNNEL_PARSING_FLAGS_FIRSTHDRIPMATCH_MASK	0x1
+#define	ETH_TUNNEL_PARSING_FLAGS_FIRSTHDRIPMATCH_SHIFT	5
+#define	ETH_TUNNEL_PARSING_FLAGS_IPV4_FRAGMENT_MASK	0x1
+#define	ETH_TUNNEL_PARSING_FLAGS_IPV4_FRAGMENT_SHIFT	6
+#define	ETH_TUNNEL_PARSING_FLAGS_IPV4_OPTIONS_MASK	0x1
+#define	ETH_TUNNEL_PARSING_FLAGS_IPV4_OPTIONS_SHIFT	7
 };
 
 /* Regular ETH Rx FP CQE. */
 struct eth_fast_path_rx_reg_cqe {
-	u8	type;
-	u8	bitfields;
+	u8 type;
+	u8 bitfields;
 #define ETH_FAST_PATH_RX_REG_CQE_RSS_HASH_TYPE_MASK  0x7
 #define ETH_FAST_PATH_RX_REG_CQE_RSS_HASH_TYPE_SHIFT 0
 #define ETH_FAST_PATH_RX_REG_CQE_TC_MASK             0xF
 #define ETH_FAST_PATH_RX_REG_CQE_TC_SHIFT            3
 #define ETH_FAST_PATH_RX_REG_CQE_RESERVED0_MASK      0x1
 #define ETH_FAST_PATH_RX_REG_CQE_RESERVED0_SHIFT     7
-	__le16				pkt_len;
-	struct parsing_and_err_flags	pars_flags;
-	__le16				vlan_tag;
-	__le32				rss_hash;
-	__le16				len_on_bd;
-	u8				placement_offset;
-	u8				reserved;
-	__le16				pbl[ETH_REG_CQE_PBL_SIZE];
-	u8				reserved1[10];
+	__le16 pkt_len;
+	struct parsing_and_err_flags pars_flags;
+	__le16 vlan_tag;
+	__le32 rss_hash;
+	__le16 len_on_first_bd;
+	u8 placement_offset;
+	struct eth_tunnel_parsing_flags tunnel_pars_flags;
+	u8 bd_num;
+	u8 reserved[7];
+	struct eth_fast_path_cqe_fw_debug fw_debug;
+	u8 reserved1[3];
+	u8 flags;
+#define ETH_FAST_PATH_RX_REG_CQE_VALID_MASK          0x1
+#define ETH_FAST_PATH_RX_REG_CQE_VALID_SHIFT         0
+#define ETH_FAST_PATH_RX_REG_CQE_VALID_TOGGLE_MASK   0x1
+#define ETH_FAST_PATH_RX_REG_CQE_VALID_TOGGLE_SHIFT  1
+#define ETH_FAST_PATH_RX_REG_CQE_RESERVED2_MASK      0x3F
+#define ETH_FAST_PATH_RX_REG_CQE_RESERVED2_SHIFT     2
+};
+
+/* TPA-continue ETH Rx FP CQE. */
+struct eth_fast_path_rx_tpa_cont_cqe {
+	u8	type;
+	u8	tpa_agg_index;
+	__le16	len_list[ETH_TPA_CQE_CONT_LEN_LIST_SIZE];
+	u8	reserved[5];
+	u8	reserved1;
+	__le16	reserved2[ETH_TPA_CQE_CONT_LEN_LIST_SIZE];
+};
+
+/* TPA-end ETH Rx FP CQE. */
+struct eth_fast_path_rx_tpa_end_cqe {
+	u8	type;
+	u8	tpa_agg_index;
+	__le16	total_packet_len;
+	u8	num_of_bds;
+	u8	end_reason;
+	__le16	num_of_coalesced_segs;
+	__le32	ts_delta;
+	__le16	len_list[ETH_TPA_CQE_END_LEN_LIST_SIZE];
+	u8	reserved1[3];
+	u8	reserved2;
+	__le16	reserved3[ETH_TPA_CQE_END_LEN_LIST_SIZE];
+};
+
+/* TPA-start ETH Rx FP CQE. */
+struct eth_fast_path_rx_tpa_start_cqe {
+	u8	type;
+	u8	bitfields;
+#define ETH_FAST_PATH_RX_TPA_START_CQE_RSS_HASH_TYPE_MASK  0x7
+#define ETH_FAST_PATH_RX_TPA_START_CQE_RSS_HASH_TYPE_SHIFT 0
+#define ETH_FAST_PATH_RX_TPA_START_CQE_TC_MASK             0xF
+#define ETH_FAST_PATH_RX_TPA_START_CQE_TC_SHIFT            3
+#define ETH_FAST_PATH_RX_TPA_START_CQE_RESERVED0_MASK      0x1
+#define ETH_FAST_PATH_RX_TPA_START_CQE_RESERVED0_SHIFT     7
+	__le16	seg_len;
+	struct parsing_and_err_flags pars_flags;
+	__le16	vlan_tag;
+	__le32	rss_hash;
+	__le16	len_on_first_bd;
+	u8	placement_offset;
+	struct eth_tunnel_parsing_flags tunnel_pars_flags;
+	u8	tpa_agg_index;
+	u8	header_len;
+	__le16	ext_bd_len_list[ETH_TPA_CQE_START_LEN_LIST_SIZE];
+	struct eth_fast_path_cqe_fw_debug fw_debug;
 };
 
 /* The L4 pseudo checksum mode for Ethernet */
@@ -168,13 +242,26 @@ struct eth_slow_path_rx_cqe {
 	u8	type;
 	u8	ramrod_cmd_id;
 	u8	error_flag;
-	u8	reserved[27];
+	u8	reserved[25];
 	__le16	echo;
+	u8	reserved1;
+	u8	flags;
+/* for PMD mode - valid indication */
+#define ETH_SLOW_PATH_RX_CQE_VALID_MASK         0x1
+#define ETH_SLOW_PATH_RX_CQE_VALID_SHIFT        0
+/* for PMD mode - valid toggle indication */
+#define ETH_SLOW_PATH_RX_CQE_VALID_TOGGLE_MASK  0x1
+#define ETH_SLOW_PATH_RX_CQE_VALID_TOGGLE_SHIFT 1
+#define ETH_SLOW_PATH_RX_CQE_RESERVED2_MASK     0x3F
+#define ETH_SLOW_PATH_RX_CQE_RESERVED2_SHIFT    2
 };
 
 /* union for all ETH Rx CQE types */
 union eth_rx_cqe {
 	struct eth_fast_path_rx_reg_cqe		fast_path_regular;
+	struct eth_fast_path_rx_tpa_start_cqe	fast_path_tpa_start;
+	struct eth_fast_path_rx_tpa_cont_cqe	fast_path_tpa_cont;
+	struct eth_fast_path_rx_tpa_end_cqe	fast_path_tpa_end;
 	struct eth_slow_path_rx_cqe		slow_path;
 };
 
@@ -183,15 +270,31 @@ enum eth_rx_cqe_type {
 	ETH_RX_CQE_TYPE_UNUSED,
 	ETH_RX_CQE_TYPE_REGULAR,
 	ETH_RX_CQE_TYPE_SLOW_PATH,
+	ETH_RX_CQE_TYPE_TPA_START,
+	ETH_RX_CQE_TYPE_TPA_CONT,
+	ETH_RX_CQE_TYPE_TPA_END,
 	MAX_ETH_RX_CQE_TYPE
 };
 
-/* ETH Rx producers data */
-struct eth_rx_prod_data {
-	__le16	bd_prod;
-	__le16	sge_prod;
-	__le16	cqe_prod;
-	__le16	reserved;
+enum eth_rx_tunn_type {
+	ETH_RX_NO_TUNN,
+	ETH_RX_TUNN_GENEVE,
+	ETH_RX_TUNN_GRE,
+	ETH_RX_TUNN_VXLAN,
+	MAX_ETH_RX_TUNN_TYPE
+};
+
+/*  Aggregation end reason. */
+enum eth_tpa_end_reason {
+	ETH_AGG_END_UNUSED,
+	ETH_AGG_END_SP_UPDATE,
+	ETH_AGG_END_MAX_LEN,
+	ETH_AGG_END_LAST_SEG,
+	ETH_AGG_END_TIMEOUT,
+	ETH_AGG_END_NOT_CONSISTENT,
+	ETH_AGG_END_OUT_OF_ORDER,
+	ETH_AGG_END_NON_TPA_SEG,
+	MAX_ETH_TPA_END_REASON
 };
 
 /* The first tx bd of a given packet */
@@ -211,12 +314,17 @@ struct eth_tx_2nd_bd {
 /* The parsing information data for the third tx bd of a given packet. */
 struct eth_tx_data_3rd_bd {
 	__le16	lso_mss;
-	u8	bitfields;
+	__le16	bitfields;
 #define ETH_TX_DATA_3RD_BD_TCP_HDR_LEN_DW_MASK  0xF
 #define ETH_TX_DATA_3RD_BD_TCP_HDR_LEN_DW_SHIFT 0
 #define ETH_TX_DATA_3RD_BD_HDR_NBD_MASK         0xF
 #define ETH_TX_DATA_3RD_BD_HDR_NBD_SHIFT        4
-	u8	resereved0[3];
+#define ETH_TX_DATA_3RD_BD_START_BD_MASK        0x1
+#define ETH_TX_DATA_3RD_BD_START_BD_SHIFT       8
+#define ETH_TX_DATA_3RD_BD_RESERVED0_MASK       0x7F
+#define ETH_TX_DATA_3RD_BD_RESERVED0_SHIFT      9
+	u8	tunn_l4_hdr_start_offset_w;
+	u8	tunn_hdr_size_w;
 };
 
 /* The third tx bd of a given packet */
@@ -226,12 +334,24 @@ struct eth_tx_3rd_bd {
 	struct eth_tx_data_3rd_bd	data;
 };
 
+/* Complementary information for the regular tx bd of a given packet. */
+struct eth_tx_data_bd {
+	__le16	reserved0;
+	__le16	bitfields;
+#define ETH_TX_DATA_BD_RESERVED1_MASK  0xFF
+#define ETH_TX_DATA_BD_RESERVED1_SHIFT 0
+#define ETH_TX_DATA_BD_START_BD_MASK   0x1
+#define ETH_TX_DATA_BD_START_BD_SHIFT  8
+#define ETH_TX_DATA_BD_RESERVED2_MASK  0x7F
+#define ETH_TX_DATA_BD_RESERVED2_SHIFT 9
+	__le16 reserved3;
+};
+
 /* The common non-special TX BD ring element */
 struct eth_tx_bd {
 	struct regpair	addr;
 	__le16		nbytes;
-	__le16		reserved0;
-	__le32		reserved1;
+	struct eth_tx_data_bd	data;
 };
 
 union eth_tx_bd_types {
@@ -242,21 +362,18 @@ union eth_tx_bd_types {
 };
 
 /* Mstorm Queue Zone */
-struct mstorm_eth_queue_zone {
-	struct eth_rx_prod_data rx_producers;
-	__le32			reserved[2];
-};
-
-/* Ustorm Queue Zone */
-struct ustorm_eth_queue_zone {
-	struct coalescing_timeset	int_coalescing_timeset;
-	__le16				reserved[3];
+enum eth_tx_tunn_type {
+	ETH_TX_TUNN_GENEVE,
+	ETH_TX_TUNN_TTAG,
+	ETH_TX_TUNN_GRE,
+	ETH_TX_TUNN_VXLAN,
+	MAX_ETH_TX_TUNN_TYPE
 };
 
 /* Ystorm Queue Zone */
-struct ystorm_eth_queue_zone {
-	struct coalescing_timeset	int_coalescing_timeset;
-	__le16				reserved[3];
+struct xstorm_eth_queue_zone {
+	struct coalescing_timeset int_coalescing_timeset;
+	u8 reserved[7];
 };
 
 /* ETH doorbell data */

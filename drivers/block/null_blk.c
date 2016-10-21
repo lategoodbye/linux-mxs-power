@@ -448,7 +448,7 @@ static int null_lnvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 	struct request *rq;
 	struct bio *bio = rqd->bio;
 
-	rq = blk_mq_alloc_request(q, bio_rw(bio), 0);
+	rq = blk_mq_alloc_request(q, bio_data_dir(bio), 0);
 	if (IS_ERR(rq))
 		return -ENOMEM;
 
@@ -742,10 +742,11 @@ static int null_add_dev(void)
 
 	add_disk(disk);
 
+done:
 	mutex_lock(&lock);
 	list_add_tail(&nullb->list, &nullb_list);
 	mutex_unlock(&lock);
-done:
+
 	return 0;
 
 out_cleanup_lightnvm:

@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -109,7 +105,7 @@ static inline char *ptlrpc_import_state_name(enum lustre_imp_state state)
 		"RECOVER", "FULL", "EVICTED",
 	};
 
-	LASSERT (state <= LUSTRE_IMP_EVICTED);
+	LASSERT(state <= LUSTRE_IMP_EVICTED);
 	return import_state_names[state];
 }
 
@@ -292,7 +288,8 @@ struct obd_import {
 				  /* need IR MNE swab */
 				  imp_need_mne_swab:1,
 				  /* import must be reconnected instead of
-				   * chose new connection */
+				   * chosing new connection
+				   */
 				  imp_force_reconnect:1,
 				  /* import has tried to connect with server */
 				  imp_connect_tried:1;

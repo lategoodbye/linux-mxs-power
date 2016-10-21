@@ -739,20 +739,17 @@ int prcmu_config_clkout(u8 clkout, u8 source, u8 div)
 	if (!div && !requests[clkout])
 		return -EINVAL;
 
-	switch (clkout) {
-	case 0:
+	if (clkout == 0) {
 		div_mask = PRCM_CLKOCR_CLKODIV0_MASK;
 		mask = (PRCM_CLKOCR_CLKODIV0_MASK | PRCM_CLKOCR_CLKOSEL0_MASK);
 		bits = ((source << PRCM_CLKOCR_CLKOSEL0_SHIFT) |
 			(div << PRCM_CLKOCR_CLKODIV0_SHIFT));
-		break;
-	case 1:
+	} else {
 		div_mask = PRCM_CLKOCR_CLKODIV1_MASK;
 		mask = (PRCM_CLKOCR_CLKODIV1_MASK | PRCM_CLKOCR_CLKOSEL1_MASK |
 			PRCM_CLKOCR_CLK1TYPE);
 		bits = ((source << PRCM_CLKOCR_CLKOSEL1_SHIFT) |
 			(div << PRCM_CLKOCR_CLKODIV1_SHIFT));
-		break;
 	}
 	bits &= mask;
 
@@ -3097,8 +3094,7 @@ static void db8500_prcmu_update_cpufreq(void)
 	}
 }
 
-static int db8500_prcmu_register_ab8500(struct device *parent,
-					struct ab8500_platform_data *pdata)
+static int db8500_prcmu_register_ab8500(struct device *parent)
 {
 	struct device_node *np;
 	struct resource ab8500_resource;
@@ -3106,8 +3102,6 @@ static int db8500_prcmu_register_ab8500(struct device *parent,
 		.name = "ab8500-core",
 		.of_compatible = "stericsson,ab8500",
 		.id = AB8500_VERSION_AB8500,
-		.platform_data = pdata,
-		.pdata_size = sizeof(struct ab8500_platform_data),
 		.resources = &ab8500_resource,
 		.num_resources = 1,
 	};
@@ -3136,7 +3130,6 @@ static int db8500_prcmu_register_ab8500(struct device *parent,
 static int db8500_prcmu_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct prcmu_pdata *pdata = dev_get_platdata(&pdev->dev);
 	int irq = 0, err = 0;
 	struct resource *res;
 
@@ -3152,7 +3145,7 @@ static int db8500_prcmu_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 	init_prcm_registers();
-	dbx500_fw_version_init(pdev, pdata->version_offset);
+	dbx500_fw_version_init(pdev, DB8500_PRCMU_FW_VERSION_OFFSET);
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "prcmu-tcdm");
 	if (!res) {
 		dev_err(&pdev->dev, "no prcmu tcdm region provided\n");
@@ -3207,7 +3200,7 @@ static int db8500_prcmu_probe(struct platform_device *pdev)
 		}
 	}
 
-	err = db8500_prcmu_register_ab8500(&pdev->dev, pdata->ab_platdata);
+	err = db8500_prcmu_register_ab8500(&pdev->dev);
 	if (err) {
 		mfd_remove_devices(&pdev->dev);
 		pr_err("prcmu: Failed to add ab8500 subdevice\n");

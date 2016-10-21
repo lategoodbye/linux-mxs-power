@@ -1,8 +1,5 @@
-
-
 generic-y += bug.h
 generic-y += bugs.h
-generic-y += checksum.h
 generic-y += clkdev.h
 generic-y += cputime.h
 generic-y += current.h
@@ -31,7 +28,6 @@ generic-y += msgbuf.h
 generic-y += msi.h
 generic-y += mutex.h
 generic-y += pci.h
-generic-y += pci-bridge.h
 generic-y += poll.h
 generic-y += preempt.h
 generic-y += resource.h

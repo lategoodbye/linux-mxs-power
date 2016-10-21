@@ -25,6 +25,7 @@
 #ifndef __HCI_CORE_H
 #define __HCI_CORE_H
 
+#include <linux/leds.h>
 #include <net/bluetooth/hci.h>
 #include <net/bluetooth/hci_sock.h>
 
@@ -371,6 +372,8 @@ struct hci_dev {
 
 	atomic_t		promisc;
 
+	const char		*hw_info;
+	const char		*fw_info;
 	struct dentry		*debugfs;
 
 	struct device		dev;
@@ -395,6 +398,8 @@ struct hci_dev {
 	__u32			rpa_timeout;
 	struct delayed_work	rpa_expired;
 	bdaddr_t		rpa;
+
+	struct led_trigger	*power_led;
 
 	int (*open)(struct hci_dev *hdev);
 	int (*close)(struct hci_dev *hdev);
@@ -651,6 +656,7 @@ enum {
 	HCI_CONN_PARAM_REMOVAL_PEND,
 	HCI_CONN_NEW_LINK_KEY,
 	HCI_CONN_SCANNING,
+	HCI_CONN_AUTH_FAILURE,
 };
 
 static inline bool hci_conn_ssp_enabled(struct hci_conn *conn)
@@ -1018,6 +1024,10 @@ void hci_unregister_dev(struct hci_dev *hdev);
 int hci_suspend_dev(struct hci_dev *hdev);
 int hci_resume_dev(struct hci_dev *hdev);
 int hci_reset_dev(struct hci_dev *hdev);
+int hci_recv_frame(struct hci_dev *hdev, struct sk_buff *skb);
+int hci_recv_diag(struct hci_dev *hdev, struct sk_buff *skb);
+void hci_set_hw_info(struct hci_dev *hdev, const char *fmt, ...);
+void hci_set_fw_info(struct hci_dev *hdev, const char *fmt, ...);
 int hci_dev_open(__u16 dev);
 int hci_dev_close(__u16 dev);
 int hci_dev_do_close(struct hci_dev *hdev);
@@ -1093,9 +1103,6 @@ int hci_add_adv_instance(struct hci_dev *hdev, u8 instance, u32 flags,
 int hci_remove_adv_instance(struct hci_dev *hdev, u8 instance);
 
 void hci_event_packet(struct hci_dev *hdev, struct sk_buff *skb);
-
-int hci_recv_frame(struct hci_dev *hdev, struct sk_buff *skb);
-int hci_recv_diag(struct hci_dev *hdev, struct sk_buff *skb);
 
 void hci_init_sysfs(struct hci_dev *hdev);
 void hci_conn_init_sysfs(struct hci_conn *conn);

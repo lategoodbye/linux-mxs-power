@@ -31,6 +31,7 @@ obj-$(CONFIG_EDAC_I5400)		+= i5400_edac.o
 obj-$(CONFIG_EDAC_I7300)		+= i7300_edac.o
 obj-$(CONFIG_EDAC_I7CORE)		+= i7core_edac.o
 obj-$(CONFIG_EDAC_SBRIDGE)		+= sb_edac.o
+obj-$(CONFIG_EDAC_SKX)			+= skx_edac.o
 obj-$(CONFIG_EDAC_E7XXX)		+= e7xxx_edac.o
 obj-$(CONFIG_EDAC_E752X)		+= e752x_edac.o
 obj-$(CONFIG_EDAC_I82443BXGX)		+= i82443bxgx_edac.o
@@ -67,6 +68,6 @@ obj-$(CONFIG_EDAC_OCTEON_L2C)		+= octeon_edac-l2c.o
 obj-$(CONFIG_EDAC_OCTEON_LMC)		+= octeon_edac-lmc.o
 obj-$(CONFIG_EDAC_OCTEON_PCI)		+= octeon_edac-pci.o
 
-obj-$(CONFIG_EDAC_ALTERA_MC)		+= altera_edac.o
+obj-$(CONFIG_EDAC_ALTERA)		+= altera_edac.o
 obj-$(CONFIG_EDAC_SYNOPSYS)		+= synopsys_edac.o
 obj-$(CONFIG_EDAC_XGENE)		+= xgene_edac.o

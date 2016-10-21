@@ -9,7 +9,11 @@
 UTS_MACHINE := arc
 
 ifeq ($(CROSS_COMPILE),)
+ifndef CONFIG_CPU_BIG_ENDIAN
 CROSS_COMPILE := arc-linux-
+else
+CROSS_COMPILE := arceb-linux-
+endif
 endif
 
 KBUILD_DEFCONFIG := nsim_700_defconfig
@@ -17,6 +21,20 @@ KBUILD_DEFCONFIG := nsim_700_defconfig
 cflags-y	+= -fno-common -pipe -fno-builtin -D__linux__
 cflags-$(CONFIG_ISA_ARCOMPACT)	+= -mA7
 cflags-$(CONFIG_ISA_ARCV2)	+= -mcpu=archs
+
+is_700 = $(shell $(CC) -dM -E - < /dev/null | grep -q "ARC700" && echo 1 || echo 0)
+
+ifdef CONFIG_ISA_ARCOMPACT
+ifeq ($(is_700), 0)
+    $(error Toolchain not configured for ARCompact builds)
+endif
+endif
+
+ifdef CONFIG_ISA_ARCV2
+ifeq ($(is_700), 1)
+    $(error Toolchain not configured for ARCv2 builds)
+endif
+endif
 
 ifdef CONFIG_ARC_CURR_IN_REG
 # For a global register defintion, make sure it gets passed to every file
@@ -47,8 +65,6 @@ cflags-y				+= -mno-div-rem
 endif
 
 endif
-
-cflags-$(CONFIG_ARC_DW2_UNWIND)		+= -fasynchronous-unwind-tables
 
 # By default gcc 4.8 generates dwarf4 which kernel unwinder can't grok
 ifeq ($(atleast_gcc48),y)
@@ -95,6 +111,11 @@ core-y		+= arch/arc/boot/dts/
 core-$(CONFIG_ARC_PLAT_SIM)	+= arch/arc/plat-sim/
 core-$(CONFIG_ARC_PLAT_TB10X)	+= arch/arc/plat-tb10x/
 core-$(CONFIG_ARC_PLAT_AXS10X)	+= arch/arc/plat-axs10x/
+core-$(CONFIG_ARC_PLAT_EZNPS)	+= arch/arc/plat-eznps/
+
+ifdef CONFIG_ARC_PLAT_EZNPS
+KBUILD_CPPFLAGS += -I$(srctree)/arch/arc/plat-eznps/include
+endif
 
 drivers-$(CONFIG_OPROFILE)	+= arch/arc/oprofile/
 
@@ -102,7 +123,7 @@ libs-y		+= arch/arc/lib/ $(LIBGCC)
 
 boot		:= arch/arc/boot
 
-#default target for make without any arguements.
+#default target for make without any arguments.
 KBUILD_IMAGE	:= bootpImage
 
 all:	$(KBUILD_IMAGE)

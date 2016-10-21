@@ -18,6 +18,15 @@
 #include "q_struct.h"
 #include "nicvf_queues.h"
 
+static void nicvf_get_page(struct nicvf *nic)
+{
+	if (!nic->rb_pageref || !nic->rb_page)
+		return;
+
+	page_ref_add(nic->rb_page, nic->rb_pageref);
+	nic->rb_pageref = 0;
+}
+
 /* Poll a register for a specific value */
 static int nicvf_poll_reg(struct nicvf *nic, int qidx,
 			  u64 reg, int bit_pos, int bits, int val)
@@ -78,32 +87,32 @@ static void nicvf_free_q_desc_mem(struct nicvf *nic, struct q_desc_mem *dmem)
 static inline int nicvf_alloc_rcv_buffer(struct nicvf *nic, gfp_t gfp,
 					 u32 buf_len, u64 **rbuf)
 {
-	int order = get_order(buf_len);
+	int order = (PAGE_SIZE <= 4096) ?  PAGE_ALLOC_COSTLY_ORDER : 0;
 
 	/* Check if request can be accomodated in previous allocated page */
-	if (nic->rb_page) {
-		if ((nic->rb_page_offset + buf_len + buf_len) >
-		    (PAGE_SIZE << order)) {
-			nic->rb_page = NULL;
-		} else {
-			nic->rb_page_offset += buf_len;
-			get_page(nic->rb_page);
-		}
+	if (nic->rb_page &&
+	    ((nic->rb_page_offset + buf_len) < (PAGE_SIZE << order))) {
+		nic->rb_pageref++;
+		goto ret;
 	}
+
+	nicvf_get_page(nic);
+	nic->rb_page = NULL;
 
 	/* Allocate a new page */
 	if (!nic->rb_page) {
 		nic->rb_page = alloc_pages(gfp | __GFP_COMP | __GFP_NOWARN,
 					   order);
 		if (!nic->rb_page) {
-			netdev_err(nic->netdev,
-				   "Failed to allocate new rcv buffer\n");
+			nic->drv_stats.rcv_buffer_alloc_failures++;
 			return -ENOMEM;
 		}
 		nic->rb_page_offset = 0;
 	}
 
+ret:
 	*rbuf = (u64 *)((u64)page_address(nic->rb_page) + nic->rb_page_offset);
+	nic->rb_page_offset += buf_len;
 
 	return 0;
 }
@@ -159,6 +168,9 @@ static int  nicvf_init_rbdr(struct nicvf *nic, struct rbdr *rbdr,
 		desc = GET_RBDR_DESC(rbdr, idx);
 		desc->buf_addr = virt_to_phys(rbuf) >> NICVF_RCV_BUF_ALIGN;
 	}
+
+	nicvf_get_page(nic);
+
 	return 0;
 }
 
@@ -241,6 +253,8 @@ refill:
 		refill_rb_cnt--;
 		new_rb++;
 	}
+
+	nicvf_get_page(nic);
 
 	/* make sure all memory stores are done before ringing doorbell */
 	smp_wmb();
@@ -519,6 +533,7 @@ static void nicvf_rcv_queue_config(struct nicvf *nic, struct queue_set *qs,
 		nicvf_config_vlan_stripping(nic, nic->netdev->features);
 
 	/* Enable Receive queue */
+	memset(&rq_cfg, 0, sizeof(struct rq_cfg));
 	rq_cfg.ena = 1;
 	rq_cfg.tcp_ena = 0;
 	nicvf_queue_reg_write(nic, NIC_QSET_RQ_0_7_CFG, qidx, *(u64 *)&rq_cfg);
@@ -551,6 +566,7 @@ void nicvf_cmp_queue_config(struct nicvf *nic, struct queue_set *qs,
 			      qidx, (u64)(cq->dmem.phys_base));
 
 	/* Enable Completion queue */
+	memset(&cq_cfg, 0, sizeof(struct cq_cfg));
 	cq_cfg.ena = 1;
 	cq_cfg.reset = 0;
 	cq_cfg.caching = 0;
@@ -599,6 +615,7 @@ static void nicvf_snd_queue_config(struct nicvf *nic, struct queue_set *qs,
 			      qidx, (u64)(sq->dmem.phys_base));
 
 	/* Enable send queue  & set queue size */
+	memset(&sq_cfg, 0, sizeof(struct sq_cfg));
 	sq_cfg.ena = 1;
 	sq_cfg.reset = 0;
 	sq_cfg.ldwb = 0;
@@ -635,6 +652,7 @@ static void nicvf_rbdr_config(struct nicvf *nic, struct queue_set *qs,
 
 	/* Enable RBDR  & set queue size */
 	/* Buffer size should be in multiples of 128 bytes */
+	memset(&rbdr_cfg, 0, sizeof(struct rbdr_cfg));
 	rbdr_cfg.ena = 1;
 	rbdr_cfg.reset = 0;
 	rbdr_cfg.ldwb = 0;
@@ -920,6 +938,8 @@ static int nicvf_tso_count_subdescs(struct sk_buff *skb)
 	return num_edescs + sh->gso_segs;
 }
 
+#define POST_CQE_DESC_COUNT 2
+
 /* Get the number of SQ descriptors needed to xmit this skb */
 static int nicvf_sq_subdesc_required(struct nicvf *nic, struct sk_buff *skb)
 {
@@ -929,6 +949,10 @@ static int nicvf_sq_subdesc_required(struct nicvf *nic, struct sk_buff *skb)
 		subdesc_cnt = nicvf_tso_count_subdescs(skb);
 		return subdesc_cnt;
 	}
+
+	/* Dummy descriptors to get TSO pkt completion notification */
+	if (nic->t88 && nic->hw_tso && skb_shinfo(skb)->gso_size)
+		subdesc_cnt += POST_CQE_DESC_COUNT;
 
 	if (skb_shinfo(skb)->nr_frags)
 		subdesc_cnt += skb_shinfo(skb)->nr_frags;
@@ -947,14 +971,21 @@ nicvf_sq_add_hdr_subdesc(struct nicvf *nic, struct snd_queue *sq, int qentry,
 	struct sq_hdr_subdesc *hdr;
 
 	hdr = (struct sq_hdr_subdesc *)GET_SQ_DESC(sq, qentry);
-	sq->skbuff[qentry] = (u64)skb;
-
 	memset(hdr, 0, SND_QUEUE_DESC_SIZE);
 	hdr->subdesc_type = SQ_DESC_TYPE_HEADER;
-	/* Enable notification via CQE after processing SQE */
-	hdr->post_cqe = 1;
-	/* No of subdescriptors following this */
-	hdr->subdesc_cnt = subdesc_cnt;
+
+	if (nic->t88 && nic->hw_tso && skb_shinfo(skb)->gso_size) {
+		/* post_cqe = 0, to avoid HW posting a CQE for every TSO
+		 * segment transmitted on 88xx.
+		 */
+		hdr->subdesc_cnt = subdesc_cnt - POST_CQE_DESC_COUNT;
+	} else {
+		sq->skbuff[qentry] = (u64)skb;
+		/* Enable notification via CQE after processing SQE */
+		hdr->post_cqe = 1;
+		/* No of subdescriptors following this */
+		hdr->subdesc_cnt = subdesc_cnt;
+	}
 	hdr->tot_len = len;
 
 	/* Offload checksum calculation to HW */
@@ -1003,6 +1034,37 @@ static inline void nicvf_sq_add_gather_subdesc(struct snd_queue *sq, int qentry,
 	gather->ld_type = NIC_SEND_LD_TYPE_E_LDD;
 	gather->size = size;
 	gather->addr = data;
+}
+
+/* Add HDR + IMMEDIATE subdescriptors right after descriptors of a TSO
+ * packet so that a CQE is posted as a notifation for transmission of
+ * TSO packet.
+ */
+static inline void nicvf_sq_add_cqe_subdesc(struct snd_queue *sq, int qentry,
+					    int tso_sqe, struct sk_buff *skb)
+{
+	struct sq_imm_subdesc *imm;
+	struct sq_hdr_subdesc *hdr;
+
+	sq->skbuff[qentry] = (u64)skb;
+
+	hdr = (struct sq_hdr_subdesc *)GET_SQ_DESC(sq, qentry);
+	memset(hdr, 0, SND_QUEUE_DESC_SIZE);
+	hdr->subdesc_type = SQ_DESC_TYPE_HEADER;
+	/* Enable notification via CQE after processing SQE */
+	hdr->post_cqe = 1;
+	/* There is no packet to transmit here */
+	hdr->dont_send = 1;
+	hdr->subdesc_cnt = POST_CQE_DESC_COUNT - 1;
+	hdr->tot_len = 1;
+	/* Actual TSO header SQE index, needed for cleanup */
+	hdr->rsvd2 = tso_sqe;
+
+	qentry = nicvf_get_nxt_sqentry(sq, qentry);
+	imm = (struct sq_imm_subdesc *)GET_SQ_DESC(sq, qentry);
+	memset(imm, 0, SND_QUEUE_DESC_SIZE);
+	imm->subdesc_type = SQ_DESC_TYPE_IMMEDIATE;
+	imm->len = 1;
 }
 
 /* Segment a TSO packet into 'gso_size' segments and append
@@ -1078,7 +1140,7 @@ static int nicvf_sq_append_tso(struct nicvf *nic, struct snd_queue *sq,
 int nicvf_sq_append_skb(struct nicvf *nic, struct sk_buff *skb)
 {
 	int i, size;
-	int subdesc_cnt;
+	int subdesc_cnt, tso_sqe = 0;
 	int sq_num, qentry;
 	struct queue_set *qs;
 	struct snd_queue *sq;
@@ -1113,6 +1175,7 @@ int nicvf_sq_append_skb(struct nicvf *nic, struct sk_buff *skb)
 	/* Add SQ header subdesc */
 	nicvf_sq_add_hdr_subdesc(nic, sq, qentry, subdesc_cnt - 1,
 				 skb, skb->len);
+	tso_sqe = qentry;
 
 	/* Add SQ gather subdescs */
 	qentry = nicvf_get_nxt_sqentry(sq, qentry);
@@ -1136,6 +1199,11 @@ int nicvf_sq_append_skb(struct nicvf *nic, struct sk_buff *skb)
 	}
 
 doorbell:
+	if (nic->t88 && skb_shinfo(skb)->gso_size) {
+		qentry = nicvf_get_nxt_sqentry(sq, qentry);
+		nicvf_sq_add_cqe_subdesc(sq, qentry, tso_sqe, skb);
+	}
+
 	/* make sure all memory stores are done before ringing doorbell */
 	smp_wmb();
 

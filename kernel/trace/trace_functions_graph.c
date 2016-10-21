@@ -8,6 +8,7 @@
  */
 #include <linux/uaccess.h>
 #include <linux/ftrace.h>
+#include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
 
@@ -318,7 +319,7 @@ int trace_graph_entry(struct ftrace_graph_ent *trace)
 	int cpu;
 	int pc;
 
-	if (!ftrace_trace_task(current))
+	if (!ftrace_trace_task(tr))
 		return 0;
 
 	/* trace it when it is-nested-in or is a function enabled. */
@@ -337,6 +338,13 @@ int trace_graph_entry(struct ftrace_graph_ent *trace)
 	if (ftrace_graph_notrace_addr(trace->func))
 		return 1;
 
+	/*
+	 * Stop here if tracing_threshold is set. We only write function return
+	 * events to the ring buffer.
+	 */
+	if (tracing_thresh)
+		return 1;
+
 	local_irq_save(flags);
 	cpu = raw_smp_processor_id();
 	data = per_cpu_ptr(tr->trace_buffer.data, cpu);
@@ -352,14 +360,6 @@ int trace_graph_entry(struct ftrace_graph_ent *trace)
 	local_irq_restore(flags);
 
 	return ret;
-}
-
-static int trace_graph_thresh_entry(struct ftrace_graph_ent *trace)
-{
-	if (tracing_thresh)
-		return 1;
-	else
-		return trace_graph_entry(trace);
 }
 
 static void
@@ -456,7 +456,7 @@ static int graph_trace_init(struct trace_array *tr)
 	set_graph_array(tr);
 	if (tracing_thresh)
 		ret = register_ftrace_graph(&trace_graph_thresh_return,
-					    &trace_graph_thresh_entry);
+					    &trace_graph_entry);
 	else
 		ret = register_ftrace_graph(&trace_graph_return,
 					    &trace_graph_entry);
@@ -1350,7 +1350,7 @@ void graph_trace_open(struct trace_iterator *iter)
  out_err_free:
 	kfree(data);
  out_err:
-	pr_warning("function graph tracer: not enough memory\n");
+	pr_warn("function graph tracer: not enough memory\n");
 }
 
 void graph_trace_close(struct trace_iterator *iter)
@@ -1468,12 +1468,12 @@ static __init int init_graph_trace(void)
 	max_bytes_for_cpu = snprintf(NULL, 0, "%d", nr_cpu_ids - 1);
 
 	if (!register_trace_event(&graph_trace_entry_event)) {
-		pr_warning("Warning: could not register graph trace events\n");
+		pr_warn("Warning: could not register graph trace events\n");
 		return 1;
 	}
 
 	if (!register_trace_event(&graph_trace_ret_event)) {
-		pr_warning("Warning: could not register graph trace events\n");
+		pr_warn("Warning: could not register graph trace events\n");
 		return 1;
 	}
 

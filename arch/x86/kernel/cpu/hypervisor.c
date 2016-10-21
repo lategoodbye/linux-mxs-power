@@ -21,7 +21,8 @@
  *
  */
 
-#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/export.h>
 #include <asm/processor.h>
 #include <asm/hypervisor.h>
 
@@ -56,7 +57,7 @@ detect_hypervisor_vendor(void)
 	}
 
 	if (max_pri)
-		printk(KERN_INFO "Hypervisor detected: %s\n", x86_hyper->name);
+		pr_info("Hypervisor detected: %s\n", x86_hyper->name);
 }
 
 void init_hypervisor(struct cpuinfo_x86 *c)

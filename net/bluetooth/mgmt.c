@@ -38,7 +38,7 @@
 #include "mgmt_util.h"
 
 #define MGMT_VERSION	1
-#define MGMT_REVISION	11
+#define MGMT_REVISION	13
 
 static const u16 mgmt_commands[] = {
 	MGMT_OP_READ_INDEX_LIST,
@@ -359,7 +359,7 @@ static int read_index_list(struct sock *sk, struct hci_dev *hdev, void *data,
 
 	count = 0;
 	list_for_each_entry(d, &hci_dev_list, list) {
-		if (d->dev_type == HCI_BREDR &&
+		if (d->dev_type == HCI_PRIMARY &&
 		    !hci_dev_test_flag(d, HCI_UNCONFIGURED))
 			count++;
 	}
@@ -384,7 +384,7 @@ static int read_index_list(struct sock *sk, struct hci_dev *hdev, void *data,
 		if (test_bit(HCI_QUIRK_RAW_DEVICE, &d->quirks))
 			continue;
 
-		if (d->dev_type == HCI_BREDR &&
+		if (d->dev_type == HCI_PRIMARY &&
 		    !hci_dev_test_flag(d, HCI_UNCONFIGURED)) {
 			rp->index[count++] = cpu_to_le16(d->id);
 			BT_DBG("Added hci%u", d->id);
@@ -419,7 +419,7 @@ static int read_unconf_index_list(struct sock *sk, struct hci_dev *hdev,
 
 	count = 0;
 	list_for_each_entry(d, &hci_dev_list, list) {
-		if (d->dev_type == HCI_BREDR &&
+		if (d->dev_type == HCI_PRIMARY &&
 		    hci_dev_test_flag(d, HCI_UNCONFIGURED))
 			count++;
 	}
@@ -444,7 +444,7 @@ static int read_unconf_index_list(struct sock *sk, struct hci_dev *hdev,
 		if (test_bit(HCI_QUIRK_RAW_DEVICE, &d->quirks))
 			continue;
 
-		if (d->dev_type == HCI_BREDR &&
+		if (d->dev_type == HCI_PRIMARY &&
 		    hci_dev_test_flag(d, HCI_UNCONFIGURED)) {
 			rp->index[count++] = cpu_to_le16(d->id);
 			BT_DBG("Added hci%u", d->id);
@@ -479,7 +479,7 @@ static int read_ext_index_list(struct sock *sk, struct hci_dev *hdev,
 
 	count = 0;
 	list_for_each_entry(d, &hci_dev_list, list) {
-		if (d->dev_type == HCI_BREDR || d->dev_type == HCI_AMP)
+		if (d->dev_type == HCI_PRIMARY || d->dev_type == HCI_AMP)
 			count++;
 	}
 
@@ -503,7 +503,7 @@ static int read_ext_index_list(struct sock *sk, struct hci_dev *hdev,
 		if (test_bit(HCI_QUIRK_RAW_DEVICE, &d->quirks))
 			continue;
 
-		if (d->dev_type == HCI_BREDR) {
+		if (d->dev_type == HCI_PRIMARY) {
 			if (hci_dev_test_flag(d, HCI_UNCONFIGURED))
 				rp->entry[count].type = 0x01;
 			else
@@ -1382,8 +1382,19 @@ static int set_bondable(struct sock *sk, struct hci_dev *hdev, void *data,
 	if (err < 0)
 		goto unlock;
 
-	if (changed)
+	if (changed) {
+		/* In limited privacy mode the change of bondable mode
+		 * may affect the local advertising address.
+		 */
+		if (hdev_is_powered(hdev) &&
+		    hci_dev_test_flag(hdev, HCI_ADVERTISING) &&
+		    hci_dev_test_flag(hdev, HCI_DISCOVERABLE) &&
+		    hci_dev_test_flag(hdev, HCI_LIMITED_PRIVACY))
+			queue_work(hdev->req_workqueue,
+				   &hdev->discoverable_update);
+
 		err = new_settings(hdev, sk);
+	}
 
 unlock:
 	hci_dev_unlock(hdev);
@@ -4423,7 +4434,7 @@ static int set_privacy(struct sock *sk, struct hci_dev *hdev, void *cp_data,
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_SET_PRIVACY,
 				       MGMT_STATUS_NOT_SUPPORTED);
 
-	if (cp->privacy != 0x00 && cp->privacy != 0x01)
+	if (cp->privacy != 0x00 && cp->privacy != 0x01 && cp->privacy != 0x02)
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_SET_PRIVACY,
 				       MGMT_STATUS_INVALID_PARAMS);
 
@@ -4442,10 +4453,15 @@ static int set_privacy(struct sock *sk, struct hci_dev *hdev, void *cp_data,
 		changed = !hci_dev_test_and_set_flag(hdev, HCI_PRIVACY);
 		memcpy(hdev->irk, cp->irk, sizeof(hdev->irk));
 		hci_dev_set_flag(hdev, HCI_RPA_EXPIRED);
+		if (cp->privacy == 0x02)
+			hci_dev_set_flag(hdev, HCI_LIMITED_PRIVACY);
+		else
+			hci_dev_clear_flag(hdev, HCI_LIMITED_PRIVACY);
 	} else {
 		changed = hci_dev_test_and_clear_flag(hdev, HCI_PRIVACY);
 		memset(hdev->irk, 0, sizeof(hdev->irk));
 		hci_dev_clear_flag(hdev, HCI_RPA_EXPIRED);
+		hci_dev_clear_flag(hdev, HCI_LIMITED_PRIVACY);
 	}
 
 	err = send_settings_rsp(sk, MGMT_OP_SET_PRIVACY, hdev);
@@ -5979,6 +5995,10 @@ static int add_advertising(struct sock *sk, struct hci_dev *hdev,
 		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_ADD_ADVERTISING,
 				       MGMT_STATUS_INVALID_PARAMS);
 
+	if (data_len != sizeof(*cp) + cp->adv_data_len + cp->scan_rsp_len)
+		return mgmt_cmd_status(sk, hdev->id, MGMT_OP_ADD_ADVERTISING,
+				       MGMT_STATUS_INVALID_PARAMS);
+
 	flags = __le32_to_cpu(cp->flags);
 	timeout = __le16_to_cpu(cp->timeout);
 	duration = __le16_to_cpu(cp->duration);
@@ -6346,7 +6366,7 @@ void mgmt_index_added(struct hci_dev *hdev)
 		return;
 
 	switch (hdev->dev_type) {
-	case HCI_BREDR:
+	case HCI_PRIMARY:
 		if (hci_dev_test_flag(hdev, HCI_UNCONFIGURED)) {
 			mgmt_index_event(MGMT_EV_UNCONF_INDEX_ADDED, hdev,
 					 NULL, 0, HCI_MGMT_UNCONF_INDEX_EVENTS);
@@ -6379,7 +6399,7 @@ void mgmt_index_removed(struct hci_dev *hdev)
 		return;
 
 	switch (hdev->dev_type) {
-	case HCI_BREDR:
+	case HCI_PRIMARY:
 		mgmt_pending_foreach(0, hdev, cmd_complete_rsp, &status);
 
 		if (hci_dev_test_flag(hdev, HCI_UNCONFIGURED)) {

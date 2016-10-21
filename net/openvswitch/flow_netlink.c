@@ -261,7 +261,7 @@ size_t ovs_tun_key_attr_size(void)
 	/* Whenever adding new OVS_TUNNEL_KEY_ FIELDS, we should consider
 	 * updating this function.
 	 */
-	return    nla_total_size(8)    /* OVS_TUNNEL_KEY_ATTR_ID */
+	return    nla_total_size_64bit(8) /* OVS_TUNNEL_KEY_ATTR_ID */
 		+ nla_total_size(16)   /* OVS_TUNNEL_KEY_ATTR_IPV[46]_SRC */
 		+ nla_total_size(16)   /* OVS_TUNNEL_KEY_ATTR_IPV[46]_DST */
 		+ nla_total_size(1)    /* OVS_TUNNEL_KEY_ATTR_TOS */
@@ -720,7 +720,8 @@ static int __ip_tun_to_nlattr(struct sk_buff *skb,
 			      unsigned short tun_proto)
 {
 	if (output->tun_flags & TUNNEL_KEY &&
-	    nla_put_be64(skb, OVS_TUNNEL_KEY_ATTR_ID, output->tun_id))
+	    nla_put_be64(skb, OVS_TUNNEL_KEY_ATTR_ID, output->tun_id,
+			 OVS_TUNNEL_KEY_ATTR_PAD))
 		return -EMSGSIZE;
 	switch (tun_proto) {
 	case AF_INET:
@@ -1959,6 +1960,12 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	if (!tun_dst)
 		return -ENOMEM;
 
+	err = dst_cache_init(&tun_dst->u.tun_info.dst_cache, GFP_KERNEL);
+	if (err) {
+		dst_release((struct dst_entry *)tun_dst);
+		return err;
+	}
+
 	a = __add_action(sfa, OVS_KEY_ATTR_TUNNEL_INFO, NULL,
 			 sizeof(*ovs_tun), log);
 	if (IS_ERR(a)) {
@@ -2038,9 +2045,6 @@ static int validate_set(const struct nlattr *a,
 		break;
 
 	case OVS_KEY_ATTR_TUNNEL:
-		if (eth_p_mpls(eth_type))
-			return -EINVAL;
-
 		if (masked)
 			return -EINVAL; /* Masked tunnel set not supported. */
 
@@ -2225,6 +2229,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			[OVS_ACTION_ATTR_SAMPLE] = (u32)-1,
 			[OVS_ACTION_ATTR_HASH] = sizeof(struct ovs_action_hash),
 			[OVS_ACTION_ATTR_CT] = (u32)-1,
+			[OVS_ACTION_ATTR_TRUNC] = sizeof(struct ovs_action_trunc),
 		};
 		const struct ovs_action_push_vlan *vlan;
 		int type = nla_type(a);
@@ -2250,6 +2255,14 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			if (nla_get_u32(a) >= DP_MAX_PORTS)
 				return -EINVAL;
 			break;
+
+		case OVS_ACTION_ATTR_TRUNC: {
+			const struct ovs_action_trunc *trunc = nla_data(a);
+
+			if (trunc->max_len < ETH_HLEN)
+				return -EINVAL;
+			break;
+		}
 
 		case OVS_ACTION_ATTR_HASH: {
 			const struct ovs_action_hash *act_hash = nla_data(a);

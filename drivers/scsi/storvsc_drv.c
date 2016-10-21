@@ -914,8 +914,9 @@ static void storvsc_handle_error(struct vmscsi_request *vm_srb,
 		do_work = true;
 		process_err_fn = storvsc_remove_lun;
 		break;
-	case (SRB_STATUS_ABORTED | SRB_STATUS_AUTOSENSE_VALID):
-		if ((asc == 0x2a) && (ascq == 0x9)) {
+	case SRB_STATUS_ABORTED:
+		if (vm_srb->srb_status & SRB_STATUS_AUTOSENSE_VALID &&
+		    (asc == 0x2a) && (ascq == 0x9)) {
 			do_work = true;
 			process_err_fn = storvsc_device_scan;
 			/*
@@ -965,6 +966,8 @@ static void storvsc_command_completion(struct storvsc_cmd_request *cmd_request,
 	if (scmnd->result) {
 		if (scsi_normalize_sense(scmnd->sense_buffer,
 				SCSI_SENSE_BUFFERSIZE, &sense_hdr) &&
+		    !(sense_hdr.sense_key == NOT_READY &&
+				 sense_hdr.asc == 0x03A) &&
 		    do_logging(STORVSC_LOGGING_ERROR))
 			scsi_print_sense_hdr(scmnd->device, "storvsc",
 					     &sense_hdr);

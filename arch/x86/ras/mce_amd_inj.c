@@ -20,6 +20,7 @@
 #include <linux/pci.h>
 
 #include <asm/mce.h>
+#include <asm/smp.h>
 #include <asm/amd_nb.h>
 #include <asm/irq_vectors.h>
 
@@ -206,7 +207,7 @@ static u32 get_nbc_for_node(int node_id)
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 	u32 cores_per_node;
 
-	cores_per_node = c->x86_max_cores / amd_get_nodes_per_socket();
+	cores_per_node = (c->x86_max_cores * smp_num_siblings) / amd_get_nodes_per_socket();
 
 	return cores_per_node * node_id;
 }
@@ -238,6 +239,31 @@ static void toggle_nb_mca_mst_cpu(u16 nid)
 	if (err)
 		pr_err("%s: Error writing F%dx%03x.\n",
 		       __func__, PCI_FUNC(F3->devfn), NBCFG);
+}
+
+static void prepare_msrs(void *info)
+{
+	struct mce i_mce = *(struct mce *)info;
+	u8 b = i_mce.bank;
+
+	wrmsrl(MSR_IA32_MCG_STATUS, i_mce.mcgstatus);
+
+	if (boot_cpu_has(X86_FEATURE_SMCA)) {
+		if (i_mce.inject_flags == DFR_INT_INJ) {
+			wrmsrl(MSR_AMD64_SMCA_MCx_DESTAT(b), i_mce.status);
+			wrmsrl(MSR_AMD64_SMCA_MCx_DEADDR(b), i_mce.addr);
+		} else {
+			wrmsrl(MSR_AMD64_SMCA_MCx_STATUS(b), i_mce.status);
+			wrmsrl(MSR_AMD64_SMCA_MCx_ADDR(b), i_mce.addr);
+		}
+
+		wrmsrl(MSR_AMD64_SMCA_MCx_MISC(b), i_mce.misc);
+	} else {
+		wrmsrl(MSR_IA32_MCx_STATUS(b), i_mce.status);
+		wrmsrl(MSR_IA32_MCx_ADDR(b), i_mce.addr);
+		wrmsrl(MSR_IA32_MCx_MISC(b), i_mce.misc);
+	}
+
 }
 
 static void do_inject(void)
@@ -286,17 +312,9 @@ static void do_inject(void)
 
 	toggle_hw_mce_inject(cpu, true);
 
-	wrmsr_on_cpu(cpu, MSR_IA32_MCG_STATUS,
-		     (u32)mcg_status, (u32)(mcg_status >> 32));
-
-	wrmsr_on_cpu(cpu, MSR_IA32_MCx_STATUS(b),
-		     (u32)i_mce.status, (u32)(i_mce.status >> 32));
-
-	wrmsr_on_cpu(cpu, MSR_IA32_MCx_ADDR(b),
-		     (u32)i_mce.addr, (u32)(i_mce.addr >> 32));
-
-	wrmsr_on_cpu(cpu, MSR_IA32_MCx_MISC(b),
-		     (u32)i_mce.misc, (u32)(i_mce.misc >> 32));
+	i_mce.mcgstatus = mcg_status;
+	i_mce.inject_flags = inj_type;
+	smp_call_function_single(cpu, prepare_msrs, &i_mce, 0);
 
 	toggle_hw_mce_inject(cpu, false);
 

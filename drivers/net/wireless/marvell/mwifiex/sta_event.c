@@ -40,8 +40,8 @@
  *      - Erases current SSID and BSSID information
  *      - Sends a disconnect event to upper layers/applications.
  */
-void
-mwifiex_reset_connect_state(struct mwifiex_private *priv, u16 reason_code)
+void mwifiex_reset_connect_state(struct mwifiex_private *priv, u16 reason_code,
+				 bool from_ap)
 {
 	struct mwifiex_adapter *adapter = priv->adapter;
 
@@ -92,6 +92,9 @@ mwifiex_reset_connect_state(struct mwifiex_private *priv, u16 reason_code)
 	priv->is_data_rate_auto = true;
 	priv->data_rate = 0;
 
+	priv->assoc_resp_ht_param = 0;
+	priv->ht_param_present = false;
+
 	if ((GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_STA ||
 	     GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_UAP) && priv->hist_data)
 		mwifiex_hist_data_reset(priv);
@@ -137,13 +140,16 @@ mwifiex_reset_connect_state(struct mwifiex_private *priv, u16 reason_code)
 	if (priv->bss_mode == NL80211_IFTYPE_STATION ||
 	    priv->bss_mode == NL80211_IFTYPE_P2P_CLIENT) {
 		cfg80211_disconnected(priv->netdev, reason_code, NULL, 0,
-				      false, GFP_KERNEL);
+				      !from_ap, GFP_KERNEL);
 	}
 	eth_zero_addr(priv->cfg_bssid);
 
 	mwifiex_stop_net_dev_queue(priv->netdev, adapter);
 	if (netif_carrier_ok(priv->netdev))
 		netif_carrier_off(priv->netdev);
+
+	mwifiex_send_cmd(priv, HostCmd_CMD_GTK_REKEY_OFFLOAD_CFG,
+			 HostCmd_ACT_GEN_REMOVE, 0, NULL, false);
 }
 
 static int mwifiex_parse_tdls_event(struct mwifiex_private *priv,
@@ -468,8 +474,8 @@ void mwifiex_bt_coex_wlan_param_update_event(struct mwifiex_private *priv,
 			scantlv =
 			    (struct mwifiex_ie_types_btcoex_scan_time *)tlv;
 			adapter->coex_scan = scantlv->coex_scan;
-			adapter->coex_min_scan_time = scantlv->min_scan_time;
-			adapter->coex_max_scan_time = scantlv->max_scan_time;
+			adapter->coex_min_scan_time = le16_to_cpu(scantlv->min_scan_time);
+			adapter->coex_max_scan_time = le16_to_cpu(scantlv->max_scan_time);
 			break;
 
 		default:
@@ -568,7 +574,7 @@ int mwifiex_process_sta_event(struct mwifiex_private *priv)
 		if (priv->media_connected) {
 			reason_code =
 				le16_to_cpu(*(__le16 *)adapter->event_body);
-			mwifiex_reset_connect_state(priv, reason_code);
+			mwifiex_reset_connect_state(priv, reason_code, true);
 		}
 		break;
 
@@ -583,7 +589,7 @@ int mwifiex_process_sta_event(struct mwifiex_private *priv)
 		if (priv->media_connected) {
 			reason_code =
 				le16_to_cpu(*(__le16 *)adapter->event_body);
-			mwifiex_reset_connect_state(priv, reason_code);
+			mwifiex_reset_connect_state(priv, reason_code, true);
 		}
 		break;
 
@@ -593,7 +599,7 @@ int mwifiex_process_sta_event(struct mwifiex_private *priv)
 		if (priv->media_connected) {
 			reason_code =
 				le16_to_cpu(*(__le16 *)adapter->event_body);
-			mwifiex_reset_connect_state(priv, reason_code);
+			mwifiex_reset_connect_state(priv, reason_code, true);
 		}
 		break;
 
@@ -607,11 +613,13 @@ int mwifiex_process_sta_event(struct mwifiex_private *priv)
 
 	case EVENT_PS_AWAKE:
 		mwifiex_dbg(adapter, EVENT, "info: EVENT: AWAKE\n");
-		if (!adapter->pps_uapsd_mode && priv->port_open &&
+		if (!adapter->pps_uapsd_mode &&
+		    (priv->port_open ||
+		     (priv->bss_mode == NL80211_IFTYPE_ADHOC)) &&
 		    priv->media_connected && adapter->sleep_period.period) {
-				adapter->pps_uapsd_mode = true;
-				mwifiex_dbg(adapter, EVENT,
-					    "event: PPS/UAPSD mode activated\n");
+			adapter->pps_uapsd_mode = true;
+			mwifiex_dbg(adapter, EVENT,
+				    "event: PPS/UAPSD mode activated\n");
 		}
 		adapter->tx_lock_flag = false;
 		if (adapter->pps_uapsd_mode && adapter->gen_null_pkt) {
@@ -686,6 +694,13 @@ int mwifiex_process_sta_event(struct mwifiex_private *priv)
 				       HostCmd_ACT_GEN_GET, 0, NULL, false);
 		break;
 
+	case EVENT_BG_SCAN_STOPPED:
+		dev_dbg(adapter->dev, "event: BGS_STOPPED\n");
+		cfg80211_sched_scan_stopped(priv->wdev.wiphy);
+		if (priv->sched_scanning)
+			priv->sched_scanning = false;
+		break;
+
 	case EVENT_PORT_RELEASE:
 		mwifiex_dbg(adapter, EVENT, "event: PORT RELEASE\n");
 		priv->port_open = true;
@@ -693,7 +708,7 @@ int mwifiex_process_sta_event(struct mwifiex_private *priv)
 
 	case EVENT_EXT_SCAN_REPORT:
 		mwifiex_dbg(adapter, EVENT, "event: EXT_SCAN Report\n");
-		if (adapter->ext_scan)
+		if (adapter->ext_scan && !priv->scan_aborting)
 			ret = mwifiex_handle_event_ext_scan_report(priv,
 						adapter->event_skb->data);
 

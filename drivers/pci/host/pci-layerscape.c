@@ -12,7 +12,7 @@
 
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/of_pci.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
@@ -208,9 +208,9 @@ static const struct of_device_id ls_pcie_of_match[] = {
 	{ .compatible = "fsl,ls1021a-pcie", .data = &ls1021_drvdata },
 	{ .compatible = "fsl,ls1043a-pcie", .data = &ls1043_drvdata },
 	{ .compatible = "fsl,ls2080a-pcie", .data = &ls2080_drvdata },
+	{ .compatible = "fsl,ls2085a-pcie", .data = &ls2080_drvdata },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, ls_pcie_of_match);
 
 static int __init ls_add_pcie_port(struct pcie_port *pp,
 				   struct platform_device *pdev)
@@ -274,9 +274,4 @@ static struct platform_driver ls_pcie_driver = {
 		.of_match_table = ls_pcie_of_match,
 	},
 };
-
-module_platform_driver_probe(ls_pcie_driver, ls_pcie_probe);
-
-MODULE_AUTHOR("Minghuan Lian <Minghuan.Lian@freescale.com>");
-MODULE_DESCRIPTION("Freescale Layerscape PCIe host controller driver");
-MODULE_LICENSE("GPL v2");
+builtin_platform_driver_probe(ls_pcie_driver, ls_pcie_probe);

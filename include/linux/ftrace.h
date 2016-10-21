@@ -455,6 +455,7 @@ int ftrace_update_record(struct dyn_ftrace *rec, int enable);
 int ftrace_test_record(struct dyn_ftrace *rec, int enable);
 void ftrace_run_stop_machine(int command);
 unsigned long ftrace_location(unsigned long ip);
+unsigned long ftrace_location_range(unsigned long start, unsigned long end);
 unsigned long ftrace_get_addr_new(struct dyn_ftrace *rec);
 unsigned long ftrace_get_addr_curr(struct dyn_ftrace *rec);
 
@@ -713,6 +714,18 @@ static inline void __ftrace_enabled_restore(int enabled)
 #define CALLER_ADDR5 ((unsigned long)ftrace_return_address(5))
 #define CALLER_ADDR6 ((unsigned long)ftrace_return_address(6))
 
+static inline unsigned long get_lock_parent_ip(void)
+{
+	unsigned long addr = CALLER_ADDR0;
+
+	if (!in_lock_functions(addr))
+		return addr;
+	addr = CALLER_ADDR1;
+	if (!in_lock_functions(addr))
+		return addr;
+	return CALLER_ADDR2;
+}
+
 #ifdef CONFIG_IRQSOFF_TRACER
   extern void time_hardirqs_on(unsigned long a0, unsigned long a1);
   extern void time_hardirqs_off(unsigned long a0, unsigned long a1);
@@ -741,23 +754,27 @@ static inline void ftrace_init(void) { }
 
 /*
  * Structure that defines an entry function trace.
+ * It's already packed but the attribute "packed" is needed
+ * to remove extra padding at the end.
  */
 struct ftrace_graph_ent {
 	unsigned long func; /* Current function */
 	int depth;
-};
+} __packed;
 
 /*
  * Structure that defines a return function trace.
+ * It's already packed but the attribute "packed" is needed
+ * to remove extra padding at the end.
  */
 struct ftrace_graph_ret {
 	unsigned long func; /* Current function */
-	unsigned long long calltime;
-	unsigned long long rettime;
 	/* Number of functions that overran the depth limit for current task */
 	unsigned long overrun;
+	unsigned long long calltime;
+	unsigned long long rettime;
 	int depth;
-};
+} __packed;
 
 /* Type of the callback handlers for tracing function graph*/
 typedef void (*trace_func_graph_ret_t)(struct ftrace_graph_ret *); /* return */
@@ -799,16 +816,6 @@ ftrace_push_return_trace(unsigned long ret, unsigned long func, int *depth,
  */
 #define __notrace_funcgraph		notrace
 
-/*
- * We want to which function is an entrypoint of a hardirq.
- * That will help us to put a signal on output.
- */
-#define __irq_entry		 __attribute__((__section__(".irqentry.text")))
-
-/* Limits of hardirq entrypoints */
-extern char __irqentry_text_start[];
-extern char __irqentry_text_end[];
-
 #define FTRACE_NOTRACE_DEPTH 65536
 #define FTRACE_RETFUNC_DEPTH 50
 #define FTRACE_RETSTACK_ALLOC_SIZE 32
@@ -845,7 +852,6 @@ static inline void unpause_graph_tracing(void)
 #else /* !CONFIG_FUNCTION_GRAPH_TRACER */
 
 #define __notrace_funcgraph
-#define __irq_entry
 #define INIT_FTRACE_GRAPH
 
 static inline void ftrace_graph_init_task(struct task_struct *t) { }

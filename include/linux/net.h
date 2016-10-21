@@ -185,6 +185,7 @@ struct proto_ops {
 	ssize_t 	(*splice_read)(struct socket *sock,  loff_t *ppos,
 				       struct pipe_inode_info *pipe, size_t len, unsigned int flags);
 	int		(*set_peek_off)(struct sock *sk, int val);
+	int		(*peek_len)(struct socket *sock);
 };
 
 #define DECLARE_SOCKADDR(type, dst, src)	\
@@ -215,10 +216,10 @@ int __sock_create(struct net *net, int family, int type, int proto,
 int sock_create(int family, int type, int proto, struct socket **res);
 int sock_create_kern(struct net *net, int family, int type, int proto, struct socket **res);
 int sock_create_lite(int family, int type, int proto, struct socket **res);
+struct socket *sock_alloc(void);
 void sock_release(struct socket *sock);
 int sock_sendmsg(struct socket *sock, struct msghdr *msg);
-int sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
-		 int flags);
+int sock_recvmsg(struct socket *sock, struct msghdr *msg, int flags);
 struct file *sock_alloc_file(struct socket *sock, int flags, const char *dname);
 struct socket *sockfd_lookup(int fd, int *err);
 struct socket *sock_from_file(struct file *file, int *err);
@@ -245,7 +246,16 @@ do {								\
 	net_ratelimited_function(pr_warn, fmt, ##__VA_ARGS__)
 #define net_info_ratelimited(fmt, ...)				\
 	net_ratelimited_function(pr_info, fmt, ##__VA_ARGS__)
-#if defined(DEBUG)
+#if defined(CONFIG_DYNAMIC_DEBUG)
+#define net_dbg_ratelimited(fmt, ...)					\
+do {									\
+	DEFINE_DYNAMIC_DEBUG_METADATA(descriptor, fmt);			\
+	if (unlikely(descriptor.flags & _DPRINTK_FLAGS_PRINT) &&	\
+	    net_ratelimit())						\
+		__dynamic_pr_debug(&descriptor, pr_fmt(fmt),		\
+		                   ##__VA_ARGS__);			\
+} while (0)
+#elif defined(DEBUG)
 #define net_dbg_ratelimited(fmt, ...)				\
 	net_ratelimited_function(pr_debug, fmt, ##__VA_ARGS__)
 #else

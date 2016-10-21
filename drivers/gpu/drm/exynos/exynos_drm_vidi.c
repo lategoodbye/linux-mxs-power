@@ -378,16 +378,8 @@ static int vidi_get_modes(struct drm_connector *connector)
 	return drm_add_edid_modes(connector, edid);
 }
 
-static struct drm_encoder *vidi_best_encoder(struct drm_connector *connector)
-{
-	struct vidi_context *ctx = ctx_from_connector(connector);
-
-	return &ctx->encoder;
-}
-
 static const struct drm_connector_helper_funcs vidi_connector_helper_funcs = {
 	.get_modes = vidi_get_modes,
-	.best_encoder = vidi_best_encoder,
 };
 
 static int vidi_create_connector(struct drm_encoder *encoder)
@@ -412,13 +404,6 @@ static int vidi_create_connector(struct drm_encoder *encoder)
 	return 0;
 }
 
-static bool exynos_vidi_mode_fixup(struct drm_encoder *encoder,
-				 const struct drm_display_mode *mode,
-				 struct drm_display_mode *adjusted_mode)
-{
-	return true;
-}
-
 static void exynos_vidi_mode_set(struct drm_encoder *encoder,
 			       struct drm_display_mode *mode,
 			       struct drm_display_mode *adjusted_mode)
@@ -434,7 +419,6 @@ static void exynos_vidi_disable(struct drm_encoder *encoder)
 }
 
 static const struct drm_encoder_helper_funcs exynos_vidi_encoder_helper_funcs = {
-	.mode_fixup = exynos_vidi_mode_fixup,
 	.mode_set = exynos_vidi_mode_set,
 	.enable = exynos_vidi_enable,
 	.disable = exynos_vidi_disable,

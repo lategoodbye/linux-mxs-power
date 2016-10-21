@@ -2372,16 +2372,15 @@ static int mpt_free_res(struct mlx4_dev *dev, int slave, int op, int cmd,
 		__mlx4_mpt_release(dev, index);
 		break;
 	case RES_OP_MAP_ICM:
-			index = get_param_l(&in_param);
-			id = index & mpt_mask(dev);
-			err = mr_res_start_move_to(dev, slave, id,
-						   RES_MPT_RESERVED, &mpt);
-			if (err)
-				return err;
-
-			__mlx4_mpt_free_icm(dev, mpt->key);
-			res_end_move(dev, slave, RES_MPT, id);
+		index = get_param_l(&in_param);
+		id = index & mpt_mask(dev);
+		err = mr_res_start_move_to(dev, slave, id,
+					   RES_MPT_RESERVED, &mpt);
+		if (err)
 			return err;
+
+		__mlx4_mpt_free_icm(dev, mpt->key);
+		res_end_move(dev, slave, RES_MPT, id);
 		break;
 	default:
 		err = -EINVAL;
@@ -3141,7 +3140,7 @@ static int verify_qp_parameters(struct mlx4_dev *dev,
 		case QP_TRANS_RTS2RTS:
 		case QP_TRANS_SQD2SQD:
 		case QP_TRANS_SQD2RTS:
-			if (slave != mlx4_master_func_num(dev))
+			if (slave != mlx4_master_func_num(dev)) {
 				if (optpar & MLX4_QP_OPTPAR_PRIMARY_ADDR_PATH) {
 					port = (qp_ctx->pri_path.sched_queue >> 6 & 1) + 1;
 					if (dev->caps.port_mask[port] != MLX4_PORT_TYPE_IB)
@@ -3160,6 +3159,7 @@ static int verify_qp_parameters(struct mlx4_dev *dev,
 					if (qp_ctx->alt_path.mgid_index >= num_gids)
 						return -EINVAL;
 				}
+			}
 			break;
 		default:
 			break;
@@ -4252,9 +4252,8 @@ int mlx4_UPDATE_QP_wrapper(struct mlx4_dev *dev, int slave,
 	     (1ULL << MLX4_UPD_QP_PATH_MASK_ETH_SRC_CHECK_MC_LB)) &&
 		!(dev->caps.flags2 &
 		  MLX4_DEV_CAP_FLAG2_UPDATE_QP_SRC_CHECK_LB)) {
-			mlx4_warn(dev,
-				  "Src check LB for slave %d isn't supported\n",
-				   slave);
+		mlx4_warn(dev, "Src check LB for slave %d isn't supported\n",
+			  slave);
 		return -ENOTSUPP;
 	}
 

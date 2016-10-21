@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 - 2015 Emulex
+ * Copyright (C) 2005 - 2016 Broadcom
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -720,29 +720,32 @@ static int be_set_phys_id(struct net_device *netdev,
 			  enum ethtool_phys_id_state state)
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
+	int status = 0;
 
 	switch (state) {
 	case ETHTOOL_ID_ACTIVE:
-		be_cmd_get_beacon_state(adapter, adapter->hba_port_num,
-					&adapter->beacon_state);
-		return 1;	/* cycle on/off once per second */
+		status = be_cmd_get_beacon_state(adapter, adapter->hba_port_num,
+						 &adapter->beacon_state);
+		if (status)
+			return be_cmd_status(status);
+		return 1;       /* cycle on/off once per second */
 
 	case ETHTOOL_ID_ON:
-		be_cmd_set_beacon_state(adapter, adapter->hba_port_num, 0, 0,
-					BEACON_STATE_ENABLED);
+		status = be_cmd_set_beacon_state(adapter, adapter->hba_port_num,
+						 0, 0, BEACON_STATE_ENABLED);
 		break;
 
 	case ETHTOOL_ID_OFF:
-		be_cmd_set_beacon_state(adapter, adapter->hba_port_num, 0, 0,
-					BEACON_STATE_DISABLED);
+		status = be_cmd_set_beacon_state(adapter, adapter->hba_port_num,
+						 0, 0, BEACON_STATE_DISABLED);
 		break;
 
 	case ETHTOOL_ID_INACTIVE:
-		be_cmd_set_beacon_state(adapter, adapter->hba_port_num, 0, 0,
-					adapter->beacon_state);
+		status = be_cmd_set_beacon_state(adapter, adapter->hba_port_num,
+						 0, 0, adapter->beacon_state);
 	}
 
-	return 0;
+	return be_cmd_status(status);
 }
 
 static int be_set_dump(struct net_device *netdev, struct ethtool_dump *dump)
@@ -790,6 +793,11 @@ static void be_get_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 static int be_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
+	struct device *dev = &adapter->pdev->dev;
+	struct be_dma_mem cmd;
+	u8 mac[ETH_ALEN];
+	bool enable;
+	int status;
 
 	if (wol->wolopts & ~WAKE_MAGIC)
 		return -EOPNOTSUPP;
@@ -799,12 +807,32 @@ static int be_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 		return -EOPNOTSUPP;
 	}
 
-	if (wol->wolopts & WAKE_MAGIC)
-		adapter->wol_en = true;
-	else
-		adapter->wol_en = false;
+	cmd.size = sizeof(struct be_cmd_req_acpi_wol_magic_config);
+	cmd.va = dma_zalloc_coherent(dev, cmd.size, &cmd.dma, GFP_KERNEL);
+	if (!cmd.va)
+		return -ENOMEM;
 
-	return 0;
+	eth_zero_addr(mac);
+
+	enable = wol->wolopts & WAKE_MAGIC;
+	if (enable)
+		ether_addr_copy(mac, adapter->netdev->dev_addr);
+
+	status = be_cmd_enable_magic_wol(adapter, mac, &cmd);
+	if (status) {
+		dev_err(dev, "Could not set Wake-on-lan mac address\n");
+		status = be_cmd_status(status);
+		goto err;
+	}
+
+	pci_enable_wake(adapter->pdev, PCI_D3hot, enable);
+	pci_enable_wake(adapter->pdev, PCI_D3cold, enable);
+
+	adapter->wol_en = enable ? true : false;
+
+err:
+	dma_free_coherent(dev, cmd.size, cmd.va, cmd.dma);
+	return status;
 }
 
 static int be_test_ddr_dma(struct be_adapter *adapter)
@@ -1168,9 +1196,17 @@ static void be_get_channels(struct net_device *netdev,
 			    struct ethtool_channels *ch)
 {
 	struct be_adapter *adapter = netdev_priv(netdev);
+	u16 num_rx_irqs = max_t(u16, adapter->num_rss_qs, 1);
 
-	ch->combined_count = adapter->num_evt_qs;
-	ch->max_combined = be_max_qs(adapter);
+	/* num_tx_qs is always same as the number of irqs used for TX */
+	ch->combined_count = min(adapter->num_tx_qs, num_rx_irqs);
+	ch->rx_count = num_rx_irqs - ch->combined_count;
+	ch->tx_count = adapter->num_tx_qs - ch->combined_count;
+
+	ch->max_combined = be_max_qp_irqs(adapter);
+	/* The user must create atleast one combined channel */
+	ch->max_rx = be_max_rx_irqs(adapter) - 1;
+	ch->max_tx = be_max_tx_irqs(adapter) - 1;
 }
 
 static int be_set_channels(struct net_device  *netdev,
@@ -1179,11 +1215,22 @@ static int be_set_channels(struct net_device  *netdev,
 	struct be_adapter *adapter = netdev_priv(netdev);
 	int status;
 
-	if (ch->rx_count || ch->tx_count || ch->other_count ||
-	    !ch->combined_count || ch->combined_count > be_max_qs(adapter))
+	/* we support either only combined channels or a combination of
+	 * combined and either RX-only or TX-only channels.
+	 */
+	if (ch->other_count || !ch->combined_count ||
+	    (ch->rx_count && ch->tx_count))
 		return -EINVAL;
 
-	adapter->cfg_num_qs = ch->combined_count;
+	if (ch->combined_count > be_max_qp_irqs(adapter) ||
+	    (ch->rx_count &&
+	     (ch->rx_count + ch->combined_count) > be_max_rx_irqs(adapter)) ||
+	    (ch->tx_count &&
+	     (ch->tx_count + ch->combined_count) > be_max_tx_irqs(adapter)))
+		return -EINVAL;
+
+	adapter->cfg_num_rx_irqs = ch->combined_count + ch->rx_count;
+	adapter->cfg_num_tx_irqs = ch->combined_count + ch->tx_count;
 
 	status = be_update_queues(adapter);
 	return be_cmd_status(status);

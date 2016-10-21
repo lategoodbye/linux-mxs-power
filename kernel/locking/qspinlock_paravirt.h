@@ -55,6 +55,11 @@ struct pv_node {
 };
 
 /*
+ * Include queued spinlock statistics code
+ */
+#include "qspinlock_stat.h"
+
+/*
  * By replacing the regular queued_spin_trylock() with the function below,
  * it will be called once when a lock waiter enter the PV slowpath before
  * being queued. By allowing one lock stealing attempt here when the pending
@@ -65,9 +70,11 @@ struct pv_node {
 static inline bool pv_queued_spin_steal_lock(struct qspinlock *lock)
 {
 	struct __qspinlock *l = (void *)lock;
+	int ret = !(atomic_read(&lock->val) & _Q_LOCKED_PENDING_MASK) &&
+		   (cmpxchg(&l->locked, 0, _Q_LOCKED_VAL) == 0);
 
-	return !(atomic_read(&lock->val) & _Q_LOCKED_PENDING_MASK) &&
-		(cmpxchg(&l->locked, 0, _Q_LOCKED_VAL) == 0);
+	qstat_inc(qstat_pv_lock_stealing, ret);
+	return ret;
 }
 
 /*
@@ -105,12 +112,12 @@ static __always_inline int trylock_clear_pending(struct qspinlock *lock)
 #else /* _Q_PENDING_BITS == 8 */
 static __always_inline void set_pending(struct qspinlock *lock)
 {
-	atomic_set_mask(_Q_PENDING_VAL, &lock->val);
+	atomic_or(_Q_PENDING_VAL, &lock->val);
 }
 
 static __always_inline void clear_pending(struct qspinlock *lock)
 {
-	atomic_clear_mask(_Q_PENDING_VAL, &lock->val);
+	atomic_andnot(_Q_PENDING_VAL, &lock->val);
 }
 
 static __always_inline int trylock_clear_pending(struct qspinlock *lock)
@@ -136,11 +143,6 @@ static __always_inline int trylock_clear_pending(struct qspinlock *lock)
 	return 0;
 }
 #endif /* _Q_PENDING_BITS == 8 */
-
-/*
- * Include queued spinlock statistics code
- */
-#include "qspinlock_stat.h"
 
 /*
  * Lock and MCS node addresses hash table for fast lookup
@@ -398,6 +400,11 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 	if (READ_ONCE(pn->state) == vcpu_hashed)
 		lp = (struct qspinlock **)1;
 
+	/*
+	 * Tracking # of slowpath locking operations
+	 */
+	qstat_inc(qstat_pv_lock_slowpath, true);
+
 	for (;; waitcnt++) {
 		/*
 		 * Set correct vCPU state to be used by queue node wait-early
@@ -443,7 +450,7 @@ pv_wait_head_or_lock(struct qspinlock *lock, struct mcs_spinlock *node)
 				goto gotlock;
 			}
 		}
-		WRITE_ONCE(pn->state, vcpu_halted);
+		WRITE_ONCE(pn->state, vcpu_hashed);
 		qstat_inc(qstat_pv_wait_head, true);
 		qstat_inc(qstat_pv_wait_again, waitcnt);
 		pv_wait(&l->locked, _Q_SLOW_VAL);

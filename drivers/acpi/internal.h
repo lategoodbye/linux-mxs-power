@@ -20,6 +20,8 @@
 
 #define PREFIX "ACPI: "
 
+int early_acpi_osi_init(void);
+int acpi_osi_init(void);
 acpi_status acpi_os_initialize1(void);
 void init_acpi_device_notify(void);
 int acpi_scan_init(void);
@@ -29,6 +31,11 @@ void acpi_processor_init(void);
 void acpi_platform_init(void);
 void acpi_pnp_init(void);
 void acpi_int340x_thermal_init(void);
+#ifdef CONFIG_ARM_AMBA
+void acpi_amba_init(void);
+#else
+static inline void acpi_amba_init(void) {}
+#endif
 int acpi_sysfs_init(void);
 void acpi_container_init(void);
 void acpi_memory_hotplug_init(void);
@@ -80,6 +87,9 @@ bool acpi_queue_hotplug_work(struct work_struct *work);
 void acpi_device_hotplug(struct acpi_device *adev, u32 src);
 bool acpi_scan_is_offline(struct acpi_device *adev, bool uevent);
 
+acpi_status acpi_sysfs_table_handler(u32 event, void *table, void *context);
+void acpi_scan_table_handler(u32 event, void *table, void *context);
+
 /* --------------------------------------------------------------------------
                      Device Node Initialization / Removal
    -------------------------------------------------------------------------- */
@@ -106,6 +116,7 @@ bool acpi_device_is_present(struct acpi_device *adev);
 bool acpi_device_is_battery(struct acpi_device *adev);
 bool acpi_device_is_first_physical_node(struct acpi_device *adev,
 					const struct device *dev);
+struct device *acpi_get_first_physical_node(struct acpi_device *adev);
 
 /* --------------------------------------------------------------------------
                      Device Matching and Notification
@@ -138,6 +149,12 @@ void acpi_early_processor_set_pdc(void);
 static inline void acpi_early_processor_set_pdc(void) {}
 #endif
 
+#ifdef CONFIG_X86
+void acpi_early_processor_osc(void);
+#else
+static inline void acpi_early_processor_osc(void) {}
+#endif
+
 /* --------------------------------------------------------------------------
                                   Embedded Controller
    -------------------------------------------------------------------------- */
@@ -167,7 +184,7 @@ typedef int (*acpi_ec_query_func) (void *data);
 
 int acpi_ec_init(void);
 int acpi_ec_ecdt_probe(void);
-int acpi_boot_ec_enable(void);
+int acpi_ec_dsdt_probe(void);
 void acpi_ec_block_transactions(void);
 void acpi_ec_unblock_transactions(void);
 void acpi_ec_unblock_transactions_early(void);

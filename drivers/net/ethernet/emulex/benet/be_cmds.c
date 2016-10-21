@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 - 2015 Emulex
+ * Copyright (C) 2005 - 2016 Broadcom
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -19,19 +19,25 @@
 #include "be.h"
 #include "be_cmds.h"
 
-static char *be_port_misconfig_evt_desc[] = {
-	"A valid SFP module detected",
-	"Optics faulted/ incorrectly installed/ not installed.",
-	"Optics of two types installed.",
-	"Incompatible optics.",
-	"Unknown port SFP status"
+char *be_misconfig_evt_port_state[] = {
+	"Physical Link is functional",
+	"Optics faulted/incorrectly installed/not installed - Reseat optics. If issue not resolved, replace.",
+	"Optics of two types installed – Remove one optic or install matching pair of optics.",
+	"Incompatible optics – Replace with compatible optics for card to function.",
+	"Unqualified optics – Replace with Avago optics for Warranty and Technical Support.",
+	"Uncertified optics – Replace with Avago-certified optics to enable link operation."
 };
 
-static char *be_port_misconfig_remedy_desc[] = {
-	"",
-	"Reseat optics. If issue not resolved, replace",
-	"Remove one optic or install matching pair of optics",
-	"Replace with compatible optics for card to function",
+static char *be_port_misconfig_evt_severity[] = {
+	"KERN_WARN",
+	"KERN_INFO",
+	"KERN_ERR",
+	"KERN_WARN"
+};
+
+static char *phy_state_oper_desc[] = {
+	"Link is non-operational",
+	"Link is operational",
 	""
 };
 
@@ -65,7 +71,27 @@ static struct be_cmd_priv_map cmd_priv_map[] = {
 		CMD_SUBSYSTEM_COMMON,
 		BE_PRIV_LNKMGMT | BE_PRIV_VHADM |
 		BE_PRIV_DEVCFG | BE_PRIV_DEVSEC
-	}
+	},
+	{
+		OPCODE_LOWLEVEL_HOST_DDR_DMA,
+		CMD_SUBSYSTEM_LOWLEVEL,
+		BE_PRIV_DEVCFG | BE_PRIV_DEVSEC
+	},
+	{
+		OPCODE_LOWLEVEL_LOOPBACK_TEST,
+		CMD_SUBSYSTEM_LOWLEVEL,
+		BE_PRIV_DEVCFG | BE_PRIV_DEVSEC
+	},
+	{
+		OPCODE_LOWLEVEL_SET_LOOPBACK_MODE,
+		CMD_SUBSYSTEM_LOWLEVEL,
+		BE_PRIV_DEVCFG | BE_PRIV_DEVSEC
+	},
+	{
+		OPCODE_COMMON_SET_HSW_CONFIG,
+		CMD_SUBSYSTEM_COMMON,
+		BE_PRIV_DEVCFG | BE_PRIV_VHADM
+	},
 };
 
 static bool be_cmd_allowed(struct be_adapter *adapter, u8 opcode, u8 subsystem)
@@ -236,7 +262,8 @@ static int be_mcc_compl_process(struct be_adapter *adapter,
 
 	if (base_status != MCC_STATUS_SUCCESS &&
 	    !be_skip_err_log(opcode, base_status, addl_status)) {
-		if (base_status == MCC_STATUS_UNAUTHORIZED_REQUEST) {
+		if (base_status == MCC_STATUS_UNAUTHORIZED_REQUEST ||
+		    addl_status == MCC_ADDL_STATUS_INSUFFICIENT_PRIVILEGES) {
 			dev_warn(&adapter->pdev->dev,
 				 "VF is not privileged to issue opcode %d-%d\n",
 				 opcode, subsystem);
@@ -281,22 +308,56 @@ static void be_async_port_misconfig_event_process(struct be_adapter *adapter,
 {
 	struct be_async_event_misconfig_port *evt =
 			(struct be_async_event_misconfig_port *)compl;
-	u32 sfp_mismatch_evt = le32_to_cpu(evt->event_data_word1);
+	u32 sfp_misconfig_evt_word1 = le32_to_cpu(evt->event_data_word1);
+	u32 sfp_misconfig_evt_word2 = le32_to_cpu(evt->event_data_word2);
+	u8 phy_oper_state = PHY_STATE_OPER_MSG_NONE;
 	struct device *dev = &adapter->pdev->dev;
-	u8 port_misconfig_evt;
+	u8 msg_severity = DEFAULT_MSG_SEVERITY;
+	u8 phy_state_info;
+	u8 new_phy_state;
 
-	port_misconfig_evt =
-		((sfp_mismatch_evt >> (adapter->hba_port_num * 8)) & 0xff);
+	new_phy_state =
+		(sfp_misconfig_evt_word1 >> (adapter->hba_port_num * 8)) & 0xff;
 
+	if (new_phy_state == adapter->phy_state)
+		return;
+
+	adapter->phy_state = new_phy_state;
+
+	/* for older fw that doesn't populate link effect data */
+	if (!sfp_misconfig_evt_word2)
+		goto log_message;
+
+	phy_state_info =
+		(sfp_misconfig_evt_word2 >> (adapter->hba_port_num * 8)) & 0xff;
+
+	if (phy_state_info & PHY_STATE_INFO_VALID) {
+		msg_severity = (phy_state_info & PHY_STATE_MSG_SEVERITY) >> 1;
+
+		if (be_phy_unqualified(new_phy_state))
+			phy_oper_state = (phy_state_info & PHY_STATE_OPER);
+	}
+
+log_message:
 	/* Log an error message that would allow a user to determine
 	 * whether the SFPs have an issue
 	 */
-	dev_info(dev, "Port %c: %s %s", adapter->port_name,
-		 be_port_misconfig_evt_desc[port_misconfig_evt],
-		 be_port_misconfig_remedy_desc[port_misconfig_evt]);
+	if (be_phy_state_unknown(new_phy_state))
+		dev_printk(be_port_misconfig_evt_severity[msg_severity], dev,
+			   "Port %c: Unrecognized Optics state: 0x%x. %s",
+			   adapter->port_name,
+			   new_phy_state,
+			   phy_state_oper_desc[phy_oper_state]);
+	else
+		dev_printk(be_port_misconfig_evt_severity[msg_severity], dev,
+			   "Port %c: %s %s",
+			   adapter->port_name,
+			   be_misconfig_evt_port_state[new_phy_state],
+			   phy_state_oper_desc[phy_oper_state]);
 
-	if (port_misconfig_evt == INCOMPATIBLE_SFP)
-		adapter->flags |= BE_FLAGS_EVT_INCOMPATIBLE_SFP;
+	/* Log Vendor name and part no. if a misconfigured SFP is detected */
+	if (be_phy_misconfigured(new_phy_state))
+		adapter->flags |= BE_FLAGS_PHY_MISCONFIGURED;
 }
 
 /* Grp5 CoS Priority evt */
@@ -540,7 +601,7 @@ static int be_mcc_notify_wait(struct be_adapter *adapter)
 	int status;
 	struct be_mcc_wrb *wrb;
 	struct be_mcc_obj *mcc_obj = &adapter->mcc_obj;
-	u16 index = mcc_obj->q.head;
+	u32 index = mcc_obj->q.head;
 	struct be_cmd_resp_hdr *resp;
 
 	index_dec(&index, mcc_obj->q.len);
@@ -1497,34 +1558,25 @@ int be_cmd_if_create(struct be_adapter *adapter, u32 cap_flags, u32 en_flags,
 	return status;
 }
 
-/* Uses MCCQ */
+/* Uses MCCQ if available else MBOX */
 int be_cmd_if_destroy(struct be_adapter *adapter, int interface_id, u32 domain)
 {
-	struct be_mcc_wrb *wrb;
+	struct be_mcc_wrb wrb = {0};
 	struct be_cmd_req_if_destroy *req;
 	int status;
 
 	if (interface_id == -1)
 		return 0;
 
-	spin_lock_bh(&adapter->mcc_lock);
-
-	wrb = wrb_from_mccq(adapter);
-	if (!wrb) {
-		status = -EBUSY;
-		goto err;
-	}
-	req = embedded_payload(wrb);
+	req = embedded_payload(&wrb);
 
 	be_wrb_cmd_hdr_prepare(&req->hdr, CMD_SUBSYSTEM_COMMON,
 			       OPCODE_COMMON_NTWK_INTERFACE_DESTROY,
-			       sizeof(*req), wrb, NULL);
+			       sizeof(*req), &wrb, NULL);
 	req->hdr.domain = domain;
 	req->interface_id = cpu_to_le32(interface_id);
 
-	status = be_mcc_notify_wait(adapter);
-err:
-	spin_unlock_bh(&adapter->mcc_lock);
+	status = be_cmd_notify_wait(adapter, &wrb);
 	return status;
 }
 
@@ -3168,6 +3220,10 @@ int be_cmd_set_loopback(struct be_adapter *adapter, u8 port_num,
 	struct be_cmd_req_set_lmode *req;
 	int status;
 
+	if (!be_cmd_allowed(adapter, OPCODE_LOWLEVEL_SET_LOOPBACK_MODE,
+			    CMD_SUBSYSTEM_LOWLEVEL))
+		return -EPERM;
+
 	spin_lock_bh(&adapter->mcc_lock);
 
 	wrb = wrb_from_mccq(adapter);
@@ -3212,6 +3268,10 @@ int be_cmd_loopback_test(struct be_adapter *adapter, u32 port_num,
 	struct be_cmd_req_loopback_test *req;
 	struct be_cmd_resp_loopback_test *resp;
 	int status;
+
+	if (!be_cmd_allowed(adapter, OPCODE_LOWLEVEL_LOOPBACK_TEST,
+			    CMD_SUBSYSTEM_LOWLEVEL))
+		return -EPERM;
 
 	spin_lock_bh(&adapter->mcc_lock);
 
@@ -3258,6 +3318,10 @@ int be_cmd_ddr_dma_test(struct be_adapter *adapter, u64 pattern,
 	struct be_cmd_req_ddrdma_test *req;
 	int status;
 	int i, j = 0;
+
+	if (!be_cmd_allowed(adapter, OPCODE_LOWLEVEL_HOST_DDR_DMA,
+			    CMD_SUBSYSTEM_LOWLEVEL))
+		return -EPERM;
 
 	spin_lock_bh(&adapter->mcc_lock);
 
@@ -3791,6 +3855,10 @@ int be_cmd_set_hsw_config(struct be_adapter *adapter, u16 pvid,
 	void *ctxt;
 	int status;
 
+	if (!be_cmd_allowed(adapter, OPCODE_COMMON_SET_HSW_CONFIG,
+			    CMD_SUBSYSTEM_COMMON))
+		return -EPERM;
+
 	spin_lock_bh(&adapter->mcc_lock);
 
 	wrb = wrb_from_mccq(adapter);
@@ -3812,7 +3880,7 @@ int be_cmd_set_hsw_config(struct be_adapter *adapter, u16 pvid,
 		AMAP_SET_BITS(struct amap_set_hsw_context, pvid_valid, ctxt, 1);
 		AMAP_SET_BITS(struct amap_set_hsw_context, pvid, ctxt, pvid);
 	}
-	if (!BEx_chip(adapter) && hsw_mode) {
+	if (hsw_mode) {
 		AMAP_SET_BITS(struct amap_set_hsw_context, interface_id,
 			      ctxt, adapter->hba_port_num);
 		AMAP_SET_BITS(struct amap_set_hsw_context, pport, ctxt, 1);
@@ -3964,7 +4032,10 @@ int be_cmd_get_acpi_wol_cap(struct be_adapter *adapter)
 		resp = (struct be_cmd_resp_acpi_wol_magic_config_v1 *)cmd.va;
 
 		adapter->wol_cap = resp->wol_settings;
-		if (adapter->wol_cap & BE_WOL_CAP)
+
+		/* Non-zero macaddr indicates WOL is enabled */
+		if (adapter->wol_cap & BE_WOL_CAP &&
+		    !is_zero_ether_addr(resp->magic_mac))
 			adapter->wol_en = true;
 	}
 err:
@@ -4301,9 +4372,35 @@ err:
 	return status;
 }
 
+/* This routine returns a list of all the NIC PF_nums in the adapter */
+u16 be_get_nic_pf_num_list(u8 *buf, u32 desc_count, u16 *nic_pf_nums)
+{
+	struct be_res_desc_hdr *hdr = (struct be_res_desc_hdr *)buf;
+	struct be_pcie_res_desc *pcie = NULL;
+	int i;
+	u16 nic_pf_count = 0;
+
+	for (i = 0; i < desc_count; i++) {
+		if (hdr->desc_type == PCIE_RESOURCE_DESC_TYPE_V0 ||
+		    hdr->desc_type == PCIE_RESOURCE_DESC_TYPE_V1) {
+			pcie = (struct be_pcie_res_desc *)hdr;
+			if (pcie->pf_state && (pcie->pf_type == MISSION_NIC ||
+					       pcie->pf_type == MISSION_RDMA)) {
+				nic_pf_nums[nic_pf_count++] = pcie->pf_num;
+			}
+		}
+
+		hdr->desc_len = hdr->desc_len ? : RESOURCE_DESC_SIZE_V0;
+		hdr = (void *)hdr + hdr->desc_len;
+	}
+	return nic_pf_count;
+}
+
 /* Will use MBOX only if MCCQ has not been created */
 int be_cmd_get_profile_config(struct be_adapter *adapter,
-			      struct be_resources *res, u8 query, u8 domain)
+			      struct be_resources *res,
+			      struct be_port_resources *port_res,
+			      u8 profile_type, u8 query, u8 domain)
 {
 	struct be_cmd_resp_get_profile_config *resp;
 	struct be_cmd_req_get_profile_config *req;
@@ -4330,7 +4427,7 @@ int be_cmd_get_profile_config(struct be_adapter *adapter,
 
 	if (!lancer_chip(adapter))
 		req->hdr.version = 1;
-	req->type = ACTIVE_PROFILE_TYPE;
+	req->type = profile_type;
 	req->hdr.domain = domain;
 
 	/* When QUERY_MODIFIABLE_FIELDS_TYPE bit is set, cmd returns the
@@ -4346,6 +4443,28 @@ int be_cmd_get_profile_config(struct be_adapter *adapter,
 
 	resp = cmd.va;
 	desc_count = le16_to_cpu(resp->desc_count);
+
+	if (port_res) {
+		u16 nic_pf_cnt = 0, i;
+		u16 nic_pf_num_list[MAX_NIC_FUNCS];
+
+		nic_pf_cnt = be_get_nic_pf_num_list(resp->func_param,
+						    desc_count,
+						    nic_pf_num_list);
+
+		for (i = 0; i < nic_pf_cnt; i++) {
+			nic = be_get_func_nic_desc(resp->func_param, desc_count,
+						   nic_pf_num_list[i]);
+			if (nic->link_param == adapter->port_num) {
+				port_res->nic_pfs++;
+				pcie = be_get_pcie_desc(resp->func_param,
+							desc_count,
+							nic_pf_num_list[i]);
+				port_res->max_vfs += le16_to_cpu(pcie->num_vfs);
+			}
+		}
+		return status;
+	}
 
 	pcie = be_get_pcie_desc(resp->func_param, desc_count,
 				adapter->pf_num);
@@ -4406,7 +4525,7 @@ static int be_cmd_set_profile_config(struct be_adapter *adapter, void *desc,
 }
 
 /* Mark all fields invalid */
-static void be_reset_nic_desc(struct be_nic_res_desc *nic)
+void be_reset_nic_desc(struct be_nic_res_desc *nic)
 {
 	memset(nic, 0, sizeof(*nic));
 	nic->unicast_mac_count = 0xFFFF;
@@ -4475,73 +4594,9 @@ int be_cmd_config_qos(struct be_adapter *adapter, u32 max_rate, u16 link_speed,
 					 1, version, domain);
 }
 
-static void be_fill_vf_res_template(struct be_adapter *adapter,
-				    struct be_resources pool_res,
-				    u16 num_vfs, u16 num_vf_qs,
-				    struct be_nic_res_desc *nic_vft)
-{
-	u32 vf_if_cap_flags = pool_res.vf_if_cap_flags;
-	struct be_resources res_mod = {0};
-
-	/* Resource with fields set to all '1's by GET_PROFILE_CONFIG cmd,
-	 * which are modifiable using SET_PROFILE_CONFIG cmd.
-	 */
-	be_cmd_get_profile_config(adapter, &res_mod, RESOURCE_MODIFIABLE, 0);
-
-	/* If RSS IFACE capability flags are modifiable for a VF, set the
-	 * capability flag as valid and set RSS and DEFQ_RSS IFACE flags if
-	 * more than 1 RSSQ is available for a VF.
-	 * Otherwise, provision only 1 queue pair for VF.
-	 */
-	if (res_mod.vf_if_cap_flags & BE_IF_FLAGS_RSS) {
-		nic_vft->flags |= BIT(IF_CAPS_FLAGS_VALID_SHIFT);
-		if (num_vf_qs > 1) {
-			vf_if_cap_flags |= BE_IF_FLAGS_RSS;
-			if (pool_res.if_cap_flags & BE_IF_FLAGS_DEFQ_RSS)
-				vf_if_cap_flags |= BE_IF_FLAGS_DEFQ_RSS;
-		} else {
-			vf_if_cap_flags &= ~(BE_IF_FLAGS_RSS |
-					     BE_IF_FLAGS_DEFQ_RSS);
-		}
-	} else {
-		num_vf_qs = 1;
-	}
-
-	if (res_mod.vf_if_cap_flags & BE_IF_FLAGS_VLAN_PROMISCUOUS) {
-		nic_vft->flags |= BIT(IF_CAPS_FLAGS_VALID_SHIFT);
-		vf_if_cap_flags &= ~BE_IF_FLAGS_VLAN_PROMISCUOUS;
-	}
-
-	nic_vft->cap_flags = cpu_to_le32(vf_if_cap_flags);
-	nic_vft->rq_count = cpu_to_le16(num_vf_qs);
-	nic_vft->txq_count = cpu_to_le16(num_vf_qs);
-	nic_vft->rssq_count = cpu_to_le16(num_vf_qs);
-	nic_vft->cq_count = cpu_to_le16(pool_res.max_cq_count /
-					(num_vfs + 1));
-
-	/* Distribute unicast MACs, VLANs, IFACE count and MCCQ count equally
-	 * among the PF and it's VFs, if the fields are changeable
-	 */
-	if (res_mod.max_uc_mac == FIELD_MODIFIABLE)
-		nic_vft->unicast_mac_count = cpu_to_le16(pool_res.max_uc_mac /
-							 (num_vfs + 1));
-
-	if (res_mod.max_vlans == FIELD_MODIFIABLE)
-		nic_vft->vlan_count = cpu_to_le16(pool_res.max_vlans /
-						  (num_vfs + 1));
-
-	if (res_mod.max_iface_count == FIELD_MODIFIABLE)
-		nic_vft->iface_count = cpu_to_le16(pool_res.max_iface_count /
-						   (num_vfs + 1));
-
-	if (res_mod.max_mcc_count == FIELD_MODIFIABLE)
-		nic_vft->mcc_count = cpu_to_le16(pool_res.max_mcc_count /
-						 (num_vfs + 1));
-}
-
 int be_cmd_set_sriov_config(struct be_adapter *adapter,
 			    struct be_resources pool_res, u16 num_vfs,
-			    u16 num_vf_qs)
+			    struct be_resources *vft_res)
 {
 	struct {
 		struct be_pcie_res_desc pcie;
@@ -4561,12 +4616,26 @@ int be_cmd_set_sriov_config(struct be_adapter *adapter,
 	be_reset_nic_desc(&desc.nic_vft);
 	desc.nic_vft.hdr.desc_type = NIC_RESOURCE_DESC_TYPE_V1;
 	desc.nic_vft.hdr.desc_len = RESOURCE_DESC_SIZE_V1;
-	desc.nic_vft.flags = BIT(VFT_SHIFT) | BIT(IMM_SHIFT) | BIT(NOSV_SHIFT);
+	desc.nic_vft.flags = vft_res->flags | BIT(VFT_SHIFT) |
+			     BIT(IMM_SHIFT) | BIT(NOSV_SHIFT);
 	desc.nic_vft.pf_num = adapter->pdev->devfn;
 	desc.nic_vft.vf_num = 0;
+	desc.nic_vft.cap_flags = cpu_to_le32(vft_res->vf_if_cap_flags);
+	desc.nic_vft.rq_count = cpu_to_le16(vft_res->max_rx_qs);
+	desc.nic_vft.txq_count = cpu_to_le16(vft_res->max_tx_qs);
+	desc.nic_vft.rssq_count = cpu_to_le16(vft_res->max_rss_qs);
+	desc.nic_vft.cq_count = cpu_to_le16(vft_res->max_cq_count);
 
-	be_fill_vf_res_template(adapter, pool_res, num_vfs, num_vf_qs,
-				&desc.nic_vft);
+	if (vft_res->max_uc_mac)
+		desc.nic_vft.unicast_mac_count =
+					cpu_to_le16(vft_res->max_uc_mac);
+	if (vft_res->max_vlans)
+		desc.nic_vft.vlan_count = cpu_to_le16(vft_res->max_vlans);
+	if (vft_res->max_iface_count)
+		desc.nic_vft.iface_count =
+				cpu_to_le16(vft_res->max_iface_count);
+	if (vft_res->max_mcc_count)
+		desc.nic_vft.mcc_count = cpu_to_le16(vft_res->max_mcc_count);
 
 	return be_cmd_set_profile_config(adapter, &desc,
 					 2 * RESOURCE_DESC_SIZE_V1, 2, 1, 0);

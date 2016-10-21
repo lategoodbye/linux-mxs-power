@@ -22,6 +22,7 @@
 #include <linux/rbtree.h>
 #include <linux/poll.h>
 #include <linux/workqueue.h>
+#include <linux/kref.h>
 
 /** Max number of pages that can be used in a single read request */
 #define FUSE_MAX_PAGES_PER_REQ 32
@@ -109,6 +110,9 @@ struct fuse_inode {
 
 	/** Miscellaneous bits describing inode state */
 	unsigned long state;
+
+	/** Lock for serializing lookup and readdir for back compatibility*/
+	struct mutex mutex;
 };
 
 /** FUSE inode state bits */
@@ -243,6 +247,7 @@ struct fuse_args {
 
 /** The request IO state (for asynchronous processing) */
 struct fuse_io_priv {
+	struct kref refcnt;
 	int async;
 	spinlock_t lock;
 	unsigned reqs;
@@ -254,7 +259,15 @@ struct fuse_io_priv {
 	struct kiocb *iocb;
 	struct file *file;
 	struct completion *done;
+	bool blocking;
 };
+
+#define FUSE_IO_PRIV_SYNC(f) \
+{					\
+	.refcnt = { ATOMIC_INIT(1) },	\
+	.async = 0,			\
+	.file = f,			\
+}
 
 /**
  * Request flags
@@ -531,6 +544,9 @@ struct fuse_conn {
 	/** write-back cache policy (default is write-through) */
 	unsigned writeback_cache:1;
 
+	/** allow parallel lookups and readdir (default is serialized) */
+	unsigned parallel_dirops:1;
+
 	/*
 	 * The following bitfields are only for optimization purposes
 	 * and hence races in setting them will not cause malfunction
@@ -688,7 +704,7 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			int generation, struct fuse_attr *attr,
 			u64 attr_valid, u64 attr_version);
 
-int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
+int fuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name,
 		     struct fuse_entry_out *outarg, struct inode **inode);
 
 /**
@@ -946,5 +962,8 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		    struct file *file);
 
 void fuse_set_initialized(struct fuse_conn *fc);
+
+void fuse_unlock_inode(struct inode *inode);
+void fuse_lock_inode(struct inode *inode);
 
 #endif /* _FS_FUSE_I_H */

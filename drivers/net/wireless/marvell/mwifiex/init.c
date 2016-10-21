@@ -60,7 +60,7 @@ static void wakeup_timer_fn(unsigned long data)
 	adapter->hw_status = MWIFIEX_HW_STATUS_RESET;
 	mwifiex_cancel_all_pending_cmd(adapter);
 
-	if (adapter->if_ops.card_reset)
+	if (adapter->if_ops.card_reset && !adapter->hs_activated)
 		adapter->if_ops.card_reset(adapter);
 }
 
@@ -110,6 +110,8 @@ int mwifiex_init_priv(struct mwifiex_private *priv)
 	priv->tx_power_level = 0;
 	priv->max_tx_power_level = 0;
 	priv->min_tx_power_level = 0;
+	priv->tx_ant = 0;
+	priv->rx_ant = 0;
 	priv->tx_rate = 0;
 	priv->rxpd_htinfo = 0;
 	priv->rxpd_rate = 0;
@@ -317,7 +319,7 @@ void mwifiex_set_trans_start(struct net_device *dev)
 	for (i = 0; i < dev->num_tx_queues; i++)
 		netdev_get_tx_queue(dev, i)->trans_start = jiffies;
 
-	dev->trans_start = jiffies;
+	netif_trans_update(dev);
 }
 
 /*
@@ -741,8 +743,6 @@ int mwifiex_dnld_fw(struct mwifiex_adapter *adapter,
 	u32 poll_num = 1;
 
 	if (adapter->if_ops.check_fw_status) {
-		adapter->winner = 0;
-
 		/* check if firmware is already running */
 		ret = adapter->if_ops.check_fw_status(adapter, poll_num);
 		if (!ret) {
@@ -750,13 +750,23 @@ int mwifiex_dnld_fw(struct mwifiex_adapter *adapter,
 				    "WLAN FW already running! Skip FW dnld\n");
 			return 0;
 		}
+	}
+
+	/* check if we are the winner for downloading FW */
+	if (adapter->if_ops.check_winner_status) {
+		adapter->winner = 0;
+		ret = adapter->if_ops.check_winner_status(adapter);
 
 		poll_num = MAX_FIRMWARE_POLL_TRIES;
+		if (ret) {
+			mwifiex_dbg(adapter, MSG,
+				    "WLAN read winner status failed!\n");
+			return ret;
+		}
 
-		/* check if we are the winner for downloading FW */
 		if (!adapter->winner) {
 			mwifiex_dbg(adapter, MSG,
-				    "FW already running! Skip FW dnld\n");
+				    "WLAN is not the winner! Skip FW dnld\n");
 			goto poll_fw;
 		}
 	}
@@ -780,3 +790,4 @@ poll_fw:
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(mwifiex_dnld_fw);

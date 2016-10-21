@@ -31,7 +31,7 @@
 
 static void i915_save_display(struct drm_device *dev)
 {
-	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = to_i915(dev);
 
 	/* Display arbitration control */
 	if (INTEL_INFO(dev)->gen <= 4)
@@ -63,7 +63,7 @@ static void i915_save_display(struct drm_device *dev)
 
 static void i915_restore_display(struct drm_device *dev)
 {
-	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = to_i915(dev);
 	u32 mask = 0xffffffff;
 
 	/* Display arbitration */
@@ -92,7 +92,7 @@ static void i915_restore_display(struct drm_device *dev)
 	}
 
 	/* only restore FBC info on the platform that supports FBC*/
-	intel_fbc_disable(dev_priv);
+	intel_fbc_global_disable(dev_priv);
 
 	/* restore FBC interval */
 	if (HAS_FBC(dev) && INTEL_INFO(dev)->gen <= 4 && !IS_G4X(dev))
@@ -103,7 +103,7 @@ static void i915_restore_display(struct drm_device *dev)
 
 int i915_save_state(struct drm_device *dev)
 {
-	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = to_i915(dev);
 	int i;
 
 	mutex_lock(&dev->struct_mutex);
@@ -148,7 +148,7 @@ int i915_save_state(struct drm_device *dev)
 
 int i915_restore_state(struct drm_device *dev)
 {
-	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = to_i915(dev);
 	int i;
 
 	mutex_lock(&dev->struct_mutex);

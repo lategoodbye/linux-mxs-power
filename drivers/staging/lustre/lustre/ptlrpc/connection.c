@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -72,7 +68,8 @@ ptlrpc_connection_get(lnet_process_id_t peer, lnet_nid_t self,
 	 * returned and may be compared against out object.
 	 */
 	/* In the function below, .hs_keycmp resolves to
-	 * conn_keycmp() */
+	 * conn_keycmp()
+	 */
 	/* coverity[overrun-buffer-val] */
 	conn2 = cfs_hash_findadd_unique(conn_hash, &peer, &conn->c_hash);
 	if (conn != conn2) {
@@ -172,7 +169,7 @@ conn_keycmp(const void *key, struct hlist_node *hnode)
 	struct ptlrpc_connection *conn;
 	const lnet_process_id_t *conn_key;
 
-	LASSERT(key != NULL);
+	LASSERT(key);
 	conn_key = key;
 	conn = hlist_entry(hnode, struct ptlrpc_connection, c_hash);
 

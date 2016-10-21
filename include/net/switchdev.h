@@ -54,11 +54,13 @@ struct switchdev_attr {
 	struct net_device *orig_dev;
 	enum switchdev_attr_id id;
 	u32 flags;
+	void *complete_priv;
+	void (*complete)(struct net_device *dev, int err, void *priv);
 	union {
 		struct netdev_phys_item_id ppid;	/* PORT_PARENT_ID */
 		u8 stp_state;				/* PORT_STP_STATE */
 		unsigned long brport_flags;		/* PORT_BRIDGE_FLAGS */
-		u32 ageing_time;			/* BRIDGE_AGEING_TIME */
+		clock_t ageing_time;			/* BRIDGE_AGEING_TIME */
 		bool vlan_filtering;			/* BRIDGE_VLAN_FILTERING */
 	} u;
 };
@@ -75,6 +77,8 @@ struct switchdev_obj {
 	struct net_device *orig_dev;
 	enum switchdev_obj_id id;
 	u32 flags;
+	void *complete_priv;
+	void (*complete)(struct net_device *dev, int err, void *priv);
 };
 
 /* SWITCHDEV_OBJ_ID_PORT_VLAN */
@@ -93,7 +97,7 @@ struct switchdev_obj_ipv4_fib {
 	struct switchdev_obj obj;
 	u32 dst;
 	int dst_len;
-	struct fib_info fi;
+	struct fib_info *fi;
 	u8 tos;
 	u8 type;
 	u32 nlflags;
@@ -223,6 +227,8 @@ void switchdev_port_fwd_mark_set(struct net_device *dev,
 				 struct net_device *group_dev,
 				 bool joining);
 
+bool switchdev_port_same_parent_id(struct net_device *a,
+				   struct net_device *b);
 #else
 
 static inline void switchdev_deferred_process(void)
@@ -345,6 +351,12 @@ static inline void switchdev_port_fwd_mark_set(struct net_device *dev,
 					       struct net_device *group_dev,
 					       bool joining)
 {
+}
+
+static inline bool switchdev_port_same_parent_id(struct net_device *a,
+						 struct net_device *b)
+{
+	return false;
 }
 
 #endif

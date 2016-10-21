@@ -118,7 +118,8 @@ static irqreturn_t nop_gpio_vbus_thread(int irq, void *data)
 		status = USB_EVENT_VBUS;
 		otg->state = OTG_STATE_B_PERIPHERAL;
 		nop->phy.last_event = status;
-		usb_gadget_vbus_connect(otg->gadget);
+		if (otg->gadget)
+			usb_gadget_vbus_connect(otg->gadget);
 
 		/* drawing a "unit load" is *always* OK, except for OTG */
 		nop_set_vbus_draw(nop, 100);
@@ -128,7 +129,8 @@ static irqreturn_t nop_gpio_vbus_thread(int irq, void *data)
 	} else {
 		nop_set_vbus_draw(nop, 0);
 
-		usb_gadget_vbus_disconnect(otg->gadget);
+		if (otg->gadget)
+			usb_gadget_vbus_disconnect(otg->gadget);
 		status = USB_EVENT_NONE;
 		otg->state = OTG_STATE_B_IDLE;
 		nop->phy.last_event = status;
@@ -142,14 +144,18 @@ static irqreturn_t nop_gpio_vbus_thread(int irq, void *data)
 int usb_gen_phy_init(struct usb_phy *phy)
 {
 	struct usb_phy_generic *nop = dev_get_drvdata(phy->dev);
+	int ret;
 
 	if (!IS_ERR(nop->vcc)) {
 		if (regulator_enable(nop->vcc))
 			dev_err(phy->dev, "Failed to enable power\n");
 	}
 
-	if (!IS_ERR(nop->clk))
-		clk_prepare_enable(nop->clk);
+	if (!IS_ERR(nop->clk)) {
+		ret = clk_prepare_enable(nop->clk);
+		if (ret)
+			return ret;
+	}
 
 	nop_reset(nop);
 
@@ -184,7 +190,10 @@ static int nop_set_peripheral(struct usb_otg *otg, struct usb_gadget *gadget)
 	}
 
 	otg->gadget = gadget;
-	otg->state = OTG_STATE_B_IDLE;
+	if (otg->state == OTG_STATE_B_PERIPHERAL)
+		usb_gadget_vbus_connect(gadget);
+	else
+		otg->state = OTG_STATE_B_IDLE;
 	return 0;
 }
 

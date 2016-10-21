@@ -113,7 +113,6 @@ void platform_heartbeat(void)
 }
 
 //#define RS_TABLE_SIZE 2
-//#define STD_COM_FLAGS (ASYNC_BOOT_AUTOCONF|ASYNC_SKIP_TEST)
 
 #define _SERIAL_PORT(_base,_irq)					\
 {									\

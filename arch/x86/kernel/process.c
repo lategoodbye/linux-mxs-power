@@ -7,7 +7,8 @@
 #include <linux/prctl.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
-#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/export.h>
 #include <linux/pm.h>
 #include <linux/tick.h>
 #include <linux/random.h>
@@ -57,6 +58,9 @@ __visible DEFINE_PER_CPU_SHARED_ALIGNED(struct tss_struct, cpu_tss) = {
 	  */
 	.io_bitmap		= { [0 ... IO_BITMAP_LONGS] = ~0 },
 #endif
+#ifdef CONFIG_X86_32
+	.SYSENTER_stack_canary	= STACK_END_MAGIC,
+#endif
 };
 EXPORT_PER_CPU_SYMBOL(cpu_tss);
 
@@ -94,10 +98,9 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 /*
  * Free current thread data structures etc..
  */
-void exit_thread(void)
+void exit_thread(struct task_struct *tsk)
 {
-	struct task_struct *me = current;
-	struct thread_struct *t = &me->thread;
+	struct thread_struct *t = &tsk->thread;
 	unsigned long *bp = t->io_bitmap_ptr;
 	struct fpu *fpu = &t->fpu;
 
@@ -402,7 +405,7 @@ static int prefer_mwait_c1_over_halt(const struct cpuinfo_x86 *c)
 	if (c->x86_vendor != X86_VENDOR_INTEL)
 		return 0;
 
-	if (!cpu_has(c, X86_FEATURE_MWAIT))
+	if (!cpu_has(c, X86_FEATURE_MWAIT) || static_cpu_has_bug(X86_BUG_MONITOR))
 		return 0;
 
 	return 1;
@@ -418,9 +421,9 @@ static void mwait_idle(void)
 	if (!current_set_polling_and_test()) {
 		trace_cpu_idle_rcuidle(1, smp_processor_id());
 		if (this_cpu_has(X86_BUG_CLFLUSH_MONITOR)) {
-			smp_mb(); /* quirk */
+			mb(); /* quirk */
 			clflush((void *)&current_thread_info()->flags);
-			smp_mb(); /* quirk */
+			mb(); /* quirk */
 		}
 
 		__monitor((void *)&current_thread_info()->flags, 0, 0);

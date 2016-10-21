@@ -19,12 +19,18 @@
 #include <linux/reboot.h>
 #include <linux/acpi.h>
 #include <linux/module.h>
+#include <linux/syscore_ops.h>
 #include <asm/io.h>
 #include <trace/events/power.h>
 
 #include "internal.h"
 #include "sleep.h"
 
+/*
+ * Some HW-full platforms do not have _S5, so they may need
+ * to leverage efi power off for a shutdown.
+ */
+bool acpi_no_s5;
 static u8 sleep_states[ACPI_S_STATE_COUNT];
 
 static void acpi_sleep_tts_switch(u32 acpi_state)
@@ -41,15 +47,32 @@ static void acpi_sleep_tts_switch(u32 acpi_state)
 	}
 }
 
-static int tts_notify_reboot(struct notifier_block *this,
+static void acpi_sleep_pts_switch(u32 acpi_state)
+{
+	acpi_status status;
+
+	status = acpi_execute_simple_method(NULL, "\\_PTS", acpi_state);
+	if (ACPI_FAILURE(status) && status != AE_NOT_FOUND) {
+		/*
+		 * OS can't evaluate the _PTS object correctly. Some warning
+		 * message will be printed. But it won't break anything.
+		 */
+		printk(KERN_NOTICE "Failure in evaluating _PTS object\n");
+	}
+}
+
+static int sleep_notify_reboot(struct notifier_block *this,
 			unsigned long code, void *x)
 {
 	acpi_sleep_tts_switch(ACPI_STATE_S5);
+
+	acpi_sleep_pts_switch(ACPI_STATE_S5);
+
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block tts_notifier = {
-	.notifier_call	= tts_notify_reboot,
+static struct notifier_block sleep_notifier = {
+	.notifier_call	= sleep_notify_reboot,
 	.next		= NULL,
 	.priority	= 0,
 };
@@ -677,6 +700,39 @@ static void acpi_sleep_suspend_setup(void)
 static inline void acpi_sleep_suspend_setup(void) {}
 #endif /* !CONFIG_SUSPEND */
 
+#ifdef CONFIG_PM_SLEEP
+static u32 saved_bm_rld;
+
+static int  acpi_save_bm_rld(void)
+{
+	acpi_read_bit_register(ACPI_BITREG_BUS_MASTER_RLD, &saved_bm_rld);
+	return 0;
+}
+
+static void  acpi_restore_bm_rld(void)
+{
+	u32 resumed_bm_rld = 0;
+
+	acpi_read_bit_register(ACPI_BITREG_BUS_MASTER_RLD, &resumed_bm_rld);
+	if (resumed_bm_rld == saved_bm_rld)
+		return;
+
+	acpi_write_bit_register(ACPI_BITREG_BUS_MASTER_RLD, saved_bm_rld);
+}
+
+static struct syscore_ops acpi_sleep_syscore_ops = {
+	.suspend = acpi_save_bm_rld,
+	.resume = acpi_restore_bm_rld,
+};
+
+void acpi_sleep_syscore_init(void)
+{
+	register_syscore_ops(&acpi_sleep_syscore_ops);
+}
+#else
+static inline void acpi_sleep_syscore_init(void) {}
+#endif /* CONFIG_PM_SLEEP */
+
 #ifdef CONFIG_HIBERNATION
 static unsigned long s4_hardware_signature;
 static struct acpi_table_facs *facs;
@@ -714,6 +770,7 @@ static int acpi_hibernation_enter(void)
 
 static void acpi_hibernation_leave(void)
 {
+	pm_set_resume_via_firmware();
 	/*
 	 * If ACPI is not enabled by the BIOS and the boot kernel, we need to
 	 * enable it here.
@@ -839,6 +896,7 @@ int __init acpi_sleep_init(void)
 
 	sleep_states[ACPI_STATE_S0] = 1;
 
+	acpi_sleep_syscore_init();
 	acpi_sleep_suspend_setup();
 	acpi_sleep_hibernate_setup();
 
@@ -846,6 +904,8 @@ int __init acpi_sleep_init(void)
 		sleep_states[ACPI_STATE_S5] = 1;
 		pm_power_off_prepare = acpi_power_off_prepare;
 		pm_power_off = acpi_power_off;
+	} else {
+		acpi_no_s5 = true;
 	}
 
 	supported[0] = 0;
@@ -856,9 +916,9 @@ int __init acpi_sleep_init(void)
 	pr_info(PREFIX "(supports%s)\n", supported);
 
 	/*
-	 * Register the tts_notifier to reboot notifier list so that the _TTS
-	 * object can also be evaluated when the system enters S5.
+	 * Register the sleep_notifier to reboot notifier list so that the _TTS
+	 * and _PTS object can also be evaluated when the system enters S5.
 	 */
-	register_reboot_notifier(&tts_notifier);
+	register_reboot_notifier(&sleep_notifier);
 	return 0;
 }

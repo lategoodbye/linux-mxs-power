@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 - 2015 Emulex
+ * Copyright (C) 2005 - 2016 Broadcom
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -68,7 +68,8 @@ enum mcc_addl_status {
 	MCC_ADDL_STATUS_TOO_MANY_INTERFACES = 0x4a,
 	MCC_ADDL_STATUS_INSUFFICIENT_VLANS = 0xab,
 	MCC_ADDL_STATUS_INVALID_SIGNATURE = 0x56,
-	MCC_ADDL_STATUS_MISSING_SIGNATURE = 0x57
+	MCC_ADDL_STATUS_MISSING_SIGNATURE = 0x57,
+	MCC_ADDL_STATUS_INSUFFICIENT_PRIVILEGES = 0x60
 };
 
 #define CQE_BASE_STATUS_MASK		0xFFFF
@@ -175,10 +176,53 @@ struct be_async_event_qnq {
 	u32 flags;
 } __packed;
 
-#define INCOMPATIBLE_SFP		0x3
+enum {
+	BE_PHY_FUNCTIONAL	= 0,
+	BE_PHY_NOT_PRESENT	= 1,
+	BE_PHY_DIFF_MEDIA	= 2,
+	BE_PHY_INCOMPATIBLE	= 3,
+	BE_PHY_UNQUALIFIED	= 4,
+	BE_PHY_UNCERTIFIED	= 5
+};
+
+#define PHY_STATE_MSG_SEVERITY		0x6
+#define PHY_STATE_OPER			0x1
+#define PHY_STATE_INFO_VALID		0x80
+#define	PHY_STATE_OPER_MSG_NONE		0x2
+#define DEFAULT_MSG_SEVERITY		0x1
+
+#define be_phy_state_unknown(phy_state) (phy_state > BE_PHY_UNCERTIFIED)
+#define be_phy_unqualified(phy_state)				\
+			(phy_state == BE_PHY_UNQUALIFIED ||	\
+			 phy_state == BE_PHY_UNCERTIFIED)
+#define be_phy_misconfigured(phy_state)				\
+			(phy_state == BE_PHY_INCOMPATIBLE ||	\
+			 phy_state == BE_PHY_UNQUALIFIED ||	\
+			 phy_state == BE_PHY_UNCERTIFIED)
+
+extern  char *be_misconfig_evt_port_state[];
+
 /* async event indicating misconfigured port */
 struct be_async_event_misconfig_port {
+ /* DATA_WORD1:
+  * phy state of port 0: bits 7 - 0
+  * phy state of port 1: bits 15 - 8
+  * phy state of port 2: bits 23 - 16
+  * phy state of port 3: bits 31 - 24
+  */
 	u32 event_data_word1;
+ /* DATA_WORD2:
+  * phy state info of port 0: bits 7 - 0
+  * phy state info of port 1: bits 15 - 8
+  * phy state info of port 2: bits 23 - 16
+  * phy state info of port 3: bits 31 - 24
+  *
+  * PHY STATE INFO:
+  * Link operability	 :bit 0
+  * Message severity	 :bit 2 - 1
+  * Rsvd			 :bits 6 - 3
+  * phy state info valid	 :bit 7
+  */
 	u32 event_data_word2;
 	u32 rsvd0;
 	u32 flags;
@@ -1512,7 +1556,9 @@ struct be_cmd_resp_acpi_wol_magic_config_v1 {
 	u8 rsvd0[2];
 	u8 wol_settings;
 	u8 rsvd1[5];
-	u32 rsvd2[295];
+	u32 rsvd2[288];
+	u8 magic_mac[6];
+	u8 rsvd3[22];
 } __packed;
 
 #define BE_GET_WOL_CAP			2
@@ -2084,6 +2130,9 @@ struct be_cmd_req_set_ext_fat_caps {
 #define IMM_SHIFT				6	/* Immediate */
 #define NOSV_SHIFT				7	/* No save */
 
+#define MISSION_NIC				1
+#define MISSION_RDMA				8
+
 struct be_res_desc_hdr {
 	u8 desc_type;
 	u8 desc_len;
@@ -2200,6 +2249,7 @@ struct be_cmd_req_get_profile_config {
 	struct be_cmd_req_hdr hdr;
 	u8 rsvd;
 #define ACTIVE_PROFILE_TYPE			0x2
+#define SAVED_PROFILE_TYPE			0x0
 #define QUERY_MODIFIABLE_FIELDS_TYPE		BIT(3)
 	u8 type;
 	u16 rsvd1;
@@ -2405,7 +2455,9 @@ int be_cmd_query_port_name(struct be_adapter *adapter);
 int be_cmd_get_func_config(struct be_adapter *adapter,
 			   struct be_resources *res);
 int be_cmd_get_profile_config(struct be_adapter *adapter,
-			      struct be_resources *res, u8 query, u8 domain);
+			      struct be_resources *res,
+			      struct be_port_resources *port_res,
+			      u8 profile_type, u8 query, u8 domain);
 int be_cmd_get_active_profile(struct be_adapter *adapter, u16 *profile);
 int be_cmd_get_if_id(struct be_adapter *adapter, struct be_vf_cfg *vf_cfg,
 		     int vf_num);
@@ -2417,4 +2469,4 @@ int be_cmd_set_vxlan_port(struct be_adapter *adapter, __be16 port);
 int be_cmd_manage_iface(struct be_adapter *adapter, u32 iface, u8 op);
 int be_cmd_set_sriov_config(struct be_adapter *adapter,
 			    struct be_resources res, u16 num_vfs,
-			    u16 num_vf_qs);
+			    struct be_resources *vft_res);

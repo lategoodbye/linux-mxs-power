@@ -338,7 +338,7 @@ do {									\
 			    schedule(); try_to_freeze())
 
 /**
- * wait_event - sleep (or freeze) until a condition gets true
+ * wait_event_freezable - sleep (or freeze) until a condition gets true
  * @wq: the waitqueue to wait on
  * @condition: a C expression for the event to wait for
  *
@@ -597,6 +597,19 @@ do {									\
 	might_sleep();							\
 	if (!(condition))						\
 		__ret = __wait_event_interruptible_exclusive(wq, condition);\
+	__ret;								\
+})
+
+#define __wait_event_killable_exclusive(wq, condition)			\
+	___wait_event(wq, condition, TASK_KILLABLE, 1, 0,		\
+		      schedule())
+
+#define wait_event_killable_exclusive(wq, condition)			\
+({									\
+	int __ret = 0;							\
+	might_sleep();							\
+	if (!(condition))						\
+		__ret = __wait_event_killable_exclusive(wq, condition);	\
 	__ret;								\
 })
 

@@ -15,11 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * version 2 along with this program; If not, see
- * http://www.sun.com/software/products/lustre/docs/GPLv2.pdf
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
+ * http://www.gnu.org/licenses/gpl-2.0.html
  *
  * GPL HEADER END
  */
@@ -49,13 +45,11 @@ enum {
 
 static inline int node_is_left_child(struct interval_node *node)
 {
-	LASSERT(node->in_parent != NULL);
 	return node == node->in_parent->in_left;
 }
 
 static inline int node_is_right_child(struct interval_node *node)
 {
-	LASSERT(node->in_parent != NULL);
 	return node == node->in_parent->in_right;
 }
 
@@ -135,7 +129,8 @@ static void __rotate_change_maxhigh(struct interval_node *node,
 
 /* The left rotation "pivots" around the link from node to node->right, and
  * - node will be linked to node->right's left child, and
- * - node->right's left child will be linked to node's right child.  */
+ * - node->right's left child will be linked to node's right child.
+ */
 static void __rotate_left(struct interval_node *node,
 			  struct interval_node **root)
 {
@@ -164,7 +159,8 @@ static void __rotate_left(struct interval_node *node,
 
 /* The right rotation "pivots" around the link from node to node->left, and
  * - node will be linked to node->left's right child, and
- * - node->left's right child will be linked to node's left child.  */
+ * - node->left's right child will be linked to node's left child.
+ */
 static void __rotate_right(struct interval_node *node,
 			   struct interval_node **root)
 {

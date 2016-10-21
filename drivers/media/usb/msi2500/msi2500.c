@@ -618,7 +618,7 @@ static int msi2500_querycap(struct file *file, void *fh,
 static int msi2500_queue_setup(struct vb2_queue *vq,
 			       unsigned int *nbuffers,
 			       unsigned int *nplanes, unsigned int sizes[],
-			       void *alloc_ctxs[])
+			       struct device *alloc_devs[])
 {
 	struct msi2500_dev *dev = vb2_get_drv_priv(vq);
 
@@ -839,8 +839,6 @@ static int msi2500_set_usb_adc(struct msi2500_dev *dev)
 		goto err;
 
 	ret = msi2500_ctrl_msg(dev, CMD_WREG, reg3);
-	if (ret)
-		goto err;
 err:
 	return ret;
 }
