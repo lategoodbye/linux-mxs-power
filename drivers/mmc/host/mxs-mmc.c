@@ -737,6 +737,7 @@ static int mxs_mmc_probe(struct platform_device *pdev)
 	mmc->ops = &mxs_mmc_ops;
 	mmc->caps = MMC_CAP_SD_HIGHSPEED | MMC_CAP_MMC_HIGHSPEED |
 		    MMC_CAP_SDIO_IRQ | MMC_CAP_NEEDS_POLL;
+	mmc->caps2 = MMC_CAP2_3_3V_ONLY_DDR;
 
 	host->broken_cd = of_property_read_bool(np, "broken-cd");
 
