@@ -59,10 +59,6 @@
 /* card detect polling timeout */
 #define MXS_MMC_DETECT_TIMEOUT			(HZ/2)
 
-struct mxs_mmc_next {
-	s32 cookie;
-};
-
 struct mxs_mmc_host {
 	struct mxs_ssp			ssp;
 
@@ -70,7 +66,6 @@ struct mxs_mmc_host {
 	struct mmc_request		*mrq;
 	struct mmc_command		*cmd;
 	struct mmc_data			*data;
-	struct mxs_mmc_next		next_data;
 
 	unsigned char			bus_width;
 	spinlock_t			lock;
@@ -160,10 +155,8 @@ static void mxs_mmc_request_done(struct mxs_mmc_host *host)
 	}
 
 	if (data) {
-		if (!data->host_cookie)
-			dma_unmap_sg(mmc_dev(host->mmc), data->sg,
-				     data->sg_len, (data->flags & MMC_DATA_WRITE) ?
-				     DMA_TO_DEVICE : DMA_FROM_DEVICE);
+		dma_unmap_sg(mmc_dev(host->mmc), data->sg,
+			     data->sg_len, ssp->dma_dir);
 		/*
 		 * If there was an error on any block, we mark all
 		 * data blocks as being in error.
@@ -229,31 +222,6 @@ static irqreturn_t mxs_mmc_irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int mxs_mmc_prep_dma_data(struct mxs_mmc_host *host,
-				struct mmc_data *data,
-				struct mxs_mmc_next *next)
-{
-	if (!next && data->host_cookie &&
-	    data->host_cookie != host->next_data.cookie) {
-		printk(KERN_WARNING "[%s] invalid cookie: data->host_cookie %d"
-		       " host->next_data.cookie %d\n",
-		       __func__, data->host_cookie, host->next_data.cookie);
-		data->host_cookie = 0;
-	}
-
-	/* Check if next job is already prepared */
-	if (next || (!next && data->host_cookie != host->next_data.cookie))
-		if (dma_map_sg(mmc_dev(host->mmc), data->sg, data->sg_len,
-			       (data->flags & MMC_DATA_WRITE) ?
-			       DMA_TO_DEVICE : DMA_FROM_DEVICE) == 0)
-			return -EINVAL;
-
-	if (next)
-		data->host_cookie = ++next->cookie < 0 ? 1 : next->cookie;
-
-	return 0;
-}
-
 static struct dma_async_tx_descriptor *mxs_mmc_prep_dma(
 	struct mxs_mmc_host *host, unsigned long flags)
 {
@@ -265,8 +233,8 @@ static struct dma_async_tx_descriptor *mxs_mmc_prep_dma(
 
 	if (data) {
 		/* data */
-		if (mxs_mmc_prep_dma_data(host, data, NULL))
-			return NULL;
+		dma_map_sg(mmc_dev(host->mmc), data->sg,
+			   data->sg_len, ssp->dma_dir);
 		sgl = data->sg;
 		sg_len = data->sg_len;
 	} else {
@@ -281,13 +249,9 @@ static struct dma_async_tx_descriptor *mxs_mmc_prep_dma(
 		desc->callback = mxs_mmc_dma_irq_callback;
 		desc->callback_param = host;
 	} else {
-		if (data) {
+		if (data)
 			dma_unmap_sg(mmc_dev(host->mmc), data->sg,
-				     data->sg_len,
-				     (data->flags & MMC_DATA_WRITE) ?
-				     DMA_TO_DEVICE : DMA_FROM_DEVICE);
-			data->host_cookie = 0;
-		}
+				     data->sg_len, ssp->dma_dir);
 	}
 
 	return desc;
@@ -527,41 +491,6 @@ static void mxs_mmc_start_cmd(struct mxs_mmc_host *host,
 	}
 }
 
-static void mxs_mmc_pre_req(struct mmc_host *mmc, struct mmc_request *mrq,
-			    bool is_first_req)
-{
-	struct mxs_mmc_host *host = mmc_priv(mmc);
-	struct mmc_data *data = mrq->data;
-
-	if (!data)
-		return;
-
-	if (data->host_cookie) {
-		data->host_cookie = 0;
-		return;
-	}
-
-	if (mxs_mmc_prep_dma_data(host, data, &host->next_data))
-		data->host_cookie = 0;
-}
-
-static void mxs_mmc_post_req(struct mmc_host *mmc, struct mmc_request *mrq,
-			     int err)
-{
-	struct mxs_mmc_host *host = mmc_priv(mmc);
-	struct mmc_data *data = mrq->data;
-
-	if (!data)
-		return;
-
-	if (data->host_cookie) {
-		dma_unmap_sg(mmc_dev(host->mmc), data->sg,
-			     data->sg_len, (data->flags & MMC_DATA_WRITE) ?
-			     DMA_TO_DEVICE : DMA_FROM_DEVICE);
-		data->host_cookie = 0;
-	}
-}
-
 static void mxs_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 {
 	struct mxs_mmc_host *host = mmc_priv(mmc);
@@ -635,8 +564,6 @@ static void mxs_mmc_enable_sdio_irq(struct mmc_host *mmc, int enable)
 }
 
 static const struct mmc_host_ops mxs_mmc_ops = {
-	.pre_req = mxs_mmc_pre_req,
-	.post_req = mxs_mmc_post_req,
 	.request = mxs_mmc_request,
 	.get_ro = mmc_gpio_get_ro,
 	.get_cd = mxs_mmc_get_cd,
@@ -698,7 +625,6 @@ static int mxs_mmc_probe(struct platform_device *pdev)
 
 	host->mmc = mmc;
 	host->sdio_irq_en = 0;
-	host->next_data.cookie = 1;
 
 	reg_vmmc = devm_regulator_get(&pdev->dev, "vmmc");
 	if (!IS_ERR(reg_vmmc)) {
