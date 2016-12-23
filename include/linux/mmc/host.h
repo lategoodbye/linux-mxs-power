@@ -311,6 +311,7 @@ struct mmc_host {
 #define MMC_CAP2_HS400_ES	(1 << 20)	/* Host supports enhanced strobe */
 #define MMC_CAP2_NO_SD		(1 << 21)	/* Do not send SD commands during initialization */
 #define MMC_CAP2_NO_MMC		(1 << 22)	/* Do not send (e)MMC commands during initialization */
+#define MMC_CAP2_3_3V_ONLY_DDR	(1 << 23)	/* can only support DDR mode at 3.3V */
 
 	mmc_pm_flag_t		pm_caps;	/* supported pm features */
 

@@ -210,6 +210,12 @@ static void mmc_select_card_type(struct mmc_card *card)
 		avail_type |= EXT_CSD_CARD_TYPE_HS_52;
 	}
 
+	if (caps2 & MMC_CAP2_3_3V_ONLY_DDR &&
+	    card_type & EXT_CSD_CARD_TYPE_DDR_1_8V) {
+		hs_max_dtr = MMC_HIGH_DDR_MAX_DTR;
+		avail_type |= EXT_CSD_CARD_TYPE_DDR_1_8V;
+	}
+
 	if (caps & MMC_CAP_1_8V_DDR &&
 	    card_type & EXT_CSD_CARD_TYPE_DDR_1_8V) {
 		hs_max_dtr = MMC_HIGH_DDR_MAX_DTR;
