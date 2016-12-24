@@ -116,6 +116,8 @@
 #define  BM_SSP_STATUS_CARD_DETECT		(1 << 28)
 #define  BM_SSP_STATUS_SDIO_IRQ			(1 << 17)
 #define  BM_SSP_STATUS_FIFO_EMPTY		(1 << 5)
+#define  BM_SSP_STATUS_CMD_BUSY			(1 << 3)
+#define  BM_SSP_STATUS_BUSY			(1 << 0)
 
 #define BF_SSP(value, field)	(((value) << BP_SSP_##field) & BM_SSP_##field)
 

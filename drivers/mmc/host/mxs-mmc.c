@@ -261,43 +261,42 @@ static void mxs_mmc_bc(struct mxs_mmc_host *host)
 {
 	struct mxs_ssp *ssp = &host->ssp;
 	struct mmc_command *cmd = host->cmd;
-	struct dma_async_tx_descriptor *desc;
-	u32 ctrl0, cmd0, cmd1;
+	u32 ctrl0, cmd0, cmd1, ctrl1;
 
 	ctrl0 = BM_SSP_CTRL0_ENABLE | BM_SSP_CTRL0_IGNORE_CRC;
 	cmd0 = BF_SSP(cmd->opcode, CMD0_CMD) | BM_SSP_CMD0_APPEND_8CYC;
 	cmd1 = cmd->arg;
+	ctrl1 = BM_SSP_CTRL1_DMA_ENABLE;
 
 	if (host->sdio_irq_en) {
 		ctrl0 |= BM_SSP_CTRL0_SDIO_IRQ_CHECK;
 		cmd0 |= BM_SSP_CMD0_CONT_CLKING_EN | BM_SSP_CMD0_SLOW_CLKING_EN;
 	}
 
-	ssp->ssp_pio_words[0] = ctrl0;
-	ssp->ssp_pio_words[1] = cmd0;
-	ssp->ssp_pio_words[2] = cmd1;
-	ssp->dma_dir = DMA_NONE;
-	ssp->slave_dirn = DMA_TRANS_NONE;
-	desc = mxs_mmc_prep_dma(host, DMA_CTRL_ACK);
-	if (!desc)
-		goto out;
+	writel(ctrl0, ssp->base + HW_SSP_CTRL0);
+	writel(cmd0, ssp->base + HW_SSP_CMD0);
+	writel(cmd1, ssp->base + HW_SSP_CMD1);
+	writel(ctrl1, ssp->base + HW_SSP_CTRL1(ssp) + STMP_OFFSET_REG_CLR);
 
-	dmaengine_submit(desc);
-	dma_async_issue_pending(ssp->dmach);
-	return;
+	writel(BM_SSP_CTRL0_RUN, ssp->base + HW_SSP_CTRL0 + STMP_OFFSET_REG_SET);
 
-out:
-	dev_warn(mmc_dev(host->mmc),
-		 "%s: failed to prep dma\n", __func__);
+	while (readl(ssp->base + HW_SSP_CTRL0) & BM_SSP_CTRL0_RUN)
+		cpu_relax();
+
+	while (readl(ssp->base + HW_SSP_STATUS(ssp)) & BM_SSP_STATUS_BUSY)
+		cpu_relax();
+
+	writel(ctrl1, ssp->base + HW_SSP_CTRL1(ssp) + STMP_OFFSET_REG_SET);
+
+	mxs_mmc_request_done(host);
 }
 
 static void mxs_mmc_ac(struct mxs_mmc_host *host)
 {
 	struct mxs_ssp *ssp = &host->ssp;
 	struct mmc_command *cmd = host->cmd;
-	struct dma_async_tx_descriptor *desc;
 	u32 ignore_crc, get_resp, long_resp;
-	u32 ctrl0, cmd0, cmd1;
+	u32 ctrl0, cmd0, cmd1, ctrl1;
 
 	ignore_crc = (mmc_resp_type(cmd) & MMC_RSP_CRC) ?
 			0 : BM_SSP_CTRL0_IGNORE_CRC;
@@ -309,6 +308,7 @@ static void mxs_mmc_ac(struct mxs_mmc_host *host)
 	ctrl0 = BM_SSP_CTRL0_ENABLE | ignore_crc | get_resp | long_resp;
 	cmd0 = BF_SSP(cmd->opcode, CMD0_CMD);
 	cmd1 = cmd->arg;
+	ctrl1 = BM_SSP_CTRL1_DMA_ENABLE;
 
 	if (cmd->opcode == MMC_STOP_TRANSMISSION)
 		cmd0 |= BM_SSP_CMD0_APPEND_8CYC;
@@ -318,22 +318,22 @@ static void mxs_mmc_ac(struct mxs_mmc_host *host)
 		cmd0 |= BM_SSP_CMD0_CONT_CLKING_EN | BM_SSP_CMD0_SLOW_CLKING_EN;
 	}
 
-	ssp->ssp_pio_words[0] = ctrl0;
-	ssp->ssp_pio_words[1] = cmd0;
-	ssp->ssp_pio_words[2] = cmd1;
-	ssp->dma_dir = DMA_NONE;
-	ssp->slave_dirn = DMA_TRANS_NONE;
-	desc = mxs_mmc_prep_dma(host, DMA_CTRL_ACK);
-	if (!desc)
-		goto out;
+	writel(ctrl0, ssp->base + HW_SSP_CTRL0);
+	writel(cmd0, ssp->base + HW_SSP_CMD0);
+	writel(cmd1, ssp->base + HW_SSP_CMD1);
+	writel(ctrl1, ssp->base + HW_SSP_CTRL1(ssp) + STMP_OFFSET_REG_CLR);
 
-	dmaengine_submit(desc);
-	dma_async_issue_pending(ssp->dmach);
-	return;
+	writel(BM_SSP_CTRL0_RUN, ssp->base + HW_SSP_CTRL0 + STMP_OFFSET_REG_SET);
 
-out:
-	dev_warn(mmc_dev(host->mmc),
-		 "%s: failed to prep dma\n", __func__);
+	while (readl(ssp->base + HW_SSP_CTRL0) & BM_SSP_CTRL0_RUN)
+		cpu_relax();
+
+	while (readl(ssp->base + HW_SSP_STATUS(ssp)) & BM_SSP_STATUS_BUSY)
+		cpu_relax();
+
+	writel(ctrl1, ssp->base + HW_SSP_CTRL1(ssp) + STMP_OFFSET_REG_SET);
+
+	mxs_mmc_request_done(host);
 }
 
 static unsigned short mxs_ns_to_ssp_ticks(unsigned clock_rate, unsigned ns)
