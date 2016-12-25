@@ -26,6 +26,8 @@
 					&mmc0_cd_cfg &mmc0_sck_cfg>;
 				bus-width = <4>;
 				vmmc-supply = <&reg_3p3v>;
+				disable-wp;
+				no-sdio;
 				status = "okay";
 			};
 
