@@ -565,12 +565,21 @@ static void mxs_mmc_enable_sdio_irq(struct mmc_host *mmc, int enable)
 
 }
 
+static int mxs_mmc_card_busy(struct mmc_host *mmc)
+{
+	struct mxs_mmc_host *host = mmc_priv(mmc);
+	struct mxs_ssp *ssp = &host->ssp;
+
+	return readl(ssp->base + HW_SSP_STATUS(ssp)) & BM_SSP_STATUS_BUSY;
+}
+
 static const struct mmc_host_ops mxs_mmc_ops = {
 	.request = mxs_mmc_request,
 	.get_ro = mmc_gpio_get_ro,
 	.get_cd = mxs_mmc_get_cd,
 	.set_ios = mxs_mmc_set_ios,
 	.enable_sdio_irq = mxs_mmc_enable_sdio_irq,
+	.card_busy = mxs_mmc_card_busy,
 };
 
 static const struct platform_device_id mxs_ssp_ids[] = {
