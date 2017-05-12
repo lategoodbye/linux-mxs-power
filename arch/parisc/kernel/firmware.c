@@ -1308,6 +1308,28 @@ int pdc_pat_cpu_get_number(struct pdc_pat_cpu_num *cpu_info, unsigned long hpa)
 }
 
 /**
+ * pdc_pat_cpu_stop_cpu - Stop current cpu.
+ * @hpa: The Hard Physical Address of the CPU which should be informed when
+ *       current cpu has stopped.
+ * @hpa_vec: Mask of interrupts which should be signalled on CPU at @hpa.
+ *
+ * Stop the CPU in which the call is made. Flushes caches and purges TLB and
+ * places CPU in a firmware loop. If the CPU is the last in a cell, an
+ * interrupt message is sent to the CPU at @hpa.
+ */
+int pdc_pat_cpu_stop_cpu(unsigned long hpa, unsigned long hpa_vec)
+{
+	int retval;
+	unsigned long flags;
+
+	spin_lock_irqsave(&pdc_lock, flags);
+	retval = mem_pdc_call(PDC_PAT_CPU, PDC_PAT_CPU_STOP, hpa, hpa_vec);
+	spin_unlock_irqrestore(&pdc_lock, flags);
+
+	return retval;
+}
+
+/**
  * pdc_pat_get_irt_size - Retrieve the number of entries in the cell's interrupt table.
  * @num_entries: The return value.
  * @cell_num: The target cell.

@@ -58,6 +58,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/assembly.h>
 #include <asm/pdc.h>
+#include <asm/pdcpat.h>
 #include <asm/pdc_chassis.h>
 #include <asm/pgalloc.h>
 #include <asm/unwind.h>
@@ -116,6 +117,19 @@ void machine_halt(void)
 	** The LED/ChassisCodes are updated by the led_halt()
 	** function, called by the reboot notifier chain.
 	*/
+
+	/* prevent soft lockup/stalled CPU messages for endless loop. */
+	rcu_sysrq_start();
+
+	/* stop all CPUs but the current one. */
+	smp_send_stop();
+
+	/* stop current CPU if possible. */
+	if (is_pdc_pat())
+		pdc_pat_cpu_stop_cpu(0, 0);
+
+	/* wait until power down. */
+	while (1) ;
 }
 
 void (*chassis_power_off)(void);
@@ -143,9 +157,7 @@ void machine_power_off(void)
 	printk(KERN_EMERG "System shut down completed.\n"
 	       "Please power this system off now.");
 
-	/* prevent soft lockup/stalled CPU messages for endless loop. */
-	rcu_sysrq_start();
-	for (;;);
+	machine_halt();
 }
 
 void (*pm_power_off)(void) = machine_power_off;
