@@ -523,7 +523,7 @@ static struct kvm_memslots *kvm_alloc_memslots(void)
 	int i;
 	struct kvm_memslots *slots;
 
-	slots = kvm_kvzalloc(sizeof(struct kvm_memslots));
+	slots = kvzalloc(sizeof(struct kvm_memslots), GFP_KERNEL);
 	if (!slots)
 		return NULL;
 
@@ -708,18 +708,6 @@ out_err_no_disable:
 	return ERR_PTR(r);
 }
 
-/*
- * Avoid using vmalloc for a small buffer.
- * Should not be used when the size is statically known.
- */
-void *kvm_kvzalloc(unsigned long size)
-{
-	if (size > PAGE_SIZE)
-		return vzalloc(size);
-	else
-		return kzalloc(size, GFP_KERNEL);
-}
-
 static void kvm_destroy_devices(struct kvm *kvm)
 {
 	struct kvm_device *dev, *tmp;
@@ -801,7 +789,7 @@ static int kvm_create_dirty_bitmap(struct kvm_memory_slot *memslot)
 {
 	unsigned long dirty_bytes = 2 * kvm_dirty_bitmap_bytes(memslot);
 
-	memslot->dirty_bitmap = kvm_kvzalloc(dirty_bytes);
+	memslot->dirty_bitmap = kvzalloc(dirty_bytes, GFP_KERNEL);
 	if (!memslot->dirty_bitmap)
 		return -ENOMEM;
 
@@ -1027,7 +1015,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 			goto out_free;
 	}
 
-	slots = kvm_kvzalloc(sizeof(struct kvm_memslots));
+	slots = kvzalloc(sizeof(struct kvm_memslots), GFP_KERNEL);
 	if (!slots)
 		goto out_free;
 	memcpy(slots, __kvm_memslots(kvm, as_id), sizeof(struct kvm_memslots));
@@ -2848,10 +2836,6 @@ static struct kvm_device_ops *kvm_device_ops_table[KVM_DEV_TYPE_MAX] = {
 	[KVM_DEV_TYPE_FSL_MPIC_20]	= &kvm_mpic_ops,
 	[KVM_DEV_TYPE_FSL_MPIC_42]	= &kvm_mpic_ops,
 #endif
-
-#ifdef CONFIG_KVM_XICS
-	[KVM_DEV_TYPE_XICS]		= &kvm_xics_ops,
-#endif
 };
 
 int kvm_register_device_ops(struct kvm_device_ops *ops, u32 type)
@@ -3727,7 +3711,7 @@ static const struct file_operations vm_stat_get_per_vm_fops = {
 	.release = kvm_debugfs_release,
 	.read    = simple_attr_read,
 	.write   = simple_attr_write,
-	.llseek  = generic_file_llseek,
+	.llseek  = no_llseek,
 };
 
 static int vcpu_stat_get_per_vm(void *data, u64 *val)
@@ -3772,7 +3756,7 @@ static const struct file_operations vcpu_stat_get_per_vm_fops = {
 	.release = kvm_debugfs_release,
 	.read    = simple_attr_read,
 	.write   = simple_attr_write,
-	.llseek  = generic_file_llseek,
+	.llseek  = no_llseek,
 };
 
 static const struct file_operations *stat_fops_per_vm[] = {
