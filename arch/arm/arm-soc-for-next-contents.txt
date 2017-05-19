@@ -15,3 +15,21 @@ fixes
 		tee: add ARM_SMCCC dependency
 	<no branch> (2ea659a9ef488125eb46da6eb571de5eae5c43f6)
 		Merge tag 'v4.12-rc1' into fixes
+		contains next/tee
+	patch
+		devicetree: Move include prefixes from arch to separate directory
+	<no branch> (b155f05dc578299557447a6fd6545ebc72c1d19b)
+		http://github.com/Broadcom/stblinux tags/arm-soc/for-4.12/devicetree-fixes
+	<no branch> (31d848aa1d85530770f0bdf1b61a042335d340ad)
+		http://github.com/Broadcom/stblinux tags/arm-soc/for-4.12/drivers-fixes
+	patch
+		ARM: configs: add a gemini defconfig
+		arm64: defconfig: sync with savedefconfig
+		arm64: defconfig: enable options needed for QCom DB410c board
+	<no branch> (e23c7f7d57831fdae444be9d507e67716ab601d4)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-4.12
+	<no branch> (bca5238816939436d72ae6bab124c4b0641a3a99)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v4.12/fixes-v2-signed
+	patch
+		ARM: remove duplicate 'const' annotations'
+		firmware: ti_sci: fix strncat length check
