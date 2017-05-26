@@ -33,3 +33,4 @@ fixes
 	patch
 		ARM: remove duplicate 'const' annotations'
 		firmware: ti_sci: fix strncat length check
+		ARM: dts: keystone-k2l: fix broken Ethernet due to disabled OSR
