@@ -1092,8 +1092,8 @@ noinline void __init arc_ioc_setup(void)
 	if (read_aux_reg(ARC_REG_SLC_BCR))
 		slc_entire_op(OP_FLUSH_N_INV);
 
-	/* IOC Aperture start: TDB: handle non default CONFIG_LINUX_LINK_BASE */
-	write_aux_reg(ARC_REG_IO_COH_AP0_BASE, 0x80000);
+	/* IOC Aperture start */
+	write_aux_reg(ARC_REG_IO_COH_AP0_BASE, CONFIG_LINUX_LINK_BASE >> 12);
 
 	/*
 	 * IOC Aperture size:
