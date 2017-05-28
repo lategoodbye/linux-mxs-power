@@ -68,3 +68,17 @@ ENTRY(res_service)
 
 	j	stext
 END(res_service)
+
+#ifdef CONFIG_EZNPS_MEM_ERROR
+ENTRY(mem_service)
+	; SW workaround to cover up on a difference between
+	; NPS real chip and simulator behaviors.
+	; NPS real chip will activate a machine check exception
+	; in case of memory error, while the simulator will
+	; trigger a level 2 interrupt. Therefor this code section
+	; should be reached only in simulation mode.
+	; DEAD END: display Regs and HALT
+
+	j EV_MachineCheck
+END(mem_service)
+#endif

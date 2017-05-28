@@ -200,8 +200,9 @@ END(handle_interrupt_level2)
 ; ---------------------------------------------
 ; User Mode Memory Bus Error Interrupt Handler
 ; (Kernel mode memory errors handled via separate exception vectors)
+; Platforms can override this weak version if needed
 ; ---------------------------------------------
-ENTRY(mem_service)
+WEAK(mem_service)
 
 	INTERRUPT_PROLOGUE 2
 

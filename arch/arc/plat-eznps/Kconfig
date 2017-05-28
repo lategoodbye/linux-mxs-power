@@ -32,3 +32,15 @@ config EZNPS_MTM_EXT
 	  any of them seem like CPU from Linux point of view.
 	  All threads within same core share the execution unit of the
 	  core and HW scheduler round robin between them.
+
+config EZNPS_MEM_ERROR
+       bool "ARC-EZchip Memory error as an exception"
+       depends on ARC_PLAT_EZNPS
+       default n
+       help
+	  Enable this for NPS Silicon (not simulator)
+	  On the real chip of the NPS, user memory errors are handled
+	  as a machine check exception, whereas on simulator platform
+	  for NPS, it handled as an interrupt level 2 (like legacy arc
+	  real chip architecture).This configuration will cause the kernel
+	  to handle memory error as a machine check exception.
