@@ -731,8 +731,10 @@ static int __init calibrate_APIC_clock(void)
 					TICK_NSEC, lapic_clockevent.shift);
 		lapic_clockevent.max_delta_ns =
 			clockevent_delta2ns(0x7FFFFF, &lapic_clockevent);
+		lapic_clockevent.max_delta_ticks = 0x7FFFFF;
 		lapic_clockevent.min_delta_ns =
 			clockevent_delta2ns(0xF, &lapic_clockevent);
+		lapic_clockevent.min_delta_ticks = 0xF;
 		lapic_clockevent.features &= ~CLOCK_EVT_FEAT_DUMMY;
 		return 0;
 	}
@@ -778,8 +780,10 @@ static int __init calibrate_APIC_clock(void)
 				       lapic_clockevent.shift);
 	lapic_clockevent.max_delta_ns =
 		clockevent_delta2ns(0x7FFFFFFF, &lapic_clockevent);
+	lapic_clockevent.max_delta_ticks = 0x7FFFFFFF;
 	lapic_clockevent.min_delta_ns =
 		clockevent_delta2ns(0xF, &lapic_clockevent);
+	lapic_clockevent.min_delta_ticks = 0xF;
 
 	lapic_timer_frequency = (delta * APIC_DIVISOR) / LAPIC_CAL_LOOPS;
 
@@ -1789,8 +1793,8 @@ void __init init_apic_mappings(void)
 		apic_phys = mp_lapic_addr;
 
 		/*
-		 * acpi lapic path already maps that address in
-		 * acpi_register_lapic_address()
+		 * If the system has ACPI MADT tables or MP info, the LAPIC
+		 * address is already registered.
 		 */
 		if (!acpi_lapic && !smp_found_config)
 			register_lapic_address(apic_phys);
@@ -2063,7 +2067,7 @@ static int allocate_logical_cpuid(int apicid)
 	return nr_logical_cpuids++;
 }
 
-int __generic_processor_info(int apicid, int version, bool enabled)
+int generic_processor_info(int apicid, int version)
 {
 	int cpu, max = nr_cpu_ids;
 	bool boot_cpu_detected = physid_isset(boot_cpu_physical_apicid,
@@ -2121,11 +2125,9 @@ int __generic_processor_info(int apicid, int version, bool enabled)
 	if (num_processors >= nr_cpu_ids) {
 		int thiscpu = max + disabled_cpus;
 
-		if (enabled) {
-			pr_warning("APIC: NR_CPUS/possible_cpus limit of %i "
-				   "reached. Processor %d/0x%x ignored.\n",
-				   max, thiscpu, apicid);
-		}
+		pr_warning("APIC: NR_CPUS/possible_cpus limit of %i "
+			   "reached. Processor %d/0x%x ignored.\n",
+			   max, thiscpu, apicid);
 
 		disabled_cpus++;
 		return -EINVAL;
@@ -2177,21 +2179,11 @@ int __generic_processor_info(int apicid, int version, bool enabled)
 		apic->x86_32_early_logical_apicid(cpu);
 #endif
 	set_cpu_possible(cpu, true);
-
-	if (enabled) {
-		num_processors++;
-		physid_set(apicid, phys_cpu_present_map);
-		set_cpu_present(cpu, true);
-	} else {
-		disabled_cpus++;
-	}
+	physid_set(apicid, phys_cpu_present_map);
+	set_cpu_present(cpu, true);
+	num_processors++;
 
 	return cpu;
-}
-
-int generic_processor_info(int apicid, int version)
-{
-	return __generic_processor_info(apicid, version, true);
 }
 
 int hard_smp_processor_id(void)
@@ -2249,7 +2241,7 @@ void __init apic_set_eoi_write(void (*eoi_write)(u32 reg, u32 v))
 static void __init apic_bsp_up_setup(void)
 {
 #ifdef CONFIG_X86_64
-	apic_write(APIC_ID, SET_APIC_ID(boot_cpu_physical_apicid));
+	apic_write(APIC_ID, apic->set_apic_id(boot_cpu_physical_apicid));
 #else
 	/*
 	 * Hack: In case of kdump, after a crash, kernel might be booting
@@ -2639,7 +2631,7 @@ static int __init lapic_insert_resource(void)
 }
 
 /*
- * need call insert after e820_reserve_resources()
+ * need call insert after e820__reserve_resources()
  * that is using request_resource
  */
 late_initcall(lapic_insert_resource);
