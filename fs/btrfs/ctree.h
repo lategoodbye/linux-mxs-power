@@ -3038,6 +3038,8 @@ struct btrfs_dir_item *btrfs_match_dir_item_name(struct btrfs_fs_info *fs_info,
 						 struct btrfs_path *path,
 						 const char *name,
 						 int name_len);
+bool btrfs_is_namelen_valid(struct extent_buffer *leaf, int slot,
+			    unsigned long start, u16 namelen);
 
 /* orphan.c */
 int btrfs_insert_orphan_item(struct btrfs_trans_handle *trans,
