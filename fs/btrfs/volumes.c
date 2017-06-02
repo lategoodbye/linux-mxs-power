@@ -6257,7 +6257,6 @@ int btrfs_map_bio(struct btrfs_fs_info *fs_info, struct bio *bio,
 
 		if (dev_nr < total_devs - 1) {
 			bio = btrfs_bio_clone(first_bio, GFP_NOFS);
-			BUG_ON(!bio); /* -ENOMEM */
 		} else
 			bio = first_bio;
 
