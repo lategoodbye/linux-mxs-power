@@ -1,36 +1,43 @@
 fixes
+	<no branch> (95d7c1f18bf8ac03b0fc48eac1f1b11f867765b8)
+		git://git.kernel.org/pub/scm/linux/kernel/git/nsekhar/linux-davinci tags/davinci-fixes-for-v4.12
 	patch
-		ARM: omap2+: make omap4_get_cpu1_ns_pa_addr declaration usable
-	<no branch> (1c0803652d82b9a62980886e019c9f70576028a5)
-		https://github.com/mbgg/linux-mediatek tags/v4.11-next-fixes
-	<no branch> (7b4ccb3c466f62bbf2f4dd5d6a143d945a6f3051)
-		https://git.kernel.org/pub/scm/linux/kernel/git/horms/renesas tags/renesas-fixes-for-v4.12
-	<no branch> (6a680783aaadd168557eec695374929ac066536f)
-		git://git.infradead.org/linux-mvebu tags/mvebu-dt64-4.12-3
-	<no branch> (d2718d1365f7fce624fd7ed163f60532f92ed016)
-		git://git.infradead.org/linux-mvebu tags/mvebu-arm64-4.12-1
-	tee/initial-merge
-		Merge branch 'tee/initial-merge' into fixes
+		arm64: defconfig: enable some core options for 64bit Rockchip socs
+	<no branch> (6c0c57ac0951a3166f318b82055b6e60eeaada14)
+		http://github.com/Broadcom/stblinux tags/arm-soc/for-4.12/devicetree-fixes-2
+	<no branch> (1c005f9c129201121ef90bde57c374a4403ccfa6)
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-fixes-4.12
 	patch
-		tee: add ARM_SMCCC dependency
-	<no branch> (2ea659a9ef488125eb46da6eb571de5eae5c43f6)
-		Merge tag 'v4.12-rc1' into fixes
-		contains next/tee
-	patch
-		devicetree: Move include prefixes from arch to separate directory
-	<no branch> (b155f05dc578299557447a6fd6545ebc72c1d19b)
-		http://github.com/Broadcom/stblinux tags/arm-soc/for-4.12/devicetree-fixes
-	<no branch> (31d848aa1d85530770f0bdf1b61a042335d340ad)
-		http://github.com/Broadcom/stblinux tags/arm-soc/for-4.12/drivers-fixes
-	patch
-		ARM: configs: add a gemini defconfig
-		arm64: defconfig: sync with savedefconfig
-		arm64: defconfig: enable options needed for QCom DB410c board
-	<no branch> (e23c7f7d57831fdae444be9d507e67716ab601d4)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-4.12
-	<no branch> (bca5238816939436d72ae6bab124c4b0641a3a99)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v4.12/fixes-v2-signed
-	patch
-		ARM: remove duplicate 'const' annotations'
-		firmware: ti_sci: fix strncat length check
 		ARM: dts: keystone-k2l: fix broken Ethernet due to disabled OSR
+		ARM: dts: versatile: use #include "..." to include local DT
+	<no branch> (cc7a938f5f308eeb6f8fe3cec28e1800aa81facb)
+		git://git.kernel.org/pub/scm/linux/kernel/git/abelloni/linux tags/at91-4.12-fixes
+	<no branch> (4497a224f759cd8350e07382307b55f870ef0df2)
+		git://git.pengutronix.de/git/pza/linux tags/reset-fixes-for-4.12
+	patch
+		MAINTAINERS: remove kernel@stlinux.com obsolete mailing list
+	<no branch> (44f73dc42c11398d7b84e94365a485ebd6420798)
+		git://git.infradead.org/linux-mvebu tags/mvebu-fixes-4.12-1
+	<no branch> (1cb0b57fec06a616d98deaeda1924f8e45e1e4de)
+		git://git.infradead.org/linux-mvebu tags/mvebu-fixes-non-critical-4.12-1
+	<no branch> (f434b1c4aba5cc4e5bae4399a965b5fd14011d69)
+		git://git.kernel.org/pub/scm/linux/kernel/git/nsekhar/linux-davinci tags/davinci-fixes-for-v4.12-p2
+
+next/fixes-non-critical
+
+next/cleanup
+
+next/soc
+
+next/arm64
+
+next/dt
+
+next/dt64
+
+next/defconfig
+
+next/drivers
+
+next/tee
+
