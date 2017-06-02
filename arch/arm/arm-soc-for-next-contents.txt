@@ -30,10 +30,26 @@ next/cleanup
 next/soc
 
 next/arm64
+	patch
+		arm64: disable Broadcom Vulcan platform
+		arm64: defconfig: drop ARCH_VULCAN
+	realtek/arm64
+		git://github.com/afaerber/linux tags/realtek-arm64-soc-for-4.12
 
 next/dt
+	renesas/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/horms/renesas tags/renesas-dt-for-v4.13
+		contains depends/renesas-dt-bindings
+	gemeni/dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/gemini-v4.13-dts-1
+	patch
+		ARM: dts: augment Moxa and Aspeed DTS for FTTMR010
 
 next/dt64
+	renesas/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/horms/renesas tags/renesas-arm64-dt-for-v4.13
+	realtek/dt64
+		git://github.com/afaerber/linux tags/realtek-arm64-dt-for-4.12
 
 next/defconfig
 
