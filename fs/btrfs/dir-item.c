@@ -493,6 +493,7 @@ int verify_dir_item(struct btrfs_fs_info *fs_info,
 	return 0;
 }
 
+#define btrfs_leaf_data(x)	BTRFS_LEAF_DATA_OFFSET
 bool btrfs_is_namelen_valid(struct extent_buffer *leaf, int slot,
 			    unsigned long start, u16 namelen)
 {
