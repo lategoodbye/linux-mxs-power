@@ -8189,6 +8189,7 @@ static int __btrfs_subio_endio_read(struct inode *inode,
 	int nr_sectors;
 	unsigned int pgoff;
 	int csum_pos;
+	int uptodate = !!(err == 0);
 	int ret;
 
 	fs_info = BTRFS_I(inode)->root->fs_info;
@@ -8204,12 +8205,14 @@ static int __btrfs_subio_endio_read(struct inode *inode,
 
 		pgoff = bvec.bv_offset;
 next_block:
-		csum_pos = BTRFS_BYTES_TO_BLKS(fs_info, offset);
-		ret = __readpage_endio_check(inode, io_bio, csum_pos,
-					bvec.bv_page, pgoff, start,
-					sectorsize);
-		if (likely(!ret))
-			goto next;
+		if (uptodate) {
+			csum_pos = BTRFS_BYTES_TO_BLKS(fs_info, offset);
+			ret = __readpage_endio_check(inode, io_bio, csum_pos,
+						     bvec.bv_page, pgoff,
+						     start, sectorsize);
+			if (likely(!ret))
+				goto next;
+		}
 try_again:
 		done.uptodate = 0;
 		done.start = start;
@@ -8270,8 +8273,11 @@ static void btrfs_endio_direct_read(struct bio *bio)
 	struct btrfs_io_bio *io_bio = btrfs_io_bio(bio);
 	int err = bio->bi_error;
 
-	if (dip->flags & BTRFS_DIO_ORIG_BIO_SUBMITTED)
+	if (dip->flags & BTRFS_DIO_ORIG_BIO_SUBMITTED) {
 		err = btrfs_subio_endio_read(inode, io_bio, err);
+		if (!err)
+			bio->bi_error = 0;
+	}
 
 	unlock_extent(&BTRFS_I(inode)->io_tree, dip->logical_offset,
 		      dip->logical_offset + dip->bytes - 1);
