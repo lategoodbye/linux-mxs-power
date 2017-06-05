@@ -500,30 +500,6 @@ static bool zram_same_page_read(struct zram *zram, u32 index,
 	return false;
 }
 
-static bool zram_same_page_write(struct zram *zram, u32 index,
-					struct page *page)
-{
-	unsigned long element;
-	void *mem = kmap_atomic(page);
-
-	if (page_same_filled(mem, &element)) {
-		kunmap_atomic(mem);
-		/* Free memory associated with this sector now. */
-		zram_slot_lock(zram, index);
-		zram_free_page(zram, index);
-		zram_set_flag(zram, index, ZRAM_SAME);
-		zram_set_element(zram, index, element);
-		zram_slot_unlock(zram, index);
-
-		atomic64_inc(&zram->stats.same_pages);
-		atomic64_inc(&zram->stats.pages_stored);
-		return true;
-	}
-	kunmap_atomic(mem);
-
-	return false;
-}
-
 static struct zram_entry *zram_entry_alloc(struct zram *zram,
 					unsigned int len, gfp_t flags)
 {
@@ -788,28 +764,31 @@ compress_again:
 static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index)
 {
 	int ret;
-	struct zram_entry *entry;
-	unsigned int comp_len;
-	void *src, *dst;
+	struct zram_entry *uninitialized_var(entry);
+	unsigned int uninitialized_var(comp_len);
+	void *src, *dst, *mem;
 	struct zcomp_strm *zstrm;
 	struct page *page = bvec->bv_page;
 	u32 checksum;
+	enum zram_pageflags flags = 0;
+	unsigned long uninitialized_var(element);
 
-	if (zram_same_page_write(zram, index, page))
-		return 0;
+	mem = kmap_atomic(page);
+	if (page_same_filled(mem, &element)) {
+		kunmap_atomic(mem);
+		/* Free memory associated with this sector now. */
+		flags = ZRAM_SAME;
+		atomic64_inc(&zram->stats.same_pages);
+		goto out;
+	}
+	kunmap_atomic(mem);
 
 	entry = zram_dedup_find(zram, page, &checksum);
 	if (entry) {
 		comp_len = entry->len;
-		zram_slot_lock(zram, index);
-		zram_free_page(zram, index);
-		zram_set_flag(zram, index, ZRAM_DUP);
-		zram_set_entry(zram, index, entry);
-		zram_set_obj_size(zram, index, comp_len);
-		zram_slot_unlock(zram, index);
+		flags = ZRAM_DUP;
 		atomic64_add(comp_len, &zram->stats.dup_data_size);
-		atomic64_inc(&zram->stats.pages_stored);
-		return 0;
+		goto out;
 	}
 
 	zstrm = zcomp_stream_get(zram->comp);
@@ -833,19 +812,24 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index)
 	zs_unmap_object(zram->mem_pool, zram_entry_handle(zram, entry));
 	zram_dedup_insert(zram, entry, checksum);
 
+out:
+	zram_slot_lock(zram, index);
 	/*
 	 * Free memory associated with this sector
 	 * before overwriting unused sectors.
 	 */
-	zram_slot_lock(zram, index);
 	zram_free_page(zram, index);
-	zram_set_entry(zram, index, entry);
-	zram_set_obj_size(zram, index, comp_len);
+	if (flags)
+		zram_set_flag(zram, index, flags);
+	if (flags != ZRAM_SAME) {
+		zram_set_obj_size(zram, index, comp_len);
+		zram_set_entry(zram, index, entry);
+	} else {
+		zram_set_element(zram, index, element);
+	}
 	zram_slot_unlock(zram, index);
-
-	/* Update stats */
-	atomic64_add(comp_len, &zram->stats.compr_data_size);
 	atomic64_inc(&zram->stats.pages_stored);
+
 	return 0;
 }
 
