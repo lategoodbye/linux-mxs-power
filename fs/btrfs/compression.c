@@ -42,48 +42,7 @@
 #include "extent_io.h"
 #include "extent_map.h"
 
-struct compressed_bio {
-	/* number of bios pending for this compressed extent */
-	atomic_t pending_bios;
-
-	/* the pages with the compressed data on them */
-	struct page **compressed_pages;
-
-	/* inode that owns this data */
-	struct inode *inode;
-
-	/* starting offset in the inode for our pages */
-	u64 start;
-
-	/* number of bytes in the inode we're working on */
-	unsigned long len;
-
-	/* number of bytes on disk */
-	unsigned long compressed_len;
-
-	/* the compression algorithm for this bio */
-	int compress_type;
-
-	/* number of compressed pages in the array */
-	unsigned long nr_pages;
-
-	/* IO errors */
-	int errors;
-	int mirror_num;
-
-	/* for reads, this is the bio we are copying the data into */
-	struct bio *orig_bio;
-
-	/*
-	 * the start of a variable length array of checksums only
-	 * used by reads
-	 */
-	u32 sums;
-};
-
-static int btrfs_decompress_bio(int type, struct page **pages_in,
-				   u64 disk_start, struct bio *orig_bio,
-				   size_t srclen);
+static int btrfs_decompress_bio(struct compressed_bio *cb);
 
 static inline int compressed_bio_size(struct btrfs_fs_info *fs_info,
 				      unsigned long disk_size)
@@ -161,7 +120,7 @@ static void end_compressed_bio_read(struct bio *bio)
 	/* if there are more bios still pending for this compressed
 	 * extent, just exit
 	 */
-	if (!atomic_dec_and_test(&cb->pending_bios))
+	if (!refcount_dec_and_test(&cb->pending_bios))
 		goto out;
 
 	inode = cb->inode;
@@ -173,11 +132,8 @@ static void end_compressed_bio_read(struct bio *bio)
 	/* ok, we're the last bio for this extent, lets start
 	 * the decompression.
 	 */
-	ret = btrfs_decompress_bio(cb->compress_type,
-				      cb->compressed_pages,
-				      cb->start,
-				      cb->orig_bio,
-				      cb->compressed_len);
+	ret = btrfs_decompress_bio(cb);
+
 csum_failed:
 	if (ret)
 		cb->errors = 1;
@@ -274,7 +230,7 @@ static void end_compressed_bio_write(struct bio *bio)
 	/* if there are more bios still pending for this compressed
 	 * extent, just exit
 	 */
-	if (!atomic_dec_and_test(&cb->pending_bios))
+	if (!refcount_dec_and_test(&cb->pending_bios))
 		goto out;
 
 	/* ok, we're the last bio for this extent, step one is to
@@ -342,7 +298,7 @@ int btrfs_submit_compressed_write(struct inode *inode, u64 start,
 	cb = kmalloc(compressed_bio_size(fs_info, compressed_len), GFP_NOFS);
 	if (!cb)
 		return -ENOMEM;
-	atomic_set(&cb->pending_bios, 0);
+	refcount_set(&cb->pending_bios, 0);
 	cb->errors = 0;
 	cb->inode = inode;
 	cb->start = start;
@@ -363,7 +319,7 @@ int btrfs_submit_compressed_write(struct inode *inode, u64 start,
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	bio->bi_private = cb;
 	bio->bi_end_io = end_compressed_bio_write;
-	atomic_inc(&cb->pending_bios);
+	refcount_set(&cb->pending_bios, 1);
 
 	/* create and submit bios for the compressed pages */
 	bytes_left = compressed_len;
@@ -388,7 +344,7 @@ int btrfs_submit_compressed_write(struct inode *inode, u64 start,
 			 * we inc the count.  Otherwise, the cb might get
 			 * freed before we're done setting it up
 			 */
-			atomic_inc(&cb->pending_bios);
+			refcount_inc(&cb->pending_bios);
 			ret = btrfs_bio_wq_end_io(fs_info, bio,
 						  BTRFS_WQ_ENDIO_DATA);
 			BUG_ON(ret); /* -ENOMEM */
@@ -607,7 +563,7 @@ int btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 	if (!cb)
 		goto out;
 
-	atomic_set(&cb->pending_bios, 0);
+	refcount_set(&cb->pending_bios, 0);
 	cb->errors = 0;
 	cb->inode = inode;
 	cb->mirror_num = mirror_num;
@@ -656,7 +612,7 @@ int btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 	bio_set_op_attrs (comp_bio, REQ_OP_READ, 0);
 	comp_bio->bi_private = cb;
 	comp_bio->bi_end_io = end_compressed_bio_read;
-	atomic_inc(&cb->pending_bios);
+	refcount_set(&cb->pending_bios, 1);
 
 	for (pg_index = 0; pg_index < nr_pages; pg_index++) {
 		page = cb->compressed_pages[pg_index];
@@ -685,7 +641,7 @@ int btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 			 * we inc the count.  Otherwise, the cb might get
 			 * freed before we're done setting it up
 			 */
-			atomic_inc(&cb->pending_bios);
+			refcount_inc(&cb->pending_bios);
 
 			if (!(BTRFS_I(inode)->flags & BTRFS_INODE_NODATASUM)) {
 				ret = btrfs_lookup_bio_sums(inode, comp_bio,
@@ -961,19 +917,16 @@ int btrfs_compress_pages(int type, struct address_space *mapping,
  * be contiguous.  They all correspond to the range of bytes covered by
  * the compressed extent.
  */
-static int btrfs_decompress_bio(int type, struct page **pages_in,
-				   u64 disk_start, struct bio *orig_bio,
-				   size_t srclen)
+static int btrfs_decompress_bio(struct compressed_bio *cb)
 {
 	struct list_head *workspace;
 	int ret;
+	int type = cb->compress_type;
 
 	workspace = find_workspace(type);
-
-	ret = btrfs_compress_op[type-1]->decompress_bio(workspace, pages_in,
-							 disk_start, orig_bio,
-							 srclen);
+	ret = btrfs_compress_op[type - 1]->decompress_bio(workspace, cb);
 	free_workspace(type, workspace);
+
 	return ret;
 }
 

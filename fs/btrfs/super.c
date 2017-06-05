@@ -1136,6 +1136,13 @@ static int btrfs_fill_super(struct super_block *sb,
 #endif
 	sb->s_flags |= MS_I_VERSION;
 	sb->s_iflags |= SB_I_CGROUPWB;
+
+	err = super_setup_bdi(sb);
+	if (err) {
+		btrfs_err(fs_info, "super_setup_bdi failed");
+		return err;
+	}
+
 	err = open_ctree(sb, fs_devices, (char *)data);
 	if (err) {
 		btrfs_err(fs_info, "open_ctree failed");
@@ -1788,8 +1795,7 @@ static int btrfs_remount(struct super_block *sb, int *flags, char *data)
 		}
 
 		if (fs_info->fs_devices->missing_devices >
-		     fs_info->num_tolerated_disk_barrier_failures &&
-		    !(*flags & MS_RDONLY)) {
+		     fs_info->num_tolerated_disk_barrier_failures) {
 			btrfs_warn(fs_info,
 				"too many missing devices, writeable remount is not allowed");
 			ret = -EACCES;
@@ -1892,7 +1898,6 @@ static inline void btrfs_descending_sort_devices(
 static int btrfs_calc_avail_data_space(struct btrfs_fs_info *fs_info,
 				       u64 *free_bytes)
 {
-	struct btrfs_root *root = fs_info->tree_root;
 	struct btrfs_device_info *devices_info;
 	struct btrfs_fs_devices *fs_devices = fs_info->fs_devices;
 	struct btrfs_device *device;
@@ -1926,7 +1931,7 @@ static int btrfs_calc_avail_data_space(struct btrfs_fs_info *fs_info,
 		return -ENOMEM;
 
 	/* calc min stripe number for data space allocation */
-	type = btrfs_get_alloc_profile(root, 1);
+	type = btrfs_data_alloc_profile(fs_info);
 	if (type & BTRFS_BLOCK_GROUP_RAID0) {
 		min_stripes = 2;
 		num_stripes = nr_devices;
