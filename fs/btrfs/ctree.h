@@ -3032,12 +3032,14 @@ struct btrfs_dir_item *btrfs_lookup_xattr(struct btrfs_trans_handle *trans,
 					  const char *name, u16 name_len,
 					  int mod);
 int verify_dir_item(struct btrfs_fs_info *fs_info,
-		    struct extent_buffer *leaf,
+		    struct extent_buffer *leaf, int slot,
 		    struct btrfs_dir_item *dir_item);
 struct btrfs_dir_item *btrfs_match_dir_item_name(struct btrfs_fs_info *fs_info,
 						 struct btrfs_path *path,
 						 const char *name,
 						 int name_len);
+bool btrfs_is_namelen_valid(struct extent_buffer *leaf, int slot,
+			    unsigned long start, u16 namelen);
 
 /* orphan.c */
 int btrfs_insert_orphan_item(struct btrfs_trans_handle *trans,
