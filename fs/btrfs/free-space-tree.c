@@ -167,8 +167,7 @@ static u8 *alloc_bitmap(u32 bitmap_size)
 	if (mem)
 		return mem;
 
-	return __vmalloc(bitmap_size, GFP_NOFS | __GFP_HIGHMEM | __GFP_ZERO,
-			 PAGE_KERNEL);
+	return __vmalloc(bitmap_size, GFP_NOFS | __GFP_ZERO, PAGE_KERNEL);
 }
 
 int convert_free_space_to_bitmaps(struct btrfs_trans_handle *trans,
@@ -1189,11 +1188,7 @@ int btrfs_create_free_space_tree(struct btrfs_fs_info *fs_info)
 	btrfs_set_fs_compat_ro(fs_info, FREE_SPACE_TREE_VALID);
 	clear_bit(BTRFS_FS_CREATING_FREE_SPACE_TREE, &fs_info->flags);
 
-	ret = btrfs_commit_transaction(trans);
-	if (ret)
-		return ret;
-
-	return 0;
+	return btrfs_commit_transaction(trans);
 
 abort:
 	clear_bit(BTRFS_FS_CREATING_FREE_SPACE_TREE, &fs_info->flags);
@@ -1278,11 +1273,7 @@ int btrfs_clear_free_space_tree(struct btrfs_fs_info *fs_info)
 	free_extent_buffer(free_space_root->commit_root);
 	kfree(free_space_root);
 
-	ret = btrfs_commit_transaction(trans);
-	if (ret)
-		return ret;
-
-	return 0;
+	return btrfs_commit_transaction(trans);
 
 abort:
 	btrfs_abort_transaction(trans, ret);
