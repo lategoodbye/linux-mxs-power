@@ -624,15 +624,22 @@ static void zram_free_page(struct zram *zram, size_t index)
 		return;
 	}
 
+	if (zram_dedup_enabled(zram) &&
+			zram_test_flag(zram, index, ZRAM_DUP)) {
+		zram_clear_flag(zram, index, ZRAM_DUP);
+		atomic64_sub(entry->len, &zram->stats.dup_data_size);
+		goto out;
+	}
+
 	if (!entry)
 		return;
 
-	zram_entry_free(zram, entry);
-
 	atomic64_sub(zram_get_obj_size(zram, index),
 			&zram->stats.compr_data_size);
-	atomic64_dec(&zram->stats.pages_stored);
+out:
+	zram_entry_free(zram, entry);
 
+	atomic64_dec(&zram->stats.pages_stored);
 	zram_set_entry(zram, index, NULL);
 	zram_set_obj_size(zram, index, 0);
 }
@@ -794,7 +801,15 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index)
 	entry = zram_dedup_find(zram, page, &checksum);
 	if (entry) {
 		comp_len = entry->len;
-		goto found_dup;
+		zram_slot_lock(zram, index);
+		zram_free_page(zram, index);
+		zram_set_flag(zram, index, ZRAM_DUP);
+		zram_set_entry(zram, index, entry);
+		zram_set_obj_size(zram, index, comp_len);
+		zram_slot_unlock(zram, index);
+		atomic64_add(comp_len, &zram->stats.dup_data_size);
+		atomic64_inc(&zram->stats.pages_stored);
+		return 0;
 	}
 
 	zstrm = zcomp_stream_get(zram->comp);
@@ -818,7 +833,6 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index)
 	zs_unmap_object(zram->mem_pool, zram_entry_handle(zram, entry));
 	zram_dedup_insert(zram, entry, checksum);
 
-found_dup:
 	/*
 	 * Free memory associated with this sector
 	 * before overwriting unused sectors.

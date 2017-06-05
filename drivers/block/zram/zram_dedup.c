@@ -101,9 +101,6 @@ static unsigned long zram_dedup_put(struct zram *zram,
 	entry->refcount--;
 	if (!entry->refcount)
 		rb_erase(&entry->rb_node, &hash->rb_root);
-	else
-		atomic64_sub(entry->len, &zram->stats.dup_data_size);
-
 	spin_unlock(&hash->lock);
 
 	return entry->refcount;
@@ -127,7 +124,6 @@ static struct zram_entry *__zram_dedup_get(struct zram *zram,
 
 again:
 	entry->refcount++;
-	atomic64_add(entry->len, &zram->stats.dup_data_size);
 	spin_unlock(&hash->lock);
 
 	if (prev)
