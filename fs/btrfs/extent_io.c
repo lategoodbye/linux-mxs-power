@@ -1988,8 +1988,6 @@ int repair_io_failure(struct btrfs_fs_info *fs_info, u64 ino, u64 start,
 	BUG_ON(!mirror_num);
 
 	bio = btrfs_io_bio_alloc(GFP_NOFS, 1);
-	if (!bio)
-		return -EIO;
 	bio->bi_iter.bi_size = 0;
 	map_length = length;
 
@@ -2334,9 +2332,6 @@ struct bio *btrfs_create_repair_bio(struct inode *inode, struct bio *failed_bio,
 	struct btrfs_io_bio *btrfs_bio;
 
 	bio = btrfs_io_bio_alloc(GFP_NOFS, 1);
-	if (!bio)
-		return NULL;
-
 	bio->bi_end_io = endio_func;
 	bio->bi_iter.bi_sector = failrec->logical >> 9;
 	bio->bi_bdev = fs_info->fs_devices->latest_bdev;
@@ -2659,64 +2654,50 @@ readpage_ok:
 }
 
 /*
- * this allocates from the btrfs_bioset.  We're returning a bio right now
- * but you can call btrfs_io_bio for the appropriate container_of magic
+ * The following helpers allocate a bio. As it's backed by a bioset, it'll
+ * never fail.  We're returning a bio right now but you can call btrfs_io_bio
+ * for the appropriate container_of magic
  */
-struct bio *
-btrfs_bio_alloc(struct block_device *bdev, u64 first_sector, int nr_vecs,
-		gfp_t gfp_flags)
+struct bio *btrfs_bio_alloc(struct block_device *bdev, u64 first_byte)
 {
 	struct btrfs_io_bio *btrfs_bio;
 	struct bio *bio;
 
-	bio = bio_alloc_bioset(gfp_flags, nr_vecs, btrfs_bioset);
-
-	if (bio == NULL && (current->flags & PF_MEMALLOC)) {
-		while (!bio && (nr_vecs /= 2)) {
-			bio = bio_alloc_bioset(gfp_flags,
-					       nr_vecs, btrfs_bioset);
-		}
-	}
-
-	if (bio) {
-		bio->bi_bdev = bdev;
-		bio->bi_iter.bi_sector = first_sector;
-		btrfs_bio = btrfs_io_bio(bio);
-		btrfs_bio->csum = NULL;
-		btrfs_bio->csum_allocated = NULL;
-		btrfs_bio->end_io = NULL;
-	}
+	bio = bio_alloc_bioset(GFP_NOFS, BIO_MAX_PAGES, btrfs_bioset);
+	bio->bi_bdev = bdev;
+	bio->bi_iter.bi_sector = first_byte >> 9;
+	btrfs_bio = btrfs_io_bio(bio);
+	btrfs_bio->csum = NULL;
+	btrfs_bio->csum_allocated = NULL;
+	btrfs_bio->end_io = NULL;
 	return bio;
 }
 
-struct bio *btrfs_bio_clone(struct bio *bio, gfp_t gfp_mask)
+struct bio *btrfs_bio_clone(struct bio *bio)
 {
 	struct btrfs_io_bio *btrfs_bio;
 	struct bio *new;
 
-	new = bio_clone_fast(bio, gfp_mask, btrfs_bioset);
-	if (new) {
-		btrfs_bio = btrfs_io_bio(new);
-		btrfs_bio->csum = NULL;
-		btrfs_bio->csum_allocated = NULL;
-		btrfs_bio->end_io = NULL;
-	}
+	/* Bio allocation backed by a bioset does not fail */
+	new = bio_clone_fast(bio, GFP_NOFS, btrfs_bioset);
+	btrfs_bio = btrfs_io_bio(new);
+	btrfs_bio->csum = NULL;
+	btrfs_bio->csum_allocated = NULL;
+	btrfs_bio->end_io = NULL;
 	return new;
 }
 
-/* this also allocates from the btrfs_bioset */
 struct bio *btrfs_io_bio_alloc(gfp_t gfp_mask, unsigned int nr_iovecs)
 {
 	struct btrfs_io_bio *btrfs_bio;
 	struct bio *bio;
 
+	/* Bio allocation backed by a bioset does not fail */
 	bio = bio_alloc_bioset(gfp_mask, nr_iovecs, btrfs_bioset);
-	if (bio) {
-		btrfs_bio = btrfs_io_bio(bio);
-		btrfs_bio->csum = NULL;
-		btrfs_bio->csum_allocated = NULL;
-		btrfs_bio->end_io = NULL;
-	}
+	btrfs_bio = btrfs_io_bio(bio);
+	btrfs_bio->csum = NULL;
+	btrfs_bio->csum_allocated = NULL;
+	btrfs_bio->end_io = NULL;
 	return bio;
 }
 
@@ -2817,11 +2798,7 @@ static int submit_extent_page(int op, int op_flags, struct extent_io_tree *tree,
 		}
 	}
 
-	bio = btrfs_bio_alloc(bdev, sector, BIO_MAX_PAGES,
-			GFP_NOFS | __GFP_HIGH);
-	if (!bio)
-		return -ENOMEM;
-
+	bio = btrfs_bio_alloc(bdev, sector << 9);
 	bio_add_page(bio, page, page_size, offset);
 	bio->bi_end_io = end_io_func;
 	bio->bi_private = tree;
