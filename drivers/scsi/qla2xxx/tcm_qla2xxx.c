@@ -595,7 +595,7 @@ static int tcm_qla2xxx_dif_tags(struct qla_tgt_cmd *cmd,
 /*
  * Called from qla_target.c:qlt_issue_task_mgmt()
  */
-static int tcm_qla2xxx_handle_tmr(struct qla_tgt_mgmt_cmd *mcmd, uint32_t lun,
+static int tcm_qla2xxx_handle_tmr(struct qla_tgt_mgmt_cmd *mcmd, u64 lun,
 	uint16_t tmr_func, uint32_t tag)
 {
 	struct fc_port *sess = mcmd->sess;
@@ -686,6 +686,19 @@ static int tcm_qla2xxx_queue_status(struct se_cmd *se_cmd)
 				struct qla_tgt_cmd, se_cmd);
 	int xmit_type = QLA_TGT_XMIT_STATUS;
 
+	if (cmd->aborted) {
+		/*
+		 * Cmd can loop during Q-full. tcm_qla2xxx_aborted_task
+		 * can get ahead of this cmd. tcm_qla2xxx_aborted_task
+		 * already kick start the free.
+		 */
+		pr_debug(
+		    "queue_data_in aborted cmd[%p] refcount %d transport_state %x, t_state %x, se_cmd_flags %x\n",
+		    cmd, kref_read(&cmd->se_cmd.cmd_kref),
+		    cmd->se_cmd.transport_state, cmd->se_cmd.t_state,
+		    cmd->se_cmd.se_cmd_flags);
+		return 0;
+	}
 	cmd->bufflen = se_cmd->data_length;
 	cmd->sg = NULL;
 	cmd->sg_cnt = 0;
