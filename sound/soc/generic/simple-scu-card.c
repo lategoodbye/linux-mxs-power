@@ -189,11 +189,6 @@ static int asoc_simple_card_dai_link_of(struct device_node *np,
 	dai_link->ops			= &asoc_simple_card_ops;
 	dai_link->init			= asoc_simple_card_dai_init;
 
-	dev_dbg(dev, "\t%s / %04x / %d\n",
-		dai_link->name,
-		dai_link->dai_fmt,
-		dai_props->sysclk);
-
 	return 0;
 }
 
@@ -246,8 +241,6 @@ static int asoc_simple_card_parse_of(struct device_node *node,
 	if (ret < 0)
 		return ret;
 
-	dev_dbg(dev, "New card: %s\n",
-		card->name ? card->name : "");
 	dev_dbg(dev, "convert_rate     %d\n", priv->convert_rate);
 	dev_dbg(dev, "convert_channels %d\n", priv->convert_channels);
 
@@ -298,8 +291,10 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 	snd_soc_card_set_drvdata(card, priv);
 
 	ret = devm_snd_soc_register_card(dev, card);
-	if (ret >= 0)
-		return ret;
+	if (ret < 0)
+		goto err;
+
+	return 0;
 err:
 	asoc_simple_card_clean_reference(card);
 
