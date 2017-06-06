@@ -13,6 +13,10 @@
 #include <linux/tick.h>
 #include <linux/workqueue.h>
 
+#include "posix-timers.h"
+
+static void posix_cpu_timer_rearm(struct k_itimer *timer);
+
 /*
  * Called after updating RLIMIT_CPU to run cpu timer and update
  * tsk->signal->cputime_expires expiration cache if necessary. Needs
@@ -322,6 +326,8 @@ static int posix_cpu_timer_create(struct k_itimer *new_timer)
 	if (CPUCLOCK_WHICH(new_timer->it_clock) >= CPUCLOCK_MAX)
 		return -EINVAL;
 
+	new_timer->kclock = &clock_posix_cpu;
+
 	INIT_LIST_HEAD(&new_timer->it.cpu.entry);
 
 	rcu_read_lock();
@@ -524,7 +530,8 @@ static void cpu_timer_fire(struct k_itimer *timer)
 		 * reload the timer.  But we need to keep it
 		 * ticking in case the signal is deliverable next time.
 		 */
-		posix_cpu_timer_schedule(timer);
+		posix_cpu_timer_rearm(timer);
+		++timer->it_requeue_pending;
 	}
 }
 
@@ -712,10 +719,8 @@ static void posix_cpu_timer_get(struct k_itimer *timer, struct itimerspec64 *itp
 	 */
 	itp->it_interval = ns_to_timespec64(timer->it.cpu.incr);
 
-	if (timer->it.cpu.expires == 0) {	/* Timer not armed at all.  */
-		itp->it_value.tv_sec = itp->it_value.tv_nsec = 0;
+	if (!timer->it.cpu.expires)
 		return;
-	}
 
 	/*
 	 * Sample the clock to take the difference with the expiry time.
@@ -739,7 +744,6 @@ static void posix_cpu_timer_get(struct k_itimer *timer, struct itimerspec64 *itp
 			 * Call the timer disarmed, nothing else to do.
 			 */
 			timer->it.cpu.expires = 0;
-			itp->it_value = ns_to_timespec64(timer->it.cpu.expires);
 			return;
 		} else {
 			cpu_timer_sample_group(timer->it_clock, p, &now);
@@ -976,10 +980,10 @@ static void check_process_timers(struct task_struct *tsk,
 }
 
 /*
- * This is called from the signal code (via do_schedule_next_timer)
+ * This is called from the signal code (via posixtimer_rearm)
  * when the last timer signal was delivered and we have to reload the timer.
  */
-void posix_cpu_timer_schedule(struct k_itimer *timer)
+static void posix_cpu_timer_rearm(struct k_itimer *timer)
 {
 	struct sighand_struct *sighand;
 	unsigned long flags;
@@ -995,12 +999,12 @@ void posix_cpu_timer_schedule(struct k_itimer *timer)
 		cpu_clock_sample(timer->it_clock, p, &now);
 		bump_cpu_timer(timer, now);
 		if (unlikely(p->exit_state))
-			goto out;
+			return;
 
 		/* Protect timer list r/w in arm_timer() */
 		sighand = lock_task_sighand(p, &flags);
 		if (!sighand)
-			goto out;
+			return;
 	} else {
 		/*
 		 * Protect arm_timer() and timer sampling in case of call to
@@ -1013,11 +1017,10 @@ void posix_cpu_timer_schedule(struct k_itimer *timer)
 			 * We can't even collect a sample any more.
 			 */
 			timer->it.cpu.expires = 0;
-			goto out;
+			return;
 		} else if (unlikely(p->exit_state) && thread_group_empty(p)) {
-			unlock_task_sighand(p, &flags);
-			/* Optimizations: if the process is dying, no need to rearm */
-			goto out;
+			/* If the process is dying, no need to rearm */
+			goto unlock;
 		}
 		cpu_timer_sample_group(timer->it_clock, p, &now);
 		bump_cpu_timer(timer, now);
@@ -1029,12 +1032,8 @@ void posix_cpu_timer_schedule(struct k_itimer *timer)
 	 */
 	WARN_ON_ONCE(!irqs_disabled());
 	arm_timer(timer);
+unlock:
 	unlock_task_sighand(p, &flags);
-
-out:
-	timer->it_overrun_last = timer->it_overrun;
-	timer->it_overrun = -1;
-	++timer->it_requeue_pending;
 }
 
 /**
@@ -1421,7 +1420,7 @@ static int thread_cpu_timer_create(struct k_itimer *timer)
 	return posix_cpu_timer_create(timer);
 }
 
-struct k_clock clock_posix_cpu = {
+const struct k_clock clock_posix_cpu = {
 	.clock_getres	= posix_cpu_clock_getres,
 	.clock_set	= posix_cpu_clock_set,
 	.clock_get	= posix_cpu_clock_get,
@@ -1431,26 +1430,19 @@ struct k_clock clock_posix_cpu = {
 	.timer_set	= posix_cpu_timer_set,
 	.timer_del	= posix_cpu_timer_del,
 	.timer_get	= posix_cpu_timer_get,
+	.timer_rearm	= posix_cpu_timer_rearm,
 };
 
-static __init int init_posix_cpu_timers(void)
-{
-	struct k_clock process = {
-		.clock_getres	= process_cpu_clock_getres,
-		.clock_get	= process_cpu_clock_get,
-		.timer_create	= process_cpu_timer_create,
-		.nsleep		= process_cpu_nsleep,
-		.nsleep_restart	= process_cpu_nsleep_restart,
-	};
-	struct k_clock thread = {
-		.clock_getres	= thread_cpu_clock_getres,
-		.clock_get	= thread_cpu_clock_get,
-		.timer_create	= thread_cpu_timer_create,
-	};
+const struct k_clock clock_process = {
+	.clock_getres	= process_cpu_clock_getres,
+	.clock_get	= process_cpu_clock_get,
+	.timer_create	= process_cpu_timer_create,
+	.nsleep		= process_cpu_nsleep,
+	.nsleep_restart	= process_cpu_nsleep_restart,
+};
 
-	posix_timers_register_clock(CLOCK_PROCESS_CPUTIME_ID, &process);
-	posix_timers_register_clock(CLOCK_THREAD_CPUTIME_ID, &thread);
-
-	return 0;
-}
-__initcall(init_posix_cpu_timers);
+const struct k_clock clock_thread = {
+	.clock_getres	= thread_cpu_clock_getres,
+	.clock_get	= thread_cpu_clock_get,
+	.timer_create	= thread_cpu_timer_create,
+};
