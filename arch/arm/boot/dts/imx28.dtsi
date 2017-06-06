@@ -58,6 +58,19 @@
 		};
 	};
 
+	ahb@0 {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		reg = <0x0 0x80000000>;
+		ranges;
+
+		ocram: sram@0 {
+			compatible = "mmio-sram";
+			reg = <0x0 0x20000>;
+		};
+	};
+
 	apb@80000000 {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -980,6 +993,12 @@
 				status = "disabled";
 			};
 
+			emi: emi@80020000 {
+				compatible = "fsl,imx28-emi";
+				reg = <0x80020000 0x2000>;
+				status = "disabled";
+			};
+
 			etm: etm@80022000 {
 				reg = <0x80022000 0x2000>;
 				status = "disabled";
@@ -1299,6 +1318,12 @@
 
 		dflpt: dflpt@800c0000 {
 			reg = <0x800c0000 0x10000>;
+			status = "disabled";
+		};
+
+		dram: dram@800e0000 {
+			compatible = "fsl,imx28-dram";
+			reg = <0x800e0000 0x10000>;
 			status = "disabled";
 		};
 
