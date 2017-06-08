@@ -636,11 +636,11 @@ ctnetlink_conntrack_event(unsigned int events, struct nf_ct_event *item)
 	if (events & (1 << IPCT_DESTROY)) {
 		type = IPCTNL_MSG_CT_DELETE;
 		group = NFNLGRP_CONNTRACK_DESTROY;
-	} else  if (events & ((1 << IPCT_NEW) | (1 << IPCT_RELATED))) {
+	} else if (events & ((1 << IPCT_NEW) | (1 << IPCT_RELATED))) {
 		type = IPCTNL_MSG_CT_NEW;
 		flags = NLM_F_CREATE|NLM_F_EXCL;
 		group = NFNLGRP_CONNTRACK_NEW;
-	} else  if (events) {
+	} else if (events) {
 		type = IPCTNL_MSG_CT_NEW;
 		group = NFNLGRP_CONNTRACK_UPDATE;
 	} else
@@ -1122,8 +1122,8 @@ static int ctnetlink_flush_conntrack(struct net *net,
 			return PTR_ERR(filter);
 	}
 
-	nf_ct_iterate_cleanup(net, ctnetlink_filter_match, filter,
-			      portid, report);
+	nf_ct_iterate_cleanup_net(net, ctnetlink_filter_match, filter,
+				  portid, report);
 	kfree(filter);
 
 	return 0;
