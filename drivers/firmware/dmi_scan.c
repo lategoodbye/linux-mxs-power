@@ -144,7 +144,7 @@ static int __init dmi_walk_early(void (*decode)(const struct dmi_header *,
 
 	buf = dmi_early_remap(dmi_base, orig_dmi_len);
 	if (buf == NULL)
-		return -1;
+		return -ENOMEM;
 
 	dmi_decode_table(buf, decode, NULL);
 
@@ -650,6 +650,21 @@ void __init dmi_scan_machine(void)
 			goto error;
 
 		/*
+		 * Same logic as above, look for a 64-bit entry point
+		 * first, and if not found, fall back to 32-bit entry point.
+		 */
+		memcpy_fromio(buf, p, 16);
+		for (q = p + 16; q < p + 0x10000; q += 16) {
+			memcpy_fromio(buf + 16, q, 16);
+			if (!dmi_smbios3_present(buf)) {
+				dmi_available = 1;
+				dmi_early_unmap(p, 0x10000);
+				goto out;
+			}
+			memcpy(buf, buf + 16, 16);
+		}
+
+		/*
 		 * Iterate over all possible DMI header addresses q.
 		 * Maintain the 32 bytes around q in buf.  On the
 		 * first iteration, substitute zero for the
@@ -659,7 +674,7 @@ void __init dmi_scan_machine(void)
 		memset(buf, 0, 16);
 		for (q = p; q < p + 0x10000; q += 16) {
 			memcpy_fromio(buf + 16, q, 16);
-			if (!dmi_smbios3_present(buf) || !dmi_present(buf)) {
+			if (!dmi_present(buf)) {
 				dmi_available = 1;
 				dmi_early_unmap(p, 0x10000);
 				goto out;
@@ -993,7 +1008,8 @@ EXPORT_SYMBOL(dmi_get_date);
  *	@decode: Callback function
  *	@private_data: Private data to be passed to the callback function
  *
- *	Returns -1 when the DMI table can't be reached, 0 on success.
+ *	Returns 0 on success, -ENXIO if DMI is not selected or not present,
+ *	or a different negative error code if DMI walking fails.
  */
 int dmi_walk(void (*decode)(const struct dmi_header *, void *),
 	     void *private_data)
@@ -1001,11 +1017,11 @@ int dmi_walk(void (*decode)(const struct dmi_header *, void *),
 	u8 *buf;
 
 	if (!dmi_available)
-		return -1;
+		return -ENXIO;
 
 	buf = dmi_remap(dmi_base, dmi_len);
 	if (buf == NULL)
-		return -1;
+		return -ENOMEM;
 
 	dmi_decode_table(buf, decode, private_data);
 
