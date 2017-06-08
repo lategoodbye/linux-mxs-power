@@ -17,6 +17,7 @@ config ARCH_MXS
 	depends on ARCH_MULTI_V5
 	select GPIOLIB
 	select MXS_TIMER
+	select MFD_SYSCON
 	select PINCTRL
 	select SOC_BUS
 	select SOC_IMX23
