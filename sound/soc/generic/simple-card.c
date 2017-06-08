@@ -233,13 +233,19 @@ static int asoc_simple_card_dai_link_of(struct device_node *node,
 	snprintf(prop, sizeof(prop), "%scpu", prefix);
 	cpu = of_get_child_by_name(node, prop);
 
+	if (!cpu) {
+		ret = -EINVAL;
+		dev_err(dev, "%s: Can't find %s DT node\n", __func__, prop);
+		goto dai_link_of_err;
+	}
+
 	snprintf(prop, sizeof(prop), "%splat", prefix);
 	plat = of_get_child_by_name(node, prop);
 
 	snprintf(prop, sizeof(prop), "%scodec", prefix);
 	codec = of_get_child_by_name(node, prop);
 
-	if (!cpu || !codec) {
+	if (!codec) {
 		ret = -EINVAL;
 		dev_err(dev, "%s: Can't find %s DT node\n", __func__, prop);
 		goto dai_link_of_err;
@@ -300,15 +306,6 @@ static int asoc_simple_card_dai_link_of(struct device_node *node,
 
 	dai_link->ops = &asoc_simple_card_ops;
 	dai_link->init = asoc_simple_card_dai_init;
-
-	dev_dbg(dev, "\tname : %s\n", dai_link->stream_name);
-	dev_dbg(dev, "\tformat : %04x\n", dai_link->dai_fmt);
-	dev_dbg(dev, "\tcpu : %s / %d\n",
-		dai_link->cpu_dai_name,
-		dai_props->cpu_dai.sysclk);
-	dev_dbg(dev, "\tcodec : %s / %d\n",
-		dai_link->codec_dai_name,
-		dai_props->codec_dai.sysclk);
 
 	asoc_simple_card_canonicalize_cpu(dai_link, single_cpu);
 
@@ -497,8 +494,10 @@ static int asoc_simple_card_probe(struct platform_device *pdev)
 	snd_soc_card_set_drvdata(card, priv);
 
 	ret = devm_snd_soc_register_card(dev, card);
-	if (ret >= 0)
-		return ret;
+	if (ret < 0)
+		goto err;
+
+	return 0;
 err:
 	asoc_simple_card_clean_reference(card);
 
