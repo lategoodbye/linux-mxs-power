@@ -3381,9 +3381,8 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 			sh->dev[i].sector + STRIPE_SECTORS) {
 			struct bio *nextbi = r5_next_bio(bi, sh->dev[i].sector);
 
-			bi->bi_error = -EIO;
 			md_write_end(conf->mddev);
-			bio_endio(bi);
+			bio_io_error(bi);
 			bi = nextbi;
 		}
 		if (bitmap_end)
@@ -3403,9 +3402,8 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 		       sh->dev[i].sector + STRIPE_SECTORS) {
 			struct bio *bi2 = r5_next_bio(bi, sh->dev[i].sector);
 
-			bi->bi_error = -EIO;
 			md_write_end(conf->mddev);
-			bio_endio(bi);
+			bio_io_error(bi);
 			bi = bi2;
 		}
 
@@ -3429,8 +3427,7 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 				struct bio *nextbi =
 					r5_next_bio(bi, sh->dev[i].sector);
 
-				bi->bi_error = -EIO;
-				bio_endio(bi);
+				bio_io_error(bi);
 				bi = nextbi;
 			}
 		}
@@ -5479,7 +5476,6 @@ static void make_discard_request(struct mddev *mddev, struct bio *bi)
 	last_sector = bi->bi_iter.bi_sector + (bi->bi_iter.bi_size>>9);
 
 	bi->bi_next = NULL;
-	md_write_start(mddev, bi);
 
 	stripe_sectors = conf->chunk_sectors *
 		(conf->raid_disks - conf->max_degraded);
@@ -5549,11 +5545,10 @@ static void make_discard_request(struct mddev *mddev, struct bio *bi)
 		release_stripe_plug(mddev, sh);
 	}
 
-	md_write_end(mddev);
 	bio_endio(bi);
 }
 
-static void raid5_make_request(struct mddev *mddev, struct bio * bi)
+static bool raid5_make_request(struct mddev *mddev, struct bio * bi)
 {
 	struct r5conf *conf = mddev->private;
 	int dd_idx;
@@ -5569,10 +5564,10 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 		int ret = r5l_handle_flush_request(conf->log, bi);
 
 		if (ret == 0)
-			return;
+			return true;
 		if (ret == -ENODEV) {
 			md_flush_request(mddev, bi);
-			return;
+			return true;
 		}
 		/* ret == -EAGAIN, fallback */
 		/*
@@ -5582,6 +5577,8 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 		do_flush = bi->bi_opf & REQ_PREFLUSH;
 	}
 
+	if (!md_write_start(mddev, bi))
+		return false;
 	/*
 	 * If array is degraded, better not do chunk aligned read because
 	 * later we might have to read it again in order to reconstruct
@@ -5591,18 +5588,18 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 	    mddev->reshape_position == MaxSector) {
 		bi = chunk_aligned_read(mddev, bi);
 		if (!bi)
-			return;
+			return true;
 	}
 
 	if (unlikely(bio_op(bi) == REQ_OP_DISCARD)) {
 		make_discard_request(mddev, bi);
-		return;
+		md_write_end(mddev);
+		return true;
 	}
 
 	logical_sector = bi->bi_iter.bi_sector & ~((sector_t)STRIPE_SECTORS-1);
 	last_sector = bio_end_sector(bi);
 	bi->bi_next = NULL;
-	md_write_start(mddev, bi);
 
 	prepare_to_wait(&conf->wait_for_overlap, &w, TASK_UNINTERRUPTIBLE);
 	for (;logical_sector < last_sector; logical_sector += STRIPE_SECTORS) {
@@ -5740,6 +5737,7 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 	if (rw == WRITE)
 		md_write_end(mddev);
 	bio_endio(bi);
+	return true;
 }
 
 static sector_t raid5_size(struct mddev *mddev, sector_t sectors, int raid_disks);
@@ -7117,6 +7115,9 @@ static int raid5_run(struct mddev *mddev)
 	int i;
 	long long min_offset_diff = 0;
 	int first = 1;
+
+	if (mddev_init_writes_pending(mddev) < 0)
+		return -ENOMEM;
 
 	if (mddev->recovery_cp != MaxSector)
 		pr_notice("md/raid:%s: not clean -- starting background reconstruction\n",

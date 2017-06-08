@@ -913,8 +913,7 @@ static void flush_pending_writes(struct r10conf *conf)
 			bio->bi_next = NULL;
 			bio->bi_bdev = rdev->bdev;
 			if (test_bit(Faulty, &rdev->flags)) {
-				bio->bi_error = -EIO;
-				bio_endio(bio);
+				bio_io_error(bio);
 			} else if (unlikely((bio_op(bio) ==  REQ_OP_DISCARD) &&
 					    !blk_queue_discard(bdev_get_queue(bio->bi_bdev))))
 				/* Just ignore it */
@@ -1303,8 +1302,6 @@ static void raid10_write_request(struct mddev *mddev, struct bio *bio,
 	sector_t sectors;
 	int max_sectors;
 
-	md_write_start(mddev, bio);
-
 	/*
 	 * Register the new request and wait if the reconstruction
 	 * thread has put up a bar for new requests.
@@ -1525,7 +1522,7 @@ static void __make_request(struct mddev *mddev, struct bio *bio, int sectors)
 		raid10_write_request(mddev, bio, r10_bio);
 }
 
-static void raid10_make_request(struct mddev *mddev, struct bio *bio)
+static bool raid10_make_request(struct mddev *mddev, struct bio *bio)
 {
 	struct r10conf *conf = mddev->private;
 	sector_t chunk_mask = (conf->geo.chunk_mask & conf->prev.chunk_mask);
@@ -1534,8 +1531,11 @@ static void raid10_make_request(struct mddev *mddev, struct bio *bio)
 
 	if (unlikely(bio->bi_opf & REQ_PREFLUSH)) {
 		md_flush_request(mddev, bio);
-		return;
+		return true;
 	}
+
+	if (!md_write_start(mddev, bio))
+		return false;
 
 	/*
 	 * If this request crosses a chunk boundary, we need to split
@@ -1553,6 +1553,7 @@ static void raid10_make_request(struct mddev *mddev, struct bio *bio)
 
 	/* In case raid10d snuck in to freeze_array */
 	wake_up(&conf->wait_barrier);
+	return true;
 }
 
 static void raid10_status(struct seq_file *seq, struct mddev *mddev)
@@ -3610,6 +3611,9 @@ static int raid10_run(struct mddev *mddev)
 	sector_t min_offset_diff = 0;
 	int first = 1;
 	bool discard_supported = false;
+
+	if (mddev_init_writes_pending(mddev) < 0)
+		return -ENOMEM;
 
 	if (mddev->private == NULL) {
 		conf = setup_conf(mddev);
