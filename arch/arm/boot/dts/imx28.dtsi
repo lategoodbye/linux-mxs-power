@@ -1136,8 +1136,11 @@
 			};
 
 			power: power@80044000 {
+				compatible = "fsl,imx28-power", "syscon";
 				reg = <0x80044000 0x2000>;
-				status = "disabled";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				interrupts = <6>;
 			};
 
 			saif1: saif@80046000 {
