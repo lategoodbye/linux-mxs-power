@@ -504,6 +504,57 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 				interrupts = <3>;
+
+				reg_vddd: regulator@1 {
+					compatible = "fsl,imx23-vddd";
+					reg = <0x1>;
+					regulator-name = "vddd";
+					regulator-min-microvolt = <1050000>;
+					regulator-max-microvolt = <1550000>;
+					vddd-supply = <&reg_vdda>;
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
+				reg_vdda: regulator@2 {
+					compatible = "fsl,imx23-vdda";
+					reg = <0x2>;
+					regulator-name = "vdda";
+					regulator-min-microvolt = <1725000>;
+					regulator-max-microvolt = <1950000>;
+					vdda-supply = <&reg_vddio>;
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
+				reg_vddio: regulator@3 {
+					compatible = "fsl,imx23-vddio";
+					reg = <0x3>;
+					regulator-name = "vddio";
+					regulator-min-microvolt = <3000000>;
+					regulator-max-microvolt = <3575000>;
+					regulator-microvolt-offset = <80000>;
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
+				reg_vddmem: regulator@4 {
+					compatible = "fsl,imx23-vddmem";
+					reg = <0x4>;
+					regulator-name = "vddmem";
+					regulator-min-microvolt = <1700000>;
+					regulator-max-microvolt = <3250000>;
+					regulator-boot-on;
+					regulator-always-on;
+				};
+
+				dcdc: regulator@5 {
+					compatible = "fsl,imx23-dcdc";
+					reg = <0x5>;
+					regulator-name = "dcdc";
+					regulator-boot-on;
+					regulator-always-on;
+				};
 			};
 
 			saif1: saif@80046000 {
