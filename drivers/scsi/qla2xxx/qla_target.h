@@ -426,7 +426,7 @@ struct ctio7_to_24xx {
 		} status0;
 		struct {
 			uint16_t sense_length;
-			uint16_t flags;
+			__le16 flags;
 			uint32_t residual;
 			__le16 ox_id;
 			uint16_t scsi_status;
@@ -675,7 +675,7 @@ struct qla_tgt_func_tmpl {
 	int (*handle_cmd)(struct scsi_qla_host *, struct qla_tgt_cmd *,
 			unsigned char *, uint32_t, int, int, int);
 	void (*handle_data)(struct qla_tgt_cmd *);
-	int (*handle_tmr)(struct qla_tgt_mgmt_cmd *, uint32_t, uint16_t,
+	int (*handle_tmr)(struct qla_tgt_mgmt_cmd *, u64, uint16_t,
 			uint32_t);
 	void (*free_cmd)(struct qla_tgt_cmd *);
 	void (*free_mcmd)(struct qla_tgt_mgmt_cmd *);
@@ -790,7 +790,6 @@ struct qla_tgt {
 	 * because req_pkt() can drop/reaquire HW lock inside. Protected by
 	 * HW lock.
 	 */
-	int irq_cmd_count;
 	int atio_irq_cmd_count;
 
 	int datasegs_per_cmd, datasegs_per_cont, sg_tablesize;
@@ -862,7 +861,6 @@ struct qla_tgt_cmd {
 	struct se_cmd se_cmd;
 	struct fc_port *sess;
 	int state;
-	struct work_struct free_work;
 	struct work_struct work;
 	/* Sense buffer that will be mapped into outgoing status */
 	unsigned char sense_buffer[TRANSPORT_SENSE_BUFFER];
@@ -885,7 +883,7 @@ struct qla_tgt_cmd {
 	int sg_cnt;		/* SG segments count */
 	int bufflen;		/* cmd buffer length */
 	int offset;
-	uint32_t unpacked_lun;
+	u64 unpacked_lun;
 	enum dma_data_direction dma_data_direction;
 	uint32_t reset_count;
 
