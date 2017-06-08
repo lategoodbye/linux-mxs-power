@@ -135,6 +135,7 @@ struct coda_params {
 	u32			vbv_size;
 	u32			slice_max_bits;
 	u32			slice_max_mb;
+	bool			force_ipicture;
 };
 
 struct coda_buffer_meta {
@@ -206,6 +207,9 @@ struct coda_ctx {
 	enum coda_inst_type		inst_type;
 	const struct coda_codec		*codec;
 	enum v4l2_colorspace		colorspace;
+	enum v4l2_xfer_func		xfer_func;
+	enum v4l2_ycbcr_encoding	ycbcr_enc;
+	enum v4l2_quantization		quantization;
 	struct coda_params		params;
 	struct v4l2_ctrl_handler	ctrls;
 	struct v4l2_fh			fh;
