@@ -701,8 +701,6 @@ struct scsi_port_stats {
 
 struct se_lun {
 	u64			unpacked_lun;
-#define SE_LUN_LINK_MAGIC			0xffff7771
-	u32			lun_link_magic;
 	bool			lun_shutdown;
 	bool			lun_access_ro;
 	u32			lun_index;
@@ -746,8 +744,6 @@ struct se_dev_stat_grps {
 };
 
 struct se_device {
-#define SE_DEV_LINK_MAGIC			0xfeeddeef
-	u32			dev_link_magic;
 	/* RELATIVE TARGET PORT IDENTIFER Counter */
 	u16			dev_rpti_counter;
 	/* Used for SAM Task Attribute ordering */
@@ -819,8 +815,6 @@ struct se_device {
 	unsigned char		udev_path[SE_UDEV_PATH_LEN];
 	/* Pointer to template of function pointers for transport */
 	const struct target_backend_ops *transport;
-	/* Linked list for struct se_hba struct se_device list */
-	struct list_head	dev_list;
 	struct se_lun		xcopy_lun;
 	/* Protection Information */
 	int			prot_length;
