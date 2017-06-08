@@ -409,6 +409,7 @@
 			};
 
 			emi@80020000 {
+				compatible = "fsl,imx23-emi";
 				reg = <0x80020000 0x2000>;
 				status = "disabled";
 			};
@@ -618,12 +619,23 @@
 		reg = <0x80080000 0x80000>;
 		ranges;
 
+		ocram: sram@00000000 {
+			compatible = "mmio-sram";
+			reg = <0x00000000 0x8000>;
+		};
+
 		usb0: usb@80080000 {
 			compatible = "fsl,imx23-usb", "fsl,imx27-usb";
 			reg = <0x80080000 0x40000>;
 			interrupts = <11>;
 			fsl,usbphy = <&usbphy0>;
 			clocks = <&clks 40>;
+			status = "disabled";
+		};
+
+		dram: dram@800e0000 {
+			compatible = "fsl,imx23-dram";
+			reg = <0x800e0000 0x10000>;
 			status = "disabled";
 		};
 	};
