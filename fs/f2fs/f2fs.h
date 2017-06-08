@@ -792,17 +792,33 @@ enum page_type {
 	OPU,
 };
 
+enum temp_type {
+	HOT = 0,	/* must be zero for meta bio */
+	WARM,
+	COLD,
+	NR_TEMP_TYPE,
+};
+
+enum need_lock_type {
+	LOCK_REQ = 0,
+	LOCK_DONE,
+	LOCK_RETRY,
+};
+
 struct f2fs_io_info {
 	struct f2fs_sb_info *sbi;	/* f2fs_sb_info pointer */
 	enum page_type type;	/* contains DATA/NODE/META/META_FLUSH */
+	enum temp_type temp;	/* contains HOT/WARM/COLD */
 	int op;			/* contains REQ_OP_ */
 	int op_flags;		/* req_flag_bits */
 	block_t new_blkaddr;	/* new block address to be written */
 	block_t old_blkaddr;	/* old block address before Cow */
 	struct page *page;	/* page to be written */
 	struct page *encrypted_page;	/* encrypted page */
+	struct list_head list;		/* serialize IOs */
 	bool submitted;		/* indicate IO submission */
-	bool need_lock;		/* indicate we need to lock cp_rwsem */
+	int need_lock;		/* indicate we need to lock cp_rwsem */
+	bool in_list;		/* indicate fio is in io_list */
 };
 
 #define is_read_io(rw) ((rw) == READ)
@@ -812,6 +828,8 @@ struct f2fs_bio_info {
 	sector_t last_block_in_bio;	/* last block number */
 	struct f2fs_io_info fio;	/* store buffered io info. */
 	struct rw_semaphore io_rwsem;	/* blocking op for bio */
+	spinlock_t io_lock;		/* serialize DATA/NODE IOs */
+	struct list_head io_list;	/* track fios */
 };
 
 #define FDEV(i)				(sbi->devs[i])
@@ -879,9 +897,9 @@ struct f2fs_sb_info {
 	struct f2fs_sm_info *sm_info;		/* segment manager */
 
 	/* for bio operations */
-	struct f2fs_bio_info read_io;			/* for read bios */
-	struct f2fs_bio_info write_io[NR_PAGE_TYPE];	/* for write bios */
-	struct mutex wio_mutex[NODE + 1];	/* bio ordering for NODE/DATA */
+	struct f2fs_bio_info *write_io[NR_PAGE_TYPE];	/* for write bios */
+	struct mutex wio_mutex[NR_PAGE_TYPE - 1][NR_TEMP_TYPE];
+						/* bio ordering for NODE/DATA */
 	int write_io_size_bits;			/* Write IO size bits */
 	mempool_t *write_io_dummy;		/* Dummy pages */
 
@@ -1270,6 +1288,11 @@ static inline bool enabled_nat_bits(struct f2fs_sb_info *sbi,
 static inline void f2fs_lock_op(struct f2fs_sb_info *sbi)
 {
 	down_read(&sbi->cp_rwsem);
+}
+
+static inline int f2fs_trylock_op(struct f2fs_sb_info *sbi)
+{
+	return down_read_trylock(&sbi->cp_rwsem);
 }
 
 static inline void f2fs_unlock_op(struct f2fs_sb_info *sbi)
@@ -2255,7 +2278,8 @@ void f2fs_replace_block(struct f2fs_sb_info *sbi, struct dnode_of_data *dn,
 			bool recover_newaddr);
 void allocate_data_block(struct f2fs_sb_info *sbi, struct page *page,
 			block_t old_blkaddr, block_t *new_blkaddr,
-			struct f2fs_summary *sum, int type);
+			struct f2fs_summary *sum, int type,
+			struct f2fs_io_info *fio, bool add_list);
 void f2fs_wait_on_page_writeback(struct page *page,
 			enum page_type type, bool ordered);
 void f2fs_wait_on_encrypted_page_writeback(struct f2fs_sb_info *sbi,
@@ -2305,14 +2329,13 @@ void destroy_checkpoint_caches(void);
 /*
  * data.c
  */
-void f2fs_submit_merged_bio(struct f2fs_sb_info *sbi, enum page_type type,
-			int rw);
-void f2fs_submit_merged_bio_cond(struct f2fs_sb_info *sbi,
+void f2fs_submit_merged_write(struct f2fs_sb_info *sbi, enum page_type type);
+void f2fs_submit_merged_write_cond(struct f2fs_sb_info *sbi,
 				struct inode *inode, nid_t ino, pgoff_t idx,
-				enum page_type type, int rw);
-void f2fs_flush_merged_bios(struct f2fs_sb_info *sbi);
+				enum page_type type);
+void f2fs_flush_merged_writes(struct f2fs_sb_info *sbi);
 int f2fs_submit_page_bio(struct f2fs_io_info *fio);
-int f2fs_submit_page_mbio(struct f2fs_io_info *fio);
+int f2fs_submit_page_write(struct f2fs_io_info *fio);
 struct block_device *f2fs_target_device(struct f2fs_sb_info *sbi,
 			block_t blk_addr, struct bio *bio);
 int f2fs_target_device_index(struct f2fs_sb_info *sbi, block_t blkaddr);
