@@ -593,6 +593,14 @@
 					regulator-boot-on;
 					regulator-always-on;
 				};
+
+				pswitch: pswitch@6 {
+					compatible = "fsl,imx23-pswitch";
+					reg = <0x6>;
+					linux,code = <116>;
+					interrupts = <3>;
+					status = "disabled";
+				};
 			};
 
 			saif1: saif@80046000 {
