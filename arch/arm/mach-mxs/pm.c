@@ -347,4 +347,5 @@ void __init mxs_pm_init(void)
 				__func__, ret);
 	}
 
+	platform_device_register_simple("cpufreq-dt", -1, NULL, 0);
 }
