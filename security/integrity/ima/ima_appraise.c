@@ -20,16 +20,28 @@
 
 static int __init default_appraise_setup(char *str)
 {
+#ifdef CONFIG_IMA_APPRAISE_BOOTPARAM
 	if (strncmp(str, "off", 3) == 0)
 		ima_appraise = 0;
 	else if (strncmp(str, "log", 3) == 0)
 		ima_appraise = IMA_APPRAISE_LOG;
 	else if (strncmp(str, "fix", 3) == 0)
 		ima_appraise = IMA_APPRAISE_FIX;
+#endif
 	return 1;
 }
 
 __setup("ima_appraise=", default_appraise_setup);
+
+/*
+ * is_ima_appraise_enabled - return appraise status
+ *
+ * Only return enabled, if not in ima_appraise="fix" or "log" modes.
+ */
+bool is_ima_appraise_enabled(void)
+{
+	return (ima_appraise & IMA_APPRAISE_ENFORCE) ? 1 : 0;
+}
 
 /*
  * ima_must_appraise - set appraise flag
