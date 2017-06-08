@@ -43,6 +43,15 @@ config MAX8925_POWER
 	  Say Y here to enable support for the battery charger in the Maxim
 	  MAX8925 PMIC.
 
+config MXS_POWER
+	tristate "Freescale MXS power subsystem support"
+	depends on ARCH_MXS || COMPILE_TEST
+	select MXS_LRADC_ADC
+	help
+	  Say Y here to enable support for the Freescale i.MX23/i.MX28
+	  power subsystem. This is a requirement to get access to on-chip
+	  regulators, battery charger and many more.
+
 config WM831X_BACKUP
 	tristate "WM831X backup battery charger support"
 	depends on MFD_WM831X
