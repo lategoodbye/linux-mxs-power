@@ -58,10 +58,8 @@ static inline bool i915_mmio_reg_valid(i915_reg_t reg)
 #define _MMIO_TRANS(tran, a, b) _MMIO(_TRANS(tran, a, b))
 #define _PORT(port, a, b) ((a) + (port)*((b)-(a)))
 #define _MMIO_PORT(port, a, b) _MMIO(_PORT(port, a, b))
-#define _PIPE3(pipe, ...) _PICK(pipe, __VA_ARGS__)
-#define _MMIO_PIPE3(pipe, a, b, c) _MMIO(_PIPE3(pipe, a, b, c))
-#define _PORT3(port, ...) _PICK(port, __VA_ARGS__)
-#define _MMIO_PORT3(pipe, a, b, c) _MMIO(_PORT3(pipe, a, b, c))
+#define _MMIO_PIPE3(pipe, a, b, c) _MMIO(_PICK(pipe, a, b, c))
+#define _MMIO_PORT3(pipe, a, b, c) _MMIO(_PICK(pipe, a, b, c))
 #define _PHY3(phy, ...) _PICK(phy, __VA_ARGS__)
 #define _MMIO_PHY3(phy, a, b, c) _MMIO(_PHY3(phy, a, b, c))
 
@@ -1065,6 +1063,7 @@ enum skl_disp_power_wells {
 	SKL_DISP_PW_MISC_IO,
 	SKL_DISP_PW_DDI_A_E,
 	GLK_DISP_PW_DDI_A = SKL_DISP_PW_DDI_A_E,
+	CNL_DISP_PW_DDI_A = SKL_DISP_PW_DDI_A_E,
 	SKL_DISP_PW_DDI_B,
 	SKL_DISP_PW_DDI_C,
 	SKL_DISP_PW_DDI_D,
@@ -1072,6 +1071,10 @@ enum skl_disp_power_wells {
 	GLK_DISP_PW_AUX_A = 8,
 	GLK_DISP_PW_AUX_B,
 	GLK_DISP_PW_AUX_C,
+	CNL_DISP_PW_AUX_A = GLK_DISP_PW_AUX_A,
+	CNL_DISP_PW_AUX_B = GLK_DISP_PW_AUX_B,
+	CNL_DISP_PW_AUX_C = GLK_DISP_PW_AUX_C,
+	CNL_DISP_PW_AUX_D,
 
 	SKL_DISP_PW_1 = 14,
 	SKL_DISP_PW_2,
@@ -2507,10 +2510,6 @@ enum skl_disp_power_wells {
 #define FBC_FENCE_OFF		_MMIO(0x3218) /* BSpec typo has 321Bh */
 #define FBC_TAG(i)		_MMIO(0x3300 + (i) * 4)
 
-#define FBC_STATUS2			_MMIO(0x43214)
-#define  IVB_FBC_COMPRESSION_MASK	0x7ff
-#define  BDW_FBC_COMPRESSION_MASK	0xfff
-
 #define FBC_LL_SIZE		(1536)
 
 #define FBC_LLC_READ_CTRL	_MMIO(0x9044)
@@ -2539,7 +2538,7 @@ enum skl_disp_power_wells {
 #define   DPFC_INVAL_SEG_SHIFT  (16)
 #define   DPFC_INVAL_SEG_MASK	(0x07ff0000)
 #define   DPFC_COMP_SEG_SHIFT	(0)
-#define   DPFC_COMP_SEG_MASK	(0x000003ff)
+#define   DPFC_COMP_SEG_MASK	(0x000007ff)
 #define DPFC_STATUS2		_MMIO(0x3214)
 #define DPFC_FENCE_YOFF		_MMIO(0x3218)
 #define DPFC_CHICKEN		_MMIO(0x3224)
@@ -2553,6 +2552,10 @@ enum skl_disp_power_wells {
 #define   DPFC_RESERVED		(0x1FFFFF00)
 #define ILK_DPFC_RECOMP_CTL	_MMIO(0x4320c)
 #define ILK_DPFC_STATUS		_MMIO(0x43210)
+#define  ILK_DPFC_COMP_SEG_MASK	0x7ff
+#define IVB_FBC_STATUS2		_MMIO(0x43214)
+#define  IVB_FBC_COMP_SEG_MASK	0x7ff
+#define  BDW_FBC_COMP_SEG_MASK	0xfff
 #define ILK_DPFC_FENCE_YOFF	_MMIO(0x43218)
 #define ILK_DPFC_CHICKEN	_MMIO(0x43224)
 #define   ILK_DPFC_DISABLE_DUMMY0 (1<<8)
@@ -2626,9 +2629,10 @@ enum skl_disp_power_wells {
 #define   GMBUS_PIN_DPB		5 /* SDVO, HDMIB */
 #define   GMBUS_PIN_DPD		6 /* HDMID */
 #define   GMBUS_PIN_RESERVED	7 /* 7 reserved */
-#define   GMBUS_PIN_1_BXT	1
+#define   GMBUS_PIN_1_BXT	1 /* BXT+ (atom) and CNP+ (big core) */
 #define   GMBUS_PIN_2_BXT	2
 #define   GMBUS_PIN_3_BXT	3
+#define   GMBUS_PIN_4_CNP	4
 #define   GMBUS_NUM_PINS	7 /* including 0 */
 #define GMBUS1			_MMIO(dev_priv->gpio_mmio_base + 0x5104) /* command/status */
 #define   GMBUS_SW_CLR_INT	(1<<31)
@@ -6838,6 +6842,10 @@ enum {
 #define  FDL_TP2_TIMER_SHIFT    10
 #define  FDL_TP2_TIMER_MASK     (3<<10)
 #define  RAWCLK_FREQ_MASK       0x3ff
+#define  CNP_RAWCLK_DIV_MASK	(0x3ff << 16)
+#define  CNP_RAWCLK_DIV(div)	((div) << 16)
+#define  CNP_RAWCLK_FRAC_MASK	(0xf << 26)
+#define  CNP_RAWCLK_FRAC(frac)	((frac) << 26)
 
 #define PCH_DPLL_TMR_CFG        _MMIO(0xc6208)
 
@@ -7792,13 +7800,6 @@ enum {
 #define  SKL_FUSE_PG1_DIST_STATUS              (1<<26)
 #define  SKL_FUSE_PG2_DIST_STATUS              (1<<25)
 
-/* Decoupled MMIO register pair for kernel driver */
-#define GEN9_DECOUPLED_REG0_DW0			_MMIO(0xF00)
-#define GEN9_DECOUPLED_REG0_DW1			_MMIO(0xF04)
-#define GEN9_DECOUPLED_DW1_GO			(1<<31)
-#define GEN9_DECOUPLED_PD_SHIFT			28
-#define GEN9_DECOUPLED_OP_SHIFT			24
-
 /* Per-pipe DDI Function Control */
 #define _TRANS_DDI_FUNC_CTL_A		0x60400
 #define _TRANS_DDI_FUNC_CTL_B		0x61400
@@ -8148,6 +8149,7 @@ enum {
 /* SFUSE_STRAP */
 #define SFUSE_STRAP			_MMIO(0xc2014)
 #define  SFUSE_STRAP_FUSE_LOCK		(1<<13)
+#define  SFUSE_STRAP_RAW_FREQUENCY	(1<<8)
 #define  SFUSE_STRAP_DISPLAY_DISABLED	(1<<7)
 #define  SFUSE_STRAP_CRT_DISABLED	(1<<6)
 #define  SFUSE_STRAP_DDIB_DETECTED	(1<<2)

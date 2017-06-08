@@ -4610,7 +4610,7 @@ static void cpt_verify_modeset(struct drm_device *dev, int pipe)
 
 static int
 skl_update_scaler(struct intel_crtc_state *crtc_state, bool force_detach,
-		  unsigned scaler_user, int *scaler_id, unsigned int rotation,
+		  unsigned int scaler_user, int *scaler_id,
 		  int src_w, int src_h, int dst_w, int dst_h)
 {
 	struct intel_crtc_scaler_state *scaler_state =
@@ -4619,9 +4619,12 @@ skl_update_scaler(struct intel_crtc_state *crtc_state, bool force_detach,
 		to_intel_crtc(crtc_state->base.crtc);
 	int need_scaling;
 
-	need_scaling = drm_rotation_90_or_270(rotation) ?
-		(src_h != dst_w || src_w != dst_h):
-		(src_w != dst_w || src_h != dst_h);
+	/*
+	 * Src coordinates are already rotated by 270 degrees for
+	 * the 90/270 degree plane rotation cases (to match the
+	 * GTT mapping), hence no need to account for rotation here.
+	 */
+	need_scaling = src_w != dst_w || src_h != dst_h;
 
 	/*
 	 * if plane is being disabled or scaler is no more required or force detach
@@ -4683,7 +4686,7 @@ int skl_update_scaler_crtc(struct intel_crtc_state *state)
 	const struct drm_display_mode *adjusted_mode = &state->base.adjusted_mode;
 
 	return skl_update_scaler(state, !state->base.active, SKL_CRTC_INDEX,
-		&state->scaler_state.scaler_id, DRM_MODE_ROTATE_0,
+		&state->scaler_state.scaler_id,
 		state->pipe_src_w, state->pipe_src_h,
 		adjusted_mode->crtc_hdisplay, adjusted_mode->crtc_vdisplay);
 }
@@ -4712,7 +4715,6 @@ static int skl_update_scaler_plane(struct intel_crtc_state *crtc_state,
 	ret = skl_update_scaler(crtc_state, force_detach,
 				drm_plane_index(&intel_plane->base),
 				&plane_state->scaler_id,
-				plane_state->base.rotation,
 				drm_rect_width(&plane_state->base.src) >> 16,
 				drm_rect_height(&plane_state->base.src) >> 16,
 				drm_rect_width(&plane_state->base.dst),
@@ -5974,10 +5976,20 @@ static void intel_connector_verify_state(struct drm_crtc_state *crtc_state,
 
 int intel_connector_init(struct intel_connector *connector)
 {
-	drm_atomic_helper_connector_reset(&connector->base);
+	struct intel_digital_connector_state *conn_state;
 
-	if (!connector->base.state)
+	/*
+	 * Allocate enough memory to hold intel_digital_connector_state,
+	 * This might be a few bytes too many, but for connectors that don't
+	 * need it we'll free the state and allocate a smaller one on the first
+	 * succesful commit anyway.
+	 */
+	conn_state = kzalloc(sizeof(*conn_state), GFP_KERNEL);
+	if (!conn_state)
 		return -ENOMEM;
+
+	__drm_atomic_helper_connector_reset(&connector->base,
+					    &conn_state->base);
 
 	return 0;
 }
@@ -11183,6 +11195,9 @@ static int intel_crtc_atomic_check(struct drm_crtc *crtc,
 			ret = skl_update_scaler_crtc(pipe_config);
 
 		if (!ret)
+			ret = skl_check_pipe_max_pixel_rate(intel_crtc,
+							    pipe_config);
+		if (!ret)
 			ret = intel_atomic_setup_scalers(dev_priv, intel_crtc,
 							 pipe_config);
 	}
@@ -13268,43 +13283,6 @@ static int intel_atomic_commit(struct drm_device *dev,
 	}
 
 	return 0;
-}
-
-void intel_crtc_restore_mode(struct drm_crtc *crtc)
-{
-	struct drm_device *dev = crtc->dev;
-	struct drm_atomic_state *state;
-	struct drm_crtc_state *crtc_state;
-	int ret;
-
-	state = drm_atomic_state_alloc(dev);
-	if (!state) {
-		DRM_DEBUG_KMS("[CRTC:%d:%s] crtc restore failed, out of memory",
-			      crtc->base.id, crtc->name);
-		return;
-	}
-
-	state->acquire_ctx = crtc->dev->mode_config.acquire_ctx;
-
-retry:
-	crtc_state = drm_atomic_get_crtc_state(state, crtc);
-	ret = PTR_ERR_OR_ZERO(crtc_state);
-	if (!ret) {
-		if (!crtc_state->active)
-			goto out;
-
-		crtc_state->mode_changed = true;
-		ret = drm_atomic_commit(state);
-	}
-
-	if (ret == -EDEADLK) {
-		drm_atomic_state_clear(state);
-		drm_modeset_backoff(state->acquire_ctx);
-		goto retry;
-	}
-
-out:
-	drm_atomic_state_put(state);
 }
 
 static const struct drm_crtc_funcs intel_crtc_funcs = {
