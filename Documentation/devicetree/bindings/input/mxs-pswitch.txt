@@ -1,0 +1,29 @@
+* Freescale i.MX23/i.MX28 power switch device tree bindings
+
+The Freescale MXS SoC has a pswitch pin which has several power related
+functions determined by a product's hardware and software design.
+
+The pswitch input driver allow for the user space handling of power events.
+
+Required properties:
+- compatible:
+  - "fsl,imx23-pswitch" for i.MX23
+  - "fsl,imx28-pswitch" for i.MX28
+- interrupts: The pswitch interrupt number.
+- linux,code: The linux key code the event maps to.
+
+Example for i.MX28:
+
+	power: power@80044000 {
+		compatible = "fsl,imx28-power", "syscon";
+		reg = <0x80044000 0x2000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		pswitch: pswitch@5 {
+			compatible = "fsl,imx28-pswitch";
+			reg = <0x5>;
+			linux,code = <116>;
+			interrupts = <6>;
+		};
+	};
