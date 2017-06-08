@@ -1,0 +1,94 @@
+Regulators on Freescale i.MX23/i.MX28
+
+i.MX23 linear regulator daisy chain:
+
++------------+     VDD5V  +---------+  VDDIO
+| DC-DC      |   +--------> LINREG  +--------->+
+|            |            | VDDIO   |          |
+|            |            +---------+          |
+| DCDC_VDDIO +->-+-----------------------------+
+|            |   |
+|            |   | VDDIO  +---------+  VDDMEM
+|            |   +--------> LINREG  +--------->
+|            |   |        | VDDMEM  |
+|            |   |        +---------+
+|            |   | VDDIO  +---------+  VDDA
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDA    |          |
+|            |            +---------+          |
+| DCDC_VDDA  +->-+-----------------------------+
+|            |   | VDDA   +---------+  VDDD
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDD    |          |
+|            |            +---------+          |
+| DCDC_VDDD  +->-------------------------------+
++------------+                                 |
+                                               v
+
+i.MX28 linear regulator daisy chain:
+
++------------+     VDD5V  +---------+  VDDIO
+| DC-DC      |   +--------> LINREG  +--------->+
+|            |            | VDDIO   |          |
+|            |            +---------+          |
+| DCDC_VDDIO +->-+-----------------------------+
+|            |   |
+|            |   | VDDIO  +---------+  VDDA
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDA    |          |
+|            |            +---------+          |
+| DCDC_VDDA  +->-+-----------------------------+
+|            |   |
+|            |   | VDDA   +---------+  VDDMEM
+|            |   +--------> LINREG  +--------->
+|            |   |        | VDDMEM  |
+|            |   |        +---------+
+|            |   | VDDA   +---------+  VDDD
+|            |   +--------> LINREG  +--------->+
+|            |            | VDDD    |          |
+|            |            +---------+          |
+| DCDC_VDDD  +->-------------------------------+
++------------+                                 |
+                                               v
+
+Required properties:
+- compatible (imx23 and imx28 supported):
+  - "fsl,<soc>-dcdc" for DC-DC converter
+  - "fsl,<soc>-vddd" for VDDD linear regulator
+  - "fsl,<soc>-vdda" for VDDA linear regulator
+  - "fsl,<soc>-vddio" for VDDIO linear regulator
+  - "fsl,<soc>-vddmem" for VDDMEM linear regulator
+
+Optional properties:
+- switching-frequency: switching frequency for the DC-DC converter in Hz.
+  Possible values are <1200000>, <1250000> or <1500000> (default).
+
+Any regulator property defined as part of the core regulator
+binding, defined in regulator.txt, can also be used.
+
+Example for i.MX28:
+
+	power: power@80044000 {
+		compatible = "fsl,imx28-power", "syscon";
+		reg = <0x80044000 0x2000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		interrupts = <6>;
+
+		dcdc: regulator@1 {
+			compatible = "fsl,imx28-dcdc";
+			reg = <0x1>;
+			regulator-name = "dcdc";
+			regulator-boot-on;
+			regulator-always-on;
+			switching-frequency = <1250000>;
+		};
+
+		reg_vddd: regulator@2 {
+			compatible = "fsl,imx28-vddd";
+			reg = <0x2>;
+			regulator-name = "vddd";
+			regulator-min-microvolt = <1350000>;
+			regulator-max-microvolt = <1550000>;
+		};
+	};
