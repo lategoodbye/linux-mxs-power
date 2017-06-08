@@ -212,20 +212,46 @@ static inline unsigned long fadump_calculate_reserve_size(void)
 	int ret;
 	unsigned long long base, size;
 
+	if (fw_dump.reserve_bootvar)
+		pr_warn("'fadump_reserve_mem=' parameter is deprecated in favor of 'crashkernel=' parameter.\n");
+
 	/*
 	 * Check if the size is specified through crashkernel= cmdline
-	 * option. If yes, then use that but ignore base as fadump
-	 * reserves memory at end of RAM.
+	 * option. If yes, then use that but ignore base as fadump reserves
+	 * memory at a predefined offset.
 	 */
 	ret = parse_crashkernel(boot_command_line, memblock_phys_mem_size(),
 				&size, &base);
 	if (ret == 0 && size > 0) {
+		unsigned long max_size;
+
+		if (fw_dump.reserve_bootvar)
+			pr_info("Using 'crashkernel=' parameter for memory reservation.\n");
+
 		fw_dump.reserve_bootvar = (unsigned long)size;
+
+		/*
+		 * Adjust if the boot memory size specified is above
+		 * the upper limit.
+		 */
+		max_size = memblock_phys_mem_size() / MAX_BOOT_MEM_RATIO;
+		if (fw_dump.reserve_bootvar > max_size) {
+			fw_dump.reserve_bootvar = max_size;
+			pr_info("Adjusted boot memory size to %luMB\n",
+				(fw_dump.reserve_bootvar >> 20));
+		}
+
+		return fw_dump.reserve_bootvar;
+	} else if (fw_dump.reserve_bootvar) {
+		/*
+		 * 'fadump_reserve_mem=' is being used to reserve memory
+		 * for firmware-assisted dump.
+		 */
 		return fw_dump.reserve_bootvar;
 	}
 
 	/* divide by 20 to get 5% of value */
-	size = memblock_end_of_DRAM() / 20;
+	size = memblock_phys_mem_size() / 20;
 
 	/* round it down in multiples of 256 */
 	size = size & ~0x0FFFFFFFUL;
@@ -377,9 +403,22 @@ static int __init early_fadump_param(char *p)
 }
 early_param("fadump", early_fadump_param);
 
-static void register_fw_dump(struct fadump_mem_struct *fdm)
+/*
+ * Look for fadump_reserve_mem= cmdline option
+ * TODO: Remove references to 'fadump_reserve_mem=' parameter,
+ *       the sooner 'crashkernel=' parameter is accustomed to.
+ */
+static int __init early_fadump_reserve_mem(char *p)
 {
-	int rc;
+	if (p)
+		fw_dump.reserve_bootvar = memparse(p, &p);
+	return 0;
+}
+early_param("fadump_reserve_mem", early_fadump_reserve_mem);
+
+static int register_fw_dump(struct fadump_mem_struct *fdm)
+{
+	int rc, err;
 	unsigned int wait_time;
 
 	pr_debug("Registering for firmware-assisted kernel dump...\n");
@@ -396,7 +435,11 @@ static void register_fw_dump(struct fadump_mem_struct *fdm)
 
 	} while (wait_time);
 
+	err = -EIO;
 	switch (rc) {
+	default:
+		pr_err("Failed to register. Unknown Error(%d).\n", rc);
+		break;
 	case -1:
 		printk(KERN_ERR "Failed to register firmware-assisted kernel"
 			" dump. Hardware Error(%d).\n", rc);
@@ -404,18 +447,22 @@ static void register_fw_dump(struct fadump_mem_struct *fdm)
 	case -3:
 		printk(KERN_ERR "Failed to register firmware-assisted kernel"
 			" dump. Parameter Error(%d).\n", rc);
+		err = -EINVAL;
 		break;
 	case -9:
 		printk(KERN_ERR "firmware-assisted kernel dump is already "
 			" registered.");
 		fw_dump.dump_registered = 1;
+		err = -EEXIST;
 		break;
 	case 0:
 		printk(KERN_INFO "firmware-assisted kernel dump registration"
 			" is successful\n");
 		fw_dump.dump_registered = 1;
+		err = 0;
 		break;
 	}
+	return err;
 }
 
 void crash_fadump(struct pt_regs *regs, const char *str)
@@ -956,7 +1003,7 @@ static unsigned long init_fadump_header(unsigned long addr)
 	return addr;
 }
 
-static void register_fadump(void)
+static int register_fadump(void)
 {
 	unsigned long addr;
 	void *vaddr;
@@ -966,7 +1013,7 @@ static void register_fadump(void)
 	 * assisted dump.
 	 */
 	if (!fw_dump.reserve_dump_area_size)
-		return;
+		return -ENODEV;
 
 	fadump_setup_crash_memory_ranges();
 
@@ -979,7 +1026,7 @@ static void register_fadump(void)
 	fadump_create_elfcore_headers(vaddr);
 
 	/* register the future kernel dump with firmware. */
-	register_fw_dump(&fdm);
+	return register_fw_dump(&fdm);
 }
 
 static int fadump_unregister_dump(struct fadump_mem_struct *fdm)
@@ -1161,7 +1208,6 @@ static ssize_t fadump_register_store(struct kobject *kobj,
 	switch (buf[0]) {
 	case '0':
 		if (fw_dump.dump_registered == 0) {
-			ret = -EINVAL;
 			goto unlock_out;
 		}
 		/* Un-register Firmware-assisted dump */
@@ -1169,11 +1215,11 @@ static ssize_t fadump_register_store(struct kobject *kobj,
 		break;
 	case '1':
 		if (fw_dump.dump_registered == 1) {
-			ret = -EINVAL;
+			ret = -EEXIST;
 			goto unlock_out;
 		}
 		/* Register Firmware-assisted dump */
-		register_fadump();
+		ret = register_fadump();
 		break;
 	default:
 		ret = -EINVAL;
