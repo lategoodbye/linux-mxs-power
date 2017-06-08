@@ -568,6 +568,14 @@ config REGULATOR_MT6397
 	  This driver supports the control of different power rails of device
 	  through regulator interface.
 
+config REGULATOR_MXS
+	tristate "Freescale MXS on-chip regulators"
+	depends on MXS_POWER || COMPILE_TEST
+	help
+	  Say y here to support Freescale MXS on-chip regulators.
+	  It is recommended that this option be enabled on i.MX23,
+	  i.MX28 platform.
+
 config REGULATOR_PALMAS
 	tristate "TI Palmas PMIC Regulators"
 	depends on MFD_PALMAS
